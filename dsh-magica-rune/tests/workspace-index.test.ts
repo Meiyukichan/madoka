@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { disabledToolsNotice, restrictWithFallback } from '../src/policy.ts'
+import { disabledToolsNotice, knownDenied, restrictWithFallback } from '../src/policy.ts'
 import { GuardState } from '../src/state.ts'
 import { installWorkspaceIndex } from '../src/workspace.ts'
 
@@ -147,5 +147,29 @@ describe('disabledToolsNotice（第三层文本兜底）', () => {
     assert.match(text, /workflow, subagent/)
     assert.match(text, /Do not call them/)
     assert.match(text, /rejected before execution/)
+  })
+})
+describe('knownDenied（用快照求交集，避免上一轮禁用「复活」）', () => {
+  it('快照里包含上一轮已隐藏的工具 → 本轮仍然入选', () => {
+    // 场景：先禁 web_fetch（已隐藏），再禁 subagent_fork。
+    // 刷新瞬间旧 mask 还在生效，实时视图里只有 subagent_fork；
+    // 而快照（restrict-free）两个都在 → 两个都要进新 mask。
+    const snapshot = new Set(['web_fetch', 'web_search', 'subagent_fork', 'read'])
+    const denied = ['web_fetch', 'web_search', 'subagent_fork']
+    assert.deepEqual(knownDenied(denied, snapshot), ['web_fetch', 'web_search', 'subagent_fork'])
+  })
+
+  it('不在快照里的名字（工具已注销）被剔除', () => {
+    const snapshot = new Set(['read', 'write'])
+    assert.deepEqual(knownDenied(['read', 'gone_tool'], snapshot), ['read'])
+  })
+
+  it('保持 denied 的顺序', () => {
+    const snapshot = new Set(['a', 'b', 'c'])
+    assert.deepEqual(knownDenied(['c', 'a'], snapshot), ['c', 'a'])
+  })
+
+  it('空名单 → 空结果', () => {
+    assert.deepEqual(knownDenied([], new Set(['a'])), [])
   })
 })

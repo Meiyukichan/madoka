@@ -20,7 +20,7 @@ import type {
   AssembledSection, DshAgent, DshContext, DshScope, DshTools, PromptAssembly,
   AgentCreatedPayload, AgentDisposedPayload,
 } from './shared/dsh.ts'
-import { disabledToolsNotice, restrictWithFallback } from './policy.ts'
+import { disabledToolsNotice, knownDenied, restrictWithFallback } from './policy.ts'
 import type { GuardState } from './state.ts'
 
 /**
@@ -79,14 +79,17 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
 
     const scope = createScope(ctx, agent)
 
-    // ④ 预过滤未知名字：restrict 对未知名抛错，用「agent 视角可见名」当安全集合
-    let visible: Set<string>
-    try {
-      visible = new Set(tools.schemas(agent).map(schema => schema.name))
-    } catch {
-      visible = new Set<string>()
-    }
-    const known = denied.filter(name => visible.has(name))
+    // ④ 求「可命名」的安全集合。
+    //
+    // ⚠️ 这里**必须**用 `state.internalTools`（restrict 之前的全量快照，只增不减），
+    // 不能用实时的 `tools.schemas(agent)`：旧 mask 的 `dispose()` 是异步的，此刻它
+    // 往往还生效，实时视图里**上一轮已被隐藏的工具看不到**，于是 `denied ∩ visible`
+    // 会把它们漏掉 → 新 mask 不含它们 → 它们重新出现在模型工具表里。
+    // 症状：先禁用 A 类、再禁用 B 类，A 类会「复活」（实测踩过）。
+    const universe = state.internalTools.size > 0
+      ? new Set(state.internalTools.keys())
+      : new Set(tools.schemas(agent).map(schema => schema.name))
+    const known = knownDenied(denied, universe)
     if (known.length > 0) {
       // 整批失败就逐名降级：一个不可 restrict 的名字不该拖累其余能藏的
       const skipped = restrictWithFallback(

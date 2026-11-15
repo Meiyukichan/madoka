@@ -187,3 +187,20 @@ export function disabledToolsNotice(names: readonly string[]): string {
     + `${[...names].join(', ')}. Do not call them: every call is rejected before execution. `
     + 'If you need one of them, ask the user to enable it in Settings → 能力管理.'
 }
+/**
+ * 从「禁用名单」里挑出**可以交给 `tools.restrict` 命名**的那些。
+ *
+ * `universe` 必须传 **restrict 之前的全量快照**（`state.internalTools`），不能传
+ * `tools.schemas(agent)` 的实时视图：旧 mask 的 `dispose()` 是异步的，刷新那一刻它
+ * 通常还在生效，实时视图里看不到「上一轮已被隐藏的工具」，交集就会把它们漏掉，
+ * 于是新一轮 mask 不含它们 —— 表现就是「先禁用 A 类、再禁用 B 类，A 类复活」。
+ * @param denied - 目标禁用名单（已剔除受保护名字）
+ * @param universe - restrict-free 的工具名全量
+ * @returns 可命名的子集，保持 denied 的顺序
+ */
+export function knownDenied(
+  denied: readonly string[],
+  universe: ReadonlySet<string>,
+): string[] {
+  return denied.filter(name => universe.has(name))
+}
