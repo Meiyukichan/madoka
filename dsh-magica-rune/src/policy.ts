@@ -162,3 +162,18 @@ export function restrictWithFallback(
   }
   return skipped
 }
+/**
+ * 「藏不掉、只能拒」的工具该在系统提示词里怎么讲。
+ *
+ * 对应设计里的第三层兜底：`tools.restrict` 摘不掉 agent 自有层注册的工具
+ * （`view()` 对 own 层不参与过滤），guard 会在执行期拒绝，但模型仍看得到
+ * 工具定义、会白调一轮。这条提示紧跟工具描述之后，明确告诉它不要调。
+ * @param names - 本次无法 restrict 的禁用工具名
+ * @returns 提示段文本；名字为空时返回空串（调用方据此跳过注入）
+ */
+export function disabledToolsNotice(names: readonly string[]): string {
+  if (names.length === 0) return ''
+  return 'The following tools are disabled by settings and cannot be removed from the tool list: '
+    + `${[...names].join(', ')}. Do not call them: every call is rejected before execution. `
+    + 'If you need one of them, ask the user to enable it in Settings → 能力管理.'
+}

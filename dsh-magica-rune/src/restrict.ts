@@ -20,7 +20,7 @@ import type {
   AssembledSection, DshAgent, DshContext, DshScope, DshTools, PromptAssembly,
   AgentCreatedPayload, AgentDisposedPayload,
 } from './shared/dsh.ts'
-import { restrictWithFallback } from './policy.ts'
+import { disabledToolsNotice, restrictWithFallback } from './policy.ts'
 import type { GuardState } from './state.ts'
 
 /**
@@ -42,6 +42,8 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
   const liveAgents = new Map<string, DshAgent>()
   /** 每个 agent 当前**已生效**的 deny 指纹，用来跳过无变化的重复重挂。 */
   const applied = new Map<string, string>()
+  /** 每个 agent 上「策略禁用、但 restrict 摘不掉」的工具名（走提示词兜底）。 */
+  const blocked = new Map<string, string[]>()
 
   /** 把某个 agent 的禁用集落到 schema 视图与提示词段。 */
   const applyTo = (agent: DshAgent): void => {
@@ -94,9 +96,14 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
       if (skipped.length > 0) {
         // 这些多半是 agent 自有层注册的（按 agent 注册的工具），restrict 摘不掉，
         // 但 guard 仍在执行期拒绝——记录一次，便于对照「能藏」与「只能拒」的差别。
+        blocked.set(agentId, skipped)
         ctx.logger.info(`[rune] ${skipped.length} tool(s) stay visible but are guard-blocked: ${skipped.join(', ')}`)
+      } else {
+        blocked.delete(agentId)
       }
       if (skipped.length < known.length) applied.set(agentId, fingerprint)
+    } else {
+      blocked.delete(agentId)
     }
 
     // ④ assemble 过滤（省 token）：动态读 state，配置变更无需重挂中间件
@@ -107,11 +114,22 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
       // 但**我们这段过滤**必须自己兜住（SKILL §2.2：不能有未捕获异常）。
       try {
         const now = state.effectiveNamesFor(agentId)
-        if (now.size === 0 || !Array.isArray(result?.sections)) return result
-        result.sections = result.sections.filter((section: AssembledSection) => {
-          if (!section.name.startsWith('tool:')) return true
-          return !now.has(section.name.slice('tool:'.length))
-        })
+        if (!Array.isArray(result?.sections)) return result
+        // 能藏的先藏：把 tool:<name> 段摘掉
+        if (now.size > 0) {
+          result.sections = result.sections.filter((section: AssembledSection) => {
+            if (!section.name.startsWith('tool:')) return true
+            return !now.has(section.name.slice('tool:'.length))
+          })
+        }
+        // 藏不掉的第三层兜底：明确写进提示词，避免模型白调一轮
+        const notice = disabledToolsNotice(blocked.get(agentId) ?? [])
+        if (notice !== '') {
+          result.sections = [
+            ...result.sections,
+            { name: 'dsh-magica-rune:disabled-notice', text: notice },
+          ]
+        }
       } catch (error) {
         ctx.logger.warn(`[rune] assemble filter failed for ${agentId}: ${String(error)}`)
       }
@@ -175,7 +193,7 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
     return () => {
       offCreated(); offDisposed()
       for (const scope of masks.values()) void scope.dispose()
-      masks.clear(); liveAgents.clear()
+      masks.clear(); liveAgents.clear(); applied.clear(); blocked.clear()
     }
   }, 'dsh-magica-rune: restrict scope')
 

@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { restrictWithFallback } from '../src/policy.ts'
+import { disabledToolsNotice, restrictWithFallback } from '../src/policy.ts'
 import { GuardState } from '../src/state.ts'
 import { installWorkspaceIndex } from '../src/workspace.ts'
 
@@ -135,5 +135,17 @@ describe('restrictWithFallback（不让一个坏名字毒死整批）', () => {
     const applied: string[][] = []
     assert.deepEqual(restrictWithFallback(makeRestrict(applied), []), [])
     assert.deepEqual(applied, [])
+  })
+})
+describe('disabledToolsNotice（第三层文本兜底）', () => {
+  it('空名单 → 空串（调用方据此跳过注入）', () => {
+    assert.equal(disabledToolsNotice([]), '')
+  })
+
+  it('有名字 → 明确列出并禁止调用', () => {
+    const text = disabledToolsNotice(['workflow', 'subagent'])
+    assert.match(text, /workflow, subagent/)
+    assert.match(text, /Do not call them/)
+    assert.match(text, /rejected before execution/)
   })
 })
