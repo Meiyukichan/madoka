@@ -20,6 +20,7 @@ import type {
   AssembledSection, DshAgent, DshContext, DshScope, DshTools, PromptAssembly,
   AgentCreatedPayload, AgentDisposedPayload,
 } from './shared/dsh.ts'
+import { shouldKeepMask } from './policy.ts'
 import type { GuardState } from './state.ts'
 
 /**
@@ -39,6 +40,8 @@ export interface RestrictHandle {
 export function installRestrict(ctx: DshContext, state: GuardState): RestrictHandle {
   const masks = new Map<string, DshScope>()
   const liveAgents = new Map<string, DshAgent>()
+  /** 每个 agent 当前**已生效**的 deny 指纹，用来跳过无变化的重复重挂。 */
+  const applied = new Map<string, string>()
 
   /** 把某个 agent 的禁用集落到 schema 视图与提示词段。 */
   const applyTo = (agent: DshAgent): void => {
@@ -53,20 +56,29 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
       ctx.logger.warn(`[rune] tool snapshot failed for ${agentId}: ${String(error)}`)
     }
 
-    // ② 撤销旧 mask（独立 scope，不动 agent 自己的注册）
+    // ② 先算目标集，再决定要不要动旧 mask。
+    //    顺序很关键：以前是「先 dispose 再看目标集为空就 return」，于是只要目标集
+    //    因为工作区映射瞬时缺失而算成空，旧 mask 就被撤掉且不再补回——表现就是
+    //    「禁用后工具先消失、随后又回到模型工具表里，但调用仍被 guard 拒绝」。
+    const denied = state.restrictableNamesFor(agentId)
+    const fingerprint = [...denied].sort().join('\u0000')
     const previous = masks.get(agentId)
+    if (previous !== undefined && applied.get(agentId) === fingerprint) return
+
+    // 工作区未知 + 目标集为空：可能是映射尚未就绪的瞬时状态，保留旧 mask（fail-closed）
+    if (shouldKeepMask({ hasMask: previous !== undefined, deniedCount: denied.length, workspaceKnown: state.hasWorkspace(agentId) })) return
+
+    // ③ 撤销旧 mask（独立 scope，不动 agent 自己的注册）
     if (previous !== undefined) {
       masks.delete(agentId)
+      applied.delete(agentId)
       void previous.dispose()
     }
-
-    // 名单已在 state 里剔除「受保护」的名字，这里拿到的是可以 restrict 的集合
-    const denied = state.restrictableNamesFor(agentId)
     if (denied.length === 0) return
 
     const scope = createScope(ctx, agent)
 
-    // ③ 预过滤未知名字：restrict 对未知名抛错，用「agent 视角可见名」当安全集合
+    // ④ 预过滤未知名字：restrict 对未知名抛错，用「agent 视角可见名」当安全集合
     let visible: Set<string>
     try {
       visible = new Set(tools.schemas(agent).map(schema => schema.name))
@@ -77,6 +89,7 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
     if (known.length > 0) {
       try {
         scope.ctx.tools.restrict({ deny: known })
+        applied.set(agentId, fingerprint)
       } catch (error) {
         ctx.logger.warn(`[rune] restrict skipped for ${agentId}: ${String(error)}`)
       }

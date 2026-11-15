@@ -291,6 +291,13 @@ export class GuardState {
 
 ## 5. `workspace.ts` —— cwd → workspaceId
 
+> **不变量：映射只增不删**（除 `agent/disposed`）。解析失败时**保留**上一次成功的结果，
+> 并在 800ms 后重试一次；拿到映射后回调 `restrict.refresh()` 重算 mask。
+>
+> 为什么：`resolve(gate, workspaceId)` 在 `workspaceId === undefined` 时回退到**全局层**。
+> 一旦因为一次解析失败把映射删掉，工作区级禁用就会**静默消失**——模型工具表里重新出现
+> 该工具、而 guard 仍会拒绝调用（「列表里有、调用报禁用」的错位）。
+
 ```ts
 // findWorkspace 定义在本文件末尾：把 ctx.get('workspaceRegistry') 包成
 // async findWorkspace(ctx, path) => Promise<{ id, title, path } | undefined>
@@ -386,6 +393,14 @@ export function installGuard(ctx: Context, state: GuardState): () => void {
 ---
 
 ## 7. `restrict.ts` —— 辅通道（省 token）
+
+> **重挂顺序是不变量**：先算目标 deny 集，再决定动不动旧 mask。
+> 顺序反了（先 `dispose()` 再看目标集为空就 `return`）会让 mask 永久丢失：
+> 目标集一旦因为工作区映射缺失而算成空，旧 mask 已撤、新 mask 又不建。
+> 现在的规则：
+> - deny 指纹未变 → 直接返回（不制造 dispose/recreate 的窗口）；
+> - 已有 mask + 目标集空 + 工作区未知 → **保留**旧 mask（fail-closed，`shouldKeepMask`）；
+> - 其余情况才撤旧、按新集重挂。
 
 ### 7.1 为什么用 `createScope` 而不是 `agent.ctx` 直接挂
 

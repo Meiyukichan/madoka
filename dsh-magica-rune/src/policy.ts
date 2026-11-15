@@ -5,13 +5,13 @@
  * - `builtinDisabled`：开箱即禁，且用户 `enabled` **不能**恢复
  * - `nonDisableable` ：永不禁用（guard 放行 / restrict 跳过 / UI 不下发）
  *
- * 名单项以 `*` 结尾表示**前缀匹配**（raw 的 `sandore_*` 就是这个语义）。
+ * 名单项以 `*` 结尾表示**前缀匹配**（`sandore_*` 就是这个语义）。
  *
- * 「restrict 不能命名」不再单独设一张表：`restrict` 只 deny 那些**通过**
- * `toolProtected()` 的名字，所以只要一个名字进了 `nonDisableable`，
- * 它天然就不会被 restrict 命名 —— 这正是 raw 里 `RESERVED` 想表达的约束。
+ * 「restrict 不能命名」不单独设表：`restrict` 只 deny 那些**通过**
+ * `toolProtected()` 的名字，所以一个名字进了 `nonDisableable` 就不会被 restrict
+ * 命名 —— 约束天然成立。
  *
- * 合并语义（与 raw 设计一致）：
+ * 合并语义：
  * ```
  * global = builtin ∪ kind.global.disabled
  *        − { n ∈ kind.global.enabled | n ∉ builtin }
@@ -125,4 +125,20 @@ function mergeLayer(base: ReadonlySet<string>, layer: ReadonlyAbilityLayer, buil
     next.delete(name)
   }
   return next
+}
+/**
+ * 目标集为空时是否应当**保留**已有 mask。
+ *
+ * 触发条件：已经有 mask、新目标集为空、且该 agent 的工作区还没解析出来。
+ * 这是「禁用后工具先消失、随后又回到模型工具表，但调用仍被 guard 拒绝」的路径：
+ * 空集是工作区映射缺失造成的假象，撤掉 mask 只会让过滤静默失效。
+ * @param input - 当前 agent 的 mask 状态与目标集大小
+ * @returns true 表示保留旧 mask（fail-closed）
+ */
+export function shouldKeepMask(input: {
+  readonly hasMask: boolean
+  readonly deniedCount: number
+  readonly workspaceKnown: boolean
+}): boolean {
+  return input.hasMask && input.deniedCount === 0 && !input.workspaceKnown
 }

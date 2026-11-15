@@ -122,6 +122,16 @@ export class GuardState {
     return names
   }
 
+  /**
+   * 该 agent 是否已解析出工作区。
+   *
+   * 「解析不出来」时工作区级名单不可信（`resolve()` 会退回全局层），
+   * 调用方据此选择 fail-closed 而不是把禁用集当成空。
+   */
+  hasWorkspace(agentId: string | undefined): boolean {
+    return agentId !== undefined && this.agentWorkspace.has(agentId)
+  }
+
   private workspaceOf(agentId: string | undefined): string | undefined {
     return agentId === undefined ? undefined : this.agentWorkspace.get(agentId)
   }
