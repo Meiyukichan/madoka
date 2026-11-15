@@ -35,7 +35,7 @@ export function KindTab(props: {
   onToggleWorkspaceZone: () => void
   workspaceId: string | undefined
   onToggle: (name: string, scope: ScopeKind) => void
-  onBatch: (names: readonly string[], scope: ScopeKind) => void
+  onBatch: (names: readonly string[], scope: ScopeKind, enable: boolean) => void
   workspaceExtra: unknown
 }) {
   const word = props.kind === 'tools' ? 'tools' : 'skills'
@@ -68,7 +68,7 @@ export function KindTab(props: {
                 category={category}
                 label={categoryLabel(props.t, category)}
                 states={group.rows.map(row => stateOf(row.name))}
-                onBatch={() => props.onBatch(group.rows.map(row => row.name), scope)}
+                onBatch={enable => props.onBatch(group.rows.map(row => row.name), scope, enable)}
               />
               <ul className={cls.grid}>
                 {group.rows.map(row => (

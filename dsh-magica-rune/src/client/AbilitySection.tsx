@@ -33,7 +33,7 @@ export interface AbilitySectionActions {
   toggleZone(zone: ScopeKind): void
   setSearch(kind: AbilityKind, text: string): void
   selectWorkspace(id: string): void
-  setPending(pending: { kind: AbilityKind; name: string } | null): void
+  setPending(pending: AbilityViewState['pending']): void
 }
 
 export interface AbilitySectionProps {
@@ -90,7 +90,27 @@ export function AbilitySection(props: AbilitySectionProps) {
     void props.toggle(kind, name, scope, scope === 'workspace' ? view.selectedWorkspaceId : undefined)
   }
 
-  const makeBatch = (kind: AbilityKind) => (names: readonly string[], scope: ScopeKind): void => {
+  /**
+   * 分组批量：与单点同一条规则——**禁用** DSH 内置工具要先确认。
+   * 整组里只要有「当前启用 + 属于内置分类」的行，就走弹窗；
+   * 启用方向永不确认（不会破坏对话能力）。
+   */
+  const makeBatch = (kind: AbilityKind) => (
+    names: readonly string[], scope: ScopeKind, enable: boolean,
+  ): void => {
+    if (kind === 'tools' && scope === 'global' && !enable) {
+      const stateOf = stateAt(kind, scope)
+      const rows = kind === 'tools' ? toolRows(data.tools, toolProtected, data.builtinDisabled) : []
+      const hits = names.filter(name => {
+        if (stateOf(name) !== 'enabled') return false
+        const row = rows.find(item => item.name === name)
+        return row !== undefined && DSH_BUILTIN_CATS.has(row.category)
+      })
+      if (hits.length > 0) {
+        actions.setPending({ kind, names, scope })
+        return
+      }
+    }
     void props.toggleBatch(
       kind, names, scope, scope === 'workspace' ? view.selectedWorkspaceId : undefined,
     )
@@ -164,8 +184,10 @@ export function AbilitySection(props: AbilitySectionProps) {
 
       {pending === null ? null : (
         <ConfirmDisable
-          title={translate('disable.title')}
-          description={translate('disable.desc', { name: pending.name })}
+          title={translate('names' in pending ? 'disable.batchTitle' : 'disable.title')}
+          description={'names' in pending
+            ? translate('disable.batchDesc', { count: String(pending.names.length) })
+            : translate('disable.desc', { name: pending.name })}
           confirmLabel={translate('disable.confirm')}
           cancelLabel={translate('disable.cancel')}
           closeLabel={translate('close')}
@@ -173,6 +195,15 @@ export function AbilitySection(props: AbilitySectionProps) {
           onConfirm={() => {
             const target = pending
             actions.setPending(null)
+            if ('names' in target) {
+              void props.toggleBatch(
+                target.kind,
+                target.names,
+                target.scope,
+                target.scope === 'workspace' ? view.selectedWorkspaceId : undefined,
+              )
+              return
+            }
             void props.toggle(target.kind, target.name, 'global')
           }}
         />

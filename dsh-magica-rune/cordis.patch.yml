@@ -35,6 +35,10 @@
           # 注意：代码里另有 HARD_RESERVED 硬保护，**删掉这行也不会解除保护**。
           - run_code
           - 'sandore_*'          # 前缀匹配
+          # subagent 由 tool-subagent 的「standing」形态按 agent 注册（own-layer），
+          # tools.view() 不把 own 注册放进 restrictableNames，restrict 命名它会抛错，
+          # 所以无法从模型工具表移除。藏不掉就不该给一个「看似能禁」的开关。
+          - subagent
 
         # ── 名单 ③：技能侧永不禁用 ──────────────────────────
         skillNonDisableable:

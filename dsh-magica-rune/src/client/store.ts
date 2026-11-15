@@ -9,7 +9,7 @@
  */
 
 import { defineStore } from '@deepseek-ai/dsh-client-store'
-import type { AbilityKind } from '../shared/ability.ts'
+import type { AbilityKind, ScopeKind } from '../shared/ability.ts'
 
 /** 只有两个 tab。 */
 export const TABS: readonly AbilityKind[] = ['tools', 'skills']
@@ -22,8 +22,17 @@ export interface AbilityViewState {
   workspaceOpen: boolean
   search: Record<AbilityKind, string>
   selectedWorkspaceId: string | undefined
-  /** 非 null 时渲染二次确认弹窗。 */
-  pending: { kind: AbilityKind; name: string } | null
+  /**
+   * 非 null 时渲染二次确认弹窗。
+   * - 
+ame：单个药丸（DSH 内置工具，点一下就要确认）
+   * - 
+ames：分组批量（整组里含 DSH 内置工具时，同样先确认）
+   */
+  pending:
+    | { kind: AbilityKind; name: string }
+    | { kind: AbilityKind; names: readonly string[]; scope: ScopeKind }
+    | null
 }
 
 type AbilityViewActions = {

@@ -418,3 +418,29 @@ export async function enableTool(page, name) {
 
 /** 搜索框：Input 原语的 className 在外层 wrapper 上，真正的输入元素是它的子 input。 */
 export const searchInput = page => page.locator('.rune-search-input input').first()
+/**
+ * 确保实例里**至少有一个 live agent**。
+ *
+ * 0.2 的工具是按会话（agent）注册的：`tools.schemas()` 的全局视图在没有任何会话时是空的
+ * （实测：新起的 dev 实例目录为 0，发一条消息后变成 26）。而能力管理页正是从工具目录
+ * 渲染药丸/分组的 —— 没有会话就只剩「暂无工具配置」，所有等 `.rune-pill` 的用例都会超时。
+ *
+ * 所以 E2E 开跑前先发一条消息把 agent 建出来；不等模型回完（agent 在发送瞬间就创建）。
+ */
+export async function ensureLiveAgent(url, text = '你好') {
+  const browser = await launchBrowser()
+  const page = await newPage(browser)
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await page.getByText('新会话', { exact: false }).first().waitFor({ state: 'visible' })
+  const intro = page.getByRole('button', { name: '继续' })
+  if (await intro.count()) await intro.first().click()
+  const box = page.locator('[role="textbox"]').first()
+  await box.waitFor({ state: 'visible' })
+  await box.click()
+  await page.keyboard.type(text)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(2500)
+  // 关键：**保持浏览器开着**。实测关掉页面后 agent 会被 dispose，
+  // 工具注册随之消失（catalog 又回到 0），后面的 spec 依旧拿不到药丸。
+  return { close: () => browser.close() }
+}

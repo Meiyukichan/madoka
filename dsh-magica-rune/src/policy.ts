@@ -55,7 +55,17 @@ export const HARD_RESERVED: ReadonlySet<string> = new Set<string>(['run_code'])
  * 整块删掉该字段时兜底。两处不一致时以 patch 为准。
  */
 export const DEFAULT_TOOL_BUILTIN_DISABLED: readonly string[] = []
-export const DEFAULT_TOOL_NON_DISABLEABLE: readonly string[] = ['run_code', 'sandore_*']
+/**
+ * 默认受保护名单（与 `cordis.patch.yml` 保持一致）。
+ *
+ * `subagent` 之所以在这里：它由 `tool-subagent` 的 **standing 形态**按 agent 注册
+ * （`packages/subagent/tool-subagent/src/index.ts:654-683`：`candidate.ctx.inject(...)`
+ * 把工具注册进 agent 自己的 ctx），因此落在 **own-layer**——`tools.view()` 不把
+ * own 注册放进 `restrictableNames`、也不参与过滤（`packages/core/tools/src/index.ts:1204-1208`），
+ * 于是 `restrict` 命名它会抛 `unknown global tool`，**无法从模型工具表移除**。
+ * 既然藏不掉，就不该在能力管理页给一个「看起来能禁、其实只是调用被拒」的开关。
+ */
+export const DEFAULT_TOOL_NON_DISABLEABLE: readonly string[] = ['run_code', 'sandore_*', 'subagent']
 export const DEFAULT_SKILL_NON_DISABLEABLE: readonly string[] = [
   'dsh-plugins-principles',
   'sandore-workflow-authoring',

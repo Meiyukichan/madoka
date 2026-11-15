@@ -112,9 +112,15 @@ describe('分组批量', () => {
     assert.ok(names.length > 0, `${GROUP} 组应有成员`)
     for (const name of names) await ensureEnabled(name)
 
+    // 分组内含 DSH 内置分类的工具 → 批量**禁用**与单点一致，先弹二次确认
     await groupBatch(page, GROUP).click()
+    const dialog = await waitForConfirm(page)
+    assert.match(await dialog.innerText(), /内置工具/)
+    await confirmButton(page).click()
+    await waitForConfirmGone(page)
     await waitGlobalDisabled(set => names.every(name => set.has(name)), `${GROUP} 整组禁用`)
 
+    // 启用方向不弹窗（不会破坏对话能力）
     await groupBatch(page, GROUP).click()
     await waitGlobalDisabled(set => names.every(name => !set.has(name)), `${GROUP} 整组启用`)
   })

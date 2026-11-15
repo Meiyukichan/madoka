@@ -28,6 +28,7 @@ export type AbilityLocaleKey =
   | 'noResults.tools' | 'noResults.skills'
   | 'tool.builtin'
   | 'disable.title' | 'disable.desc' | 'disable.confirm' | 'disable.cancel'
+  | 'disable.batchTitle' | 'disable.batchDesc'
   | 'loading' | 'error'
   | 'cat.file' | 'cat.shell' | 'cat.image' | 'cat.agent' | 'cat.job' | 'cat.goal'
   | 'cat.ralph' | 'cat.cordis' | 'cat.mcp' | 'cat.misc' | 'cat.builtin' | 'cat.plugin-other'
@@ -53,6 +54,8 @@ export const zh: Record<AbilityLocaleKey, string> = {
   'disable.desc': '该工具为 DSH 内置工具，禁用后可能导致 DSH 对话功能无法正常使用，是否禁用 {name}？',
   'disable.confirm': '禁用',
   'disable.cancel': '取消',
+  'disable.batchTitle': '批量禁用内置工具',
+  'disable.batchDesc': '该分组含 {count} 个 DSH 内置工具，批量禁用后可能导致 DSH 对话功能无法正常使用，是否继续？',
   loading: '加载中…',
   error: '加载失败',
   'cat.file': '文件操作',
@@ -92,6 +95,8 @@ export const en: Record<AbilityLocaleKey, string> = {
   'disable.desc': 'This tool ships with DSH. Disabling it may break normal conversation features. Disable {name}?',
   'disable.confirm': 'Disable',
   'disable.cancel': 'Cancel',
+  'disable.batchTitle': 'Disable built-in tools in bulk',
+  'disable.batchDesc': 'This group contains {count} DSH built-in tools. Disabling them in bulk may break normal conversation features. Continue?',
   loading: 'Loading…',
   error: 'Load failed',
   'cat.file': 'Files',

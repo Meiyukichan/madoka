@@ -17,7 +17,7 @@
 
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { snapshotPatch, startServer } from './harness.mjs'
+import { ensureLiveAgent, snapshotPatch, startServer } from './harness.mjs'
 
 const ALL = ['style', 'toggle', 'scope', 'search', 'skills']
 const chosen = process.env.DSH_E2E_ONLY === undefined ? ALL : process.env.DSH_E2E_ONLY.split(',')
@@ -27,6 +27,10 @@ const restorePatch = snapshotPatch()
 const server = await startServer()
 console.log(`[e2e] server: ${server.url}`)
 console.log(`[e2e] profile patch: 已快照，结束后原样写回`)
+// 0.2 的工具按会话（agent）注册：没有任何 live agent 时能力目录为空，
+// 所有等 `.rune-pill` 的用都会超时。先发一条消息把 agent 建出来。
+const agentHost = await ensureLiveAgent(server.url)
+console.log(`[e2e] live agent: 已就绪`)
 
 let exitCode = 1
 try {
@@ -40,6 +44,7 @@ try {
     child.once('error', reject)
   })
 } finally {
+  await agentHost.close()
   await server.stop()
   if (process.env.DSH_E2E_KEEP_PATCH === '1') console.log('[e2e] DSH_E2E_KEEP_PATCH=1，保留 patch 现场')
   else { restorePatch(); console.log('[e2e] profile patch 已还原') }
