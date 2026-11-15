@@ -20,6 +20,7 @@ import type {
   AssembledSection, DshAgent, DshContext, DshScope, DshTools, PromptAssembly,
   AgentCreatedPayload, AgentDisposedPayload,
 } from './shared/dsh.ts'
+import { restrictWithFallback } from './policy.ts'
 import type { GuardState } from './state.ts'
 
 /**
@@ -85,12 +86,17 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
     }
     const known = denied.filter(name => visible.has(name))
     if (known.length > 0) {
-      try {
-        scope.ctx.tools.restrict({ deny: known })
-        applied.set(agentId, fingerprint)
-      } catch (error) {
-        ctx.logger.warn(`[rune] restrict skipped for ${agentId}: ${String(error)}`)
+      // 整批失败就逐名降级：一个不可 restrict 的名字不该拖累其余能藏的
+      const skipped = restrictWithFallback(
+        names => { scope.ctx.tools.restrict({ deny: names }) },
+        known,
+      )
+      if (skipped.length > 0) {
+        // 这些多半是 agent 自有层注册的（按 agent 注册的工具），restrict 摘不掉，
+        // 但 guard 仍在执行期拒绝——记录一次，便于对照「能藏」与「只能拒」的差别。
+        ctx.logger.info(`[rune] ${skipped.length} tool(s) stay visible but are guard-blocked: ${skipped.join(', ')}`)
       }
+      if (skipped.length < known.length) applied.set(agentId, fingerprint)
     }
 
     // ④ assemble 过滤（省 token）：动态读 state，配置变更无需重挂中间件

@@ -126,3 +126,39 @@ function mergeLayer(base: ReadonlySet<string>, layer: ReadonlyAbilityLayer, buil
   }
   return next
 }
+/**
+ * 逐名降级地应用 `tools.restrict`，返回**藏不掉**的名字。
+ *
+ * 为什么不能一次传整批：`restrict({ deny })` 只要有一个名字不在
+ * `view(scope).restrictableNames` 里就**整体抛错**（`tools/src/index.ts:1114-1118`），
+ * 而这个集合只含「继承层」的名字——agent 自己那一层注册的工具（`subagent`、
+ * `subagent_fork` 这类按 agent 注册的）不在其中，虽然它们对模型可见、却无法被
+ * restrict 摘掉。整批调用因此会被一个坏名字毒死，连能藏的也一起放弃。
+ *
+ * 策略：先整批试（常见情况一次成功、只留一条 restriction），失败再逐名重试。
+ * 藏不掉的名字返回给调用方记日志——它们仍由 guard 在执行期拒绝。
+ * @param restrict - 真正调用 `tools.restrict` 的薄封装（注入以便单测）
+ * @param names - 目标 deny 名单
+ * @returns 无法 restrict 的名字（已被 guard 兜底）
+ */
+export function restrictWithFallback(
+  restrict: (names: string[]) => void,
+  names: readonly string[],
+): string[] {
+  if (names.length === 0) return []
+  try {
+    restrict([...names])
+    return []
+  } catch {
+    // 整批被拒：逐名重试，能藏几个藏几个
+  }
+  const skipped: string[] = []
+  for (const name of names) {
+    try {
+      restrict([name])
+    } catch {
+      skipped.push(name)
+    }
+  }
+  return skipped
+}

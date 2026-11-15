@@ -10,6 +10,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { restrictWithFallback } from '../src/policy.ts'
 import { GuardState } from '../src/state.ts'
 import { installWorkspaceIndex } from '../src/workspace.ts'
 
@@ -94,5 +95,45 @@ describe('installWorkspaceIndex', () => {
 
     handlers.get('agent/disposed')!({ agent: { id: 'a5' } })
     assert.equal(state.agentWorkspace.has('a5'), false)
+  })
+})
+describe('restrictWithFallback（不让一个坏名字毒死整批）', () => {
+  const ownLayer = new Set(['subagent', 'subagent_fork'])
+
+  /** 模拟 DSH 的 restrict：整批里只要有一个不可 restrict 的名字就整体抛错。 */
+  const makeRestrict = (applied: string[][]) => (names: string[]) => {
+    const bad = names.filter(name => ownLayer.has(name))
+    if (bad.length > 0) throw new Error(`tools.restrict() names unknown global tool "${bad[0]}"`)
+    applied.push(names)
+  }
+
+  it('整批可 restrict → 一次调用、无跳过', () => {
+    const applied: string[][] = []
+    const skipped = restrictWithFallback(makeRestrict(applied), ['plugin_manager', 'workflow'])
+    assert.deepEqual(skipped, [])
+    assert.deepEqual(applied, [['plugin_manager', 'workflow']])
+  })
+
+  it('整批含不可 restrict 的名字 → 逐名降级，其余仍然生效', () => {
+    const applied: string[][] = []
+    const skipped = restrictWithFallback(
+      makeRestrict(applied),
+      ['plugin_manager', 'subagent', 'workflow'],
+    )
+    assert.deepEqual(skipped, ['subagent'])
+    assert.deepEqual(applied, [['plugin_manager'], ['workflow']])
+  })
+
+  it('全部不可 restrict → 全部跳过，不抛错', () => {
+    const applied: string[][] = []
+    const skipped = restrictWithFallback(makeRestrict(applied), ['subagent', 'subagent_fork'])
+    assert.deepEqual(skipped, ['subagent', 'subagent_fork'])
+    assert.deepEqual(applied, [])
+  })
+
+  it('空名单 → 不调用', () => {
+    const applied: string[][] = []
+    assert.deepEqual(restrictWithFallback(makeRestrict(applied), []), [])
+    assert.deepEqual(applied, [])
   })
 })
