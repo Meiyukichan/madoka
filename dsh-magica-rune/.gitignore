@@ -1,0 +1,7 @@
+node_modules/
+lib/
+*.log
+.DS_Store
+
+# E2E 截图（生成物，不入库）
+e2e/.shots/

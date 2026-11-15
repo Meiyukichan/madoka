@@ -1,0 +1,21 @@
+# dsh-market 投稿条目（复制到 madoka 仓库的 data/plugins/ 下提 PR）
+#
+# 文件名必须是：Meiyukichan__madoka--dsh-magica-rune.yml
+# （monorepo 子包规则：<owner>__<repo>--<子目录路径用连字符>）
+#
+# 只需这一个文件。data/plugins/*.yml 是唯一数据源，两个 README 由脚本生成，
+# 不要手工编辑 README，也不要往 data/screenshots.json 加键（截图已在本包仓库里声明）。
+
+url: https://github.com/Meiyukichan/madoka/tree/main/dsh-magica-rune
+name: Meiyukichan/madoka#dsh-magica-rune
+category: tools
+
+# 只有 description.en 是必填；zh 可选（不写也行，维护者会补）。
+# 含 ": " 必须加引号，否则 YAML 会当成嵌套键。
+description:
+  en: 'Enable or disable any dsh tool or skill globally or per workspace. Disabled entries leave the model tool list and system prompt, calls are refused at runtime, and changes apply without a restart.'
+  zh: '按全局或工作区启用 / 禁用任意工具与技能：被禁项会从模型的工具清单与系统提示词里移除，调用时再兜底拒绝，改动即时生效、无需重启。'
+
+# 可选——GitHub 托管的位图作为市场卡片图标；不写则回退到作者头像。
+# 本包已带 assets/ 但还没有 180×180 的图标位图，需要时补一张再放开下面这行：
+# icon: https://raw.githubusercontent.com/Meiyukichan/madoka/main/dsh-magica-rune/assets/icon-180.png

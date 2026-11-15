@@ -1,0 +1,55 @@
+# ── 依赖 ───────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.pnpm-cache/
+.npm-cache/
+.pnpm-local/
+.yarn/
+.corepack
+
+# ── 构建 / 缓存 ────────────────────────────────────────
+# 注意：AGENTS.md 约定构建产物统一放在 lib/。
+# 本仓只发布 dsh-magica-rune，它的 lib/ 由 `prepare` / `prepublishOnly` 现构建，不入库。
+dist/
+lib/
+lib-tests/
+*.tsbuildinfo
+.dts/
+.tmp/
+.turbo/
+.cache/
+*/docs/raw
+
+# ── 日志与调试 ────────────────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+coverage/
+.e2e
+/.e2e/
+/e2e/
+
+# ── 本地配置 / 密钥 ───────────────────────────────────
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── 编辑器 ────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# ── 本仓库只收录 dsh-magica-rune ──────────────────────
+# 下面这些目录仍保留在工作区里（本地开发 / 别的用途），但**不进入本仓库**。
+/docs/
+/dsh-magica-im/
+/dsh-magica-index/
+/dsh-magica-lattice/
+/dsh-magica-spellbook/
+/dsh-magica-teamwork/

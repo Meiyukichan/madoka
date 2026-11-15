@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Ability",
+    "description": "Enable or disable any tool or skill globally or per workspace. Disabled entries leave the model's tool list and system prompt and are refused at call time; changes take effect immediately, no restart."
+  }
+}

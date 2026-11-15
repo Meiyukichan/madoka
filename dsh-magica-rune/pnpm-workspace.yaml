@@ -1,0 +1,16 @@
+packages:
+  - '.'
+
+# 单包工程：'.' 必须在列表里，否则 pnpm 不认为它是 workspace 成员。
+#
+# autoInstallPeers: false —— 本包的 @deepseek-ai/* 是 **peerDependencies**，
+# 由宿主运行时提供（profile 的 peer 拦截层解析到安装树的那一份）。
+# 若让 pnpm 自动装 peer，会去 registry 拉，而 registry 上这些名字的最新版是
+# 0.0.1-rc.1（与 0.2.0-rc.2 不兼容），会污染 node_modules 甚至安装失败。
+autoInstallPeers: false
+
+# pnpm 11+ 的构建脚本白名单（写在 workspace 根才生效）。
+# 两者都设 false：本机沙箱禁止 pnpm 用管道 spawn 子进程；
+# esbuild 的平台二进制来自 @esbuild/win32-x64 可选依赖（不跑 postinstall 也能用）。
+allowBuilds:
+  esbuild: false

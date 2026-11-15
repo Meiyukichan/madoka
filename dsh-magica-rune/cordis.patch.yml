@@ -1,0 +1,44 @@
+# 能力管理：host 半侧挂工具 / 技能门禁与目录 HTTP；client 半侧挂「设置 → 能力管理」页。
+#
+# 这里只放**插件内置的默认名单**，不放用户开关状态。
+#
+# 为什么不写 tools / skills：
+#   「哪些工具被禁了」是**用户运行态**，由「能力管理」页写入 **profile 自己的**
+#   cordis.patch.yml（落成一条按 id 覆盖的行）。在这里写空壳既多余又误导 ——
+#   那个空 shape 由 Config schema 的 .default() 提供，删掉行为完全一致。
+#
+# 名单语义：
+#   builtinDisabled   开箱即禁，且用户 enabled 不能恢复（UI 显示「内置禁用」徽章）
+#   nonDisableable    永不禁用；同时意味着 restrict 不会命名它、UI 不下发它
+#   skillNonDisableable  技能侧永不禁用
+#   名字以 `*` 结尾表示前缀匹配。
+#
+# 📌 生产环境改名单：**不要**改本文件（装好后它在 node_modules 里，升级会被覆盖），
+#    而是往 profile 的 cordis.patch.yml 写一条按 id 覆盖的行，并**完整重述** config
+#    （patch 是整体替换 config，不深合并）。
+#
+# ⚠️ 两个不能改的地方：
+#   1. `id` 就是 settings 的命名空间（`entry.options.id`），改了前端就写不回去；
+#      它必须与 src/namespace.ts 的 ABILITY_NS 完全一致。
+#   2. 只有「裸包名」这一行会挂载 ./client —— 不要改成 pkg/host 之类子路径。
+- insert:
+    - id: dsh-magica-rune
+      name: '@meiyukichan/dsh-magica-rune'
+      config:
+        # ── 名单 ①：默认禁用（开箱即禁，enabled 不可恢复）──────
+        # 暂为空：rune 没有自带替代品，不替用户砍 dsh 原生能力。
+        builtinDisabled: []
+
+        # ── 名单 ②：永不禁用（guard 放行 / restrict 不命名 / UI 不下发）
+        nonDisableable:
+          # run_code 是 PTC 呈现传输，不是能力工具（restrict 命名它会抛错）。
+          # 注意：代码里另有 HARD_RESERVED 硬保护，**删掉这行也不会解除保护**。
+          - run_code
+          - 'sandore_*'          # 前缀匹配
+
+        # ── 名单 ③：技能侧永不禁用 ──────────────────────────
+        skillNonDisableable:
+          - dsh-plugins-principles
+          - sandore-workflow-authoring
+          - cordis-plugin-development
+          - editing-cordis-compositions

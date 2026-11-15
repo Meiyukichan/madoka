@@ -1,0 +1,38 @@
+{
+  // 本包的 @deepseek-ai/* 全是 peerDependencies（运行时由 host 提供同一份实例），
+  // 但它们不在本仓依赖树里、registry 上也只有不兼容的旧版本，所以**类型解析**
+  // 用 paths 直接指向本机 dsh 安装树里的 .d.ts（与运行时同一份产物）。
+  //
+  // 为什么逐个指到 `lib/types/index.d.ts` 而不是用 `@deepseek-ai/*` 通配目录：
+  // 这些包的 package.json 有 `exports`，NodeNext 下把 paths 指到**目录**会走
+  // exports 条件解析、拿不到 types；直接指声明文件最稳。
+  //
+  // 只影响 tsc：esbuild 把 @deepseek-ai/* 全部标 external，构建与运行都不看这里。
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@deepseek-ai/dsh-client-store": ["D:/project-tools/nodejs/node24/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-store/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["D:/project-tools/nodejs/node24/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-slots": ["D:/project-tools/nodejs/node24/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-scope": ["D:/project-tools/nodejs/node24/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-scope/lib/types/index.d.ts"],
+      "@deepseek-ai/schemastery": ["D:/project-tools/nodejs/node24/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery/lib/types/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["lib", "node_modules"]
+}
