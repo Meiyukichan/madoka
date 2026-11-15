@@ -16,6 +16,6 @@ description:
   en: 'Enable or disable any dsh tool or skill globally or per workspace. Disabled entries leave the model tool list and system prompt, calls are refused at runtime, and changes apply without a restart.'
   zh: '按全局或工作区启用 / 禁用任意工具与技能：被禁项会从模型的工具清单与系统提示词里移除，调用时再兜底拒绝，改动即时生效、无需重启。'
 
-# 可选——GitHub 托管的位图作为市场卡片图标；不写则回退到作者头像。
-# 本包已带 assets/ 但还没有 180×180 的图标位图，需要时补一张再放开下面这行：
-# icon: https://raw.githubusercontent.com/Meiyukichan/madoka/main/dsh-magica-rune/assets/icon-180.png
+# 市场卡片图标：GitHub 托管的位图，180×180 PNG（assets/icon-180.png，76 KB）。
+# 不写则回退到作者头像。
+icon: https://raw.githubusercontent.com/Meiyukichan/madoka/main/dsh-magica-rune/assets/icon-180.png
