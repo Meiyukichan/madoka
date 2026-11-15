@@ -3,6 +3,9 @@
   "version": "0.2.0-alpha.1",
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "DSH 能力管理：按全局或工作区启用 / 禁用任意工具与技能。被禁项同时从模型的工具清单与系统提示词中移除，运行期再兜底拦截；支持搜索、分组批量与内置保护，改动即时生效、无需重启。",
   "repository": {
     "type": "git",
