@@ -427,20 +427,60 @@ export const searchInput = page => page.locator('.rune-search-input input').firs
  *
  * 所以 E2E 开跑前先发一条消息把 agent 建出来；不等模型回完（agent 在发送瞬间就创建）。
  */
-export async function ensureLiveAgent(url, text = '你好') {
+export async function ensureLiveAgent(url, text = '你好', attempts = 3) {
   const browser = await launchBrowser()
   const page = await newPage(browser)
-  await page.goto(url, { waitUntil: 'domcontentloaded' })
-  await page.getByText('新会话', { exact: false }).first().waitFor({ state: 'visible' })
-  const intro = page.getByRole('button', { name: '继续' })
-  if (await intro.count()) await intro.first().click()
-  const box = page.locator('[role="textbox"]').first()
-  await box.waitFor({ state: 'visible' })
-  await box.click()
-  await page.keyboard.type(text)
-  await page.keyboard.press('Enter')
-  await page.waitForTimeout(2500)
-  // 关键：**保持浏览器开着**。实测关掉页面后 agent 会被 dispose，
-  // 工具注册随之消失（catalog 又回到 0），后面的 spec 依旧拿不到药丸。
-  return { close: () => browser.close() }
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    await page.goto(url, { waitUntil: 'domcontentloaded' })
+    await page.getByText('新会话', { exact: false }).first().waitFor({ state: 'visible' })
+    const intro = page.getByRole('button', { name: '继续' })
+    if (await intro.count()) await intro.first().click()
+    const box = page.locator('[role="textbox"]').first()
+    await box.waitFor({ state: 'visible' })
+    await box.click()
+    await page.keyboard.type(text)
+    await page.keyboard.press('Enter')
+    // 轮询而不是固定等待：会话真正开始跑（工具注册完成）需要几秒到十几秒。
+    await page.waitForTimeout(1200)
+    // 以「目录里有工具」作为 agent 真的建成的判据：请求失败/未注册时它是 0，
+    // 光等固定时间会出现「看起来建好了其实没有」的假阳性。
+    let tools = 0
+    for (let tick = 0; tick < 50 && tools === 0; tick++) {
+      tools = await page.evaluate(async () => {
+        const body = await (await fetch('/rune-ability/catalog', { credentials: 'same-origin' })).json()
+        return Array.isArray(body.tools) ? body.tools.length : 0
+      })
+      if (tools === 0) await page.waitForTimeout(500)
+    }
+    if (tools > 0) {
+      // 关键：**保持浏览器开着**。实测关掉页面后 agent 会被 dispose，
+      // 工具注册随之消失（catalog 又回到 0），后面的 spec 依旧拿不到药丸。
+      return { close: () => browser.close(), tools }
+    }
+  }
+  await browser.close()
+  throw new Error('无法建立 live agent：能力目录始终为空（工具按会话注册，没有会话就没有工具）')
+}
+/** 轮询等待「全局禁用集合」满足期望；返回最后一次读到的数组。 */
+export async function waitGlobalDisabled(predicate, label, timeout = 8_000) {
+  const deadline = Date.now() + timeout
+  let last = []
+  while (Date.now() < deadline) {
+    last = readGlobalDisabled()
+    if (predicate(new Set(last))) return last
+    await new Promise(resolve => setTimeout(resolve, 120))
+  }
+  throw new Error(`${label}：patch 里是 ${JSON.stringify(last)}`)
+}
+
+/** 轮询等待「所有工作区禁用集合的并集」满足期望。 */
+export async function waitWorkspaceDisabled(predicate, label, timeout = 8_000) {
+  const deadline = Date.now() + timeout
+  let last = []
+  while (Date.now() < deadline) {
+    last = Object.values(readWorkspaceDisabled()).flat()
+    if (predicate(new Set(last))) return last
+    await new Promise(resolve => setTimeout(resolve, 120))
+  }
+  throw new Error(`${label}：patch 里是 ${JSON.stringify(last)}`)
 }

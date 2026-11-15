@@ -19,7 +19,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { ensureLiveAgent, snapshotPatch, startServer } from './harness.mjs'
 
-const ALL = ['style', 'toggle', 'scope', 'search', 'skills']
+const ALL = ['style', 'toggle', 'scope', 'search', 'skills', 'matrix']
 const chosen = process.env.DSH_E2E_ONLY === undefined ? ALL : process.env.DSH_E2E_ONLY.split(',')
 const SPECS = chosen.map(name => fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url)))
 
