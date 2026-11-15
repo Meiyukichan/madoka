@@ -2,7 +2,8 @@
 
 - **用中文回答**
 - **新代码一律面向 `0.2.0-rc.2` 的 DSH**；本地源码：`D:\project-code\llm\deepseek-harness`（下文路径都相对它）。
-- 本仓另有 0.1.2 线（`dsh-index` / `dsh-madoka`）：**只维护，不复用其代码、类型和 API 记忆** 。
+- **本仓库只收录 `@meiyukichan/dsh-magica-rune`**（本目录）；工作区里的其他包（`dsh-magica-spellbook`、`dsh-magica-index`、`dsh-magica-teamwork` 等）留在本机但不进本仓库。
+- 本仓另有 0.1.2 线（`@meiyukichan/dsh-index`）：**只维护，不复用其代码、类型和 API 记忆** 。
 - 写插件前先查源码中同类官方实现，对齐 API、命名与返回结构；**不要照抄 0.1.2 时代的代码**（本文件末尾列了常见漂移）。
 - 项目下所有子包采用pnpm构建 (pnpm-workspace.yaml)，版本统一从0.2.0-alpha.1开始，最后lib/只有两个文件：index.js/client.js【压缩源码】。*.js.map 禁止进入 lib/
 - 要有tests单元测试
@@ -152,7 +153,7 @@
    - Web 服务器与 Remote：`docs/subsystems/web-server.zh.md`、`docs/subsystems/typert.zh.md`
    - 工具：`packages/core/tools/README.md`
 3. **实时核对**：会话里有 `cordis_inspect_*` 工具时优先用它——Host 侧查 `Service` / `Event` / `Config`，Client 侧查 `Slots.listSubTree`（精确 slot 的 cardinality、scope、owner props、现有 occupant）、`Theme.listTokens`（当前真实 token 名）、`Service.listService`。源码与运行时不符时，以运行时为准并记录差异。
-4. **本仓 SDK**：0.2 线是 `dsh-spellbook`（SDK 文档目标位 `docs/spellbook/`，落地后优先 import，不自造）；`dsh-index` / `dsh-madoka` 是 0.1.2 线，只可参考工程形态。
+4. **本仓 SDK**：0.2 线是 `dsh-magica-spellbook`（SDK 文档目标位 `docs/spellbook/`，落地后优先 import，不自造）；`@meiyukichan/dsh-index` 是 0.1.2 线，只可参考工程形态。
 
 ## 六、0.1.2 → 0.2 常见漂移（照抄旧代码必踩）
 
