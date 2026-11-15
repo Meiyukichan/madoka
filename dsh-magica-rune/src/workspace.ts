@@ -16,9 +16,6 @@ import { normalize } from 'node:path'
 import type { DshContext, DshWorkspaceRegistry, AgentCreatedPayload, AgentDisposedPayload } from './shared/dsh.ts'
 import type { GuardState } from './state.ts'
 
-/** 首次解析失败后的重试延迟（registry 可能尚未就绪）。 */
-const WORKSPACE_RETRY_MS = 800
-
 /** 纯字符串归一（不碰文件系统；物理 canon 由 dsh registry 唯一负责）。 */
 export function normalizeProjectPath(input: string): string {
   const normalized = normalize(input)
@@ -53,66 +50,28 @@ export async function resolveWorkspaceId(ctx: DshContext, cwd: string): Promise<
  *    拿错会让 `agent.id` 为 undefined，工作区策略静默失效。
  * 2. 处理器**绝不 throw**：`agent/created` 是 serial 监听器，throw 会让 agent 创建失败。
  */
-export function installWorkspaceIndex(
-  ctx: DshContext,
-  state: GuardState,
-  onResolved?: (agentId: string) => void,
-): () => void {
+
+export function installWorkspaceIndex(ctx: DshContext, state: GuardState): () => void {
   return ctx.effect(() => {
-    const timers = new Set<ReturnType<typeof setTimeout>>()
-
-    /** 解析一次并落表；返回是否拿到了 workspaceId。 */
-    const resolveInto = async (agentId: string, cwd: string): Promise<boolean> => {
-      const workspaceId = await resolveWorkspaceId(ctx, cwd)
-      if (workspaceId === undefined) return false
-      const changed = state.agentWorkspace.get(agentId) !== workspaceId
-      state.agentWorkspace.set(agentId, workspaceId)
-      // 映射变化后必须让 restrict 重算一次 mask，否则 schema 视图还是旧的
-      if (changed) onResolved?.(agentId)
-      return true
-    }
-
     const offCreated = ctx.on('agent/created', async (...args: unknown[]) => {
       const payload = args[0] as AgentCreatedPayload
       const agent = payload?.agent
       if (agent === undefined) return
       const agentId = String(agent.id)
-      let cwd: string | undefined
       try {
-        cwd = agent.session.header.cwd
+        const cwd = agent.session.header.cwd
+        const workspaceId = cwd === undefined || cwd === '' ? undefined : await resolveWorkspaceId(ctx, cwd)
+        if (workspaceId === undefined) state.agentWorkspace.delete(agentId)
+        else state.agentWorkspace.set(agentId, workspaceId)
       } catch (error) {
-        ctx.logger.warn(`[rune] workspace cwd read failed for agent ${agentId}: ${String(error)}`)
-        return
-      }
-      if (cwd === undefined || cwd === '') return
-
-      try {
-        if (await resolveInto(agentId, cwd)) return
-      } catch (error) {
+        state.agentWorkspace.delete(agentId)
         ctx.logger.warn(`[rune] workspace resolve failed for agent ${agentId}: ${String(error)}`)
       }
-
-      // 首次解析可能早于 workspaceRegistry 就绪。此时**绝不删映射**：
-      // 删掉会让 guard / restrict 回退到「只看全局层」，工作区级禁用会被静默丢
-      // （症状：工具先消失又出现，但调用仍被拒绝）。改为稍后重试一次。
-      const timer = setTimeout(() => {
-        timers.delete(timer)
-        void resolveInto(agentId, cwd as string).catch((error: unknown) => {
-          ctx.logger.warn(`[rune] workspace retry failed for agent ${agentId}: ${String(error)}`)
-        })
-      }, WORKSPACE_RETRY_MS)
-      timers.add(timer)
     })
-
     const offDisposed = ctx.on('agent/disposed', (...args: unknown[]) => {
       const payload = args[0] as AgentDisposedPayload
       if (payload?.agent !== undefined) state.agentWorkspace.delete(String(payload.agent.id))
     })
-
-    return () => {
-      offCreated(); offDisposed()
-      for (const timer of timers) clearTimeout(timer)
-      timers.clear()
-    }
+    return () => { offCreated(); offDisposed() }
   }, 'dsh-magica-rune: workspace index')
 }

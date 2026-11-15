@@ -291,12 +291,18 @@ export class GuardState {
 
 ## 5. `workspace.ts` —— cwd → workspaceId
 
-> **不变量：映射只增不删**（除 `agent/disposed`）。解析失败时**保留**上一次成功的结果，
-> 并在 800ms 后重试一次；拿到映射后回调 `restrict.refresh()` 重算 mask。
+> 语义：`agent/created` 时解析一次，成功就 `set`、解析不出来就 `delete`（`agent/disposed` 也删）。
+> 解析失败的四种情况都是**正常退化**，不是错误：
 >
-> 为什么：`resolve(gate, workspaceId)` 在 `workspaceId === undefined` 时回退到**全局层**。
-> 一旦因为一次解析失败把映射删掉，工作区级禁用就会**静默消失**——模型工具表里重新出现
-> 该工具、而 guard 仍会拒绝调用（「列表里有、调用报禁用」的错位）。
+> | 情况 | 结果 |
+> |---|---|
+> | `cwd` 为空（header 未填） | 不解析，无映射 |
+> | `workspaceRegistry` 尚未就绪 | 无映射 |
+> | `realpathNormalize` 抛错（目录不存在 / 路径未完全限定） | 无映射 |
+> | `resolveByPath` 返回 `undefined`（该目录不是**已注册**工作区根） | 无映射 |
+>
+> 无映射时 `resolve()` 只看全局层——这是**设计意图**：不是工作区根目录的会话，工作区级策略不适用。
+> 另外注意 `resolveByPath` 是**精确等值匹配**，子目录 cwd 匹配不上父工作区。
 
 ```ts
 // findWorkspace 定义在本文件末尾：把 ctx.get('workspaceRegistry') 包成
@@ -394,13 +400,14 @@ export function installGuard(ctx: Context, state: GuardState): () => void {
 
 ## 7. `restrict.ts` —— 辅通道（省 token）
 
-> **重挂顺序是不变量**：先算目标 deny 集，再决定动不动旧 mask。
-> 顺序反了（先 `dispose()` 再看目标集为空就 `return`）会让 mask 永久丢失：
-> 目标集一旦因为工作区映射缺失而算成空，旧 mask 已撤、新 mask 又不建。
-> 现在的规则：
-> - deny 指纹未变 → 直接返回（不制造 dispose/recreate 的窗口）；
-> - 已有 mask + 目标集空 + 工作区未知 → **保留**旧 mask（fail-closed，`shouldKeepMask`）；
-> - 其余情况才撤旧、按新集重挂。
+> **两条不变量**：
+>
+> 1. **顺序**：先算目标 deny 集，再决定动不动旧 mask。反了（先 `dispose()` 再看目标集为空就
+>    `return`）会让 mask 永久丢失：旧 mask 已撤、新 mask 又不建。现在 deny 指纹未变就直接返回。
+> 2. **补齐**：`agent/created` 只覆盖「我们已在监听时」创建的 agent。插件晚于会话启用
+>    （loader 热重载、`plugin add` 后继续旧会话）时，那些 agent 从没进过索引，`refresh()`
+>    刷不到它们 → 设置里已禁用、guard 也拒绝，但模型工具表里仍然有。
+>    因此 apply 时与每次 `refresh()` 都执行 `agents.list()` 补齐（`seedFromRegistry()`）。
 
 ### 7.1 为什么用 `createScope` 而不是 `agent.ctx` 直接挂
 

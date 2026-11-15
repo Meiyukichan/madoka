@@ -20,7 +20,6 @@ import type {
   AssembledSection, DshAgent, DshContext, DshScope, DshTools, PromptAssembly,
   AgentCreatedPayload, AgentDisposedPayload,
 } from './shared/dsh.ts'
-import { shouldKeepMask } from './policy.ts'
 import type { GuardState } from './state.ts'
 
 /**
@@ -65,8 +64,7 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
     const previous = masks.get(agentId)
     if (previous !== undefined && applied.get(agentId) === fingerprint) return
 
-    // 工作区未知 + 目标集为空：可能是映射尚未就绪的瞬时状态，保留旧 mask（fail-closed）
-    if (shouldKeepMask({ hasMask: previous !== undefined, deniedCount: denied.length, workspaceKnown: state.hasWorkspace(agentId) })) return
+
 
     // ③ 撤销旧 mask（独立 scope，不动 agent 自己的注册）
     if (previous !== undefined) {
@@ -117,7 +115,37 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
     masks.set(agentId, scope)
   }
 
+  /**
+   * 把**已存在**的 live agent 补齐进索引并重挂 mask。
+   *
+   * `agent/created` 只会通知「我们已在监听时」创建的 agent。插件晚于会话启用
+   * （loader 热重载、plugin add 之后继续旧会话）时，那些 agent 永远不会进
+   * `liveAgents`，`refresh()` 也就永远刷不到它们 —— 表现就是「设置里禁用了、
+   * guard 也拒绝调用，但模型工具表里仍然有」。这里用 `agents.list()` 补一次。
+   */
+  const seedFromRegistry = (): void => {
+    const registry = ctx.get<{ list(): DshAgent[] }>('agents')
+    if (registry === undefined) return
+    let agents: DshAgent[]
+    try {
+      agents = registry.list()
+    } catch (error) {
+      ctx.logger.warn(`[rune] agents.list() failed: ${String(error)}`)
+      return
+    }
+    for (const agent of agents) {
+      liveAgents.set(String(agent.id), agent)
+      try {
+        applyTo(agent)
+      } catch (error) {
+        ctx.logger.warn(`[rune] restrict seed failed for ${String(agent.id)}: ${String(error)}`)
+      }
+    }
+  }
+
   const disposeListeners = ctx.effect(() => {
+    // 先补齐 apply 之前就已存在的 agent，再挂监听接住后续创建的
+    seedFromRegistry()
     const offCreated = ctx.on('agent/created', (...args: unknown[]) => {
       const payload = args[0] as AgentCreatedPayload
       const agent = payload?.agent
@@ -147,6 +175,8 @@ export function installRestrict(ctx: DshContext, state: GuardState): RestrictHan
 
   return {
     refresh(): void {
+      // 每次配置变更都重新对齐一次：既刷新已知 agent，也把「监听期间新出现/漏掉」的补进来
+      seedFromRegistry()
       for (const agent of liveAgents.values()) {
         try {
           applyTo(agent)

@@ -70,14 +70,7 @@ export function apply(ctx: DshContext, config: RuneConfig): void {
   state.sync(readConfig(config))
 
   // 2) 工作区索引（guard 依赖 agentWorkspace）
-  //    拿到映射后要让 restrict 重算 mask：晚解析成功时旧 mask 是空的
-  const workspaceIndex = installWorkspaceIndex(ctx, state, () => {
-    try {
-      restrict.refresh()
-    } catch (error) {
-      ctx.logger.warn(`[rune] restrict refresh after workspace resolve failed: ${String(error)}`)
-    }
-  })
+  const workspaceIndex = installWorkspaceIndex(ctx, state)
 
   // 3) 两个 advisory 通道：先建 handle，下面的 watch 闭包按引用读
   const skillGate = installSkillGate(ctx, state)
