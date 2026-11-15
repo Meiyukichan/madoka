@@ -36,4 +36,4 @@ pnpm e2e          # 端到端（Playwright，真开浏览器点页面）
 
 ## 许可
 
-[Apache-2.0](LICENSE)
+[MIT](LICENSE)

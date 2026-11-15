@@ -233,3 +233,8 @@ src/
 ```
 
 > 样式是「TS 字符串 + 注入 `<style>`」（esbuild 不做 CSS Modules），数值逐条对齐 `docs/raw/a.md` §5；只有 6px / 5px 圆角保留字面值，因为 0.2 的圆角 token 只有 4/8/12/16/20/28。
+
+## 许可
+
+[MIT](LICENSE)
+
