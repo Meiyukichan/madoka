@@ -1,22 +1,22 @@
-# 01 · 0.1.2 → 0.2.0-rc.2 逐项过时审计（工具 + 技能）
+# 01 · 0.2.0-rc.2 API 逐项核对与设计依据（工具 + 技能）
 
-> 判定符号：`✅` 原样成立 ｜ `⚠️` 需改（签名/载荷/语义变了）｜ `❌` 过时（API 不存在或去了别处）｜ `⛔` 移出范围（已评估，不做）
+> 判定符号：`✅` 原样成立 ｜ `⚠️` 有条件成立（签名/载荷/语义有前提）｜ `❌` 不可用（API 不存在或去了别处）｜ `⛔` 移出范围（已评估，不做）
 >
-> 路径约定：`packages/…` = DSH 源码（`0.2.0-rc.2`）；`⟨sd⟩/…` = 本仓 `dsh-magica-spellbook`；`raw/…` = 本仓 `docs/raw/`。
-> 行号以 0.2.0-rc.2 源码为准，**`raw/` 里的行号一律作废**。
+> 路径约定：`packages/…` = DSH 源码（`0.2.0-rc.2`）；`src/…` = 本包源码；`scripts/…` = 本包构建脚本。
+> 行号以 0.2.0-rc.2 源码为准，本文所有 `packages/…:行号` 引用都在该 tag 上逐条核对过。
 >
-> **范围**：本审计只覆盖**工具**与**技能**两类。命令 / Agent 两类的评估结论收在 §4.5，不进入实现。
+> **范围**：本核对只覆盖**工具**与**技能**两类。命令 / Agent 两类的评估结论收在 §4.5，不进入实现。
 
 ---
 
 ## 0. 一页结论
 
-| # | 组件 | 判定 | 替换目标 |
+| # | 组件 | 判定 | 采纳做法 |
 |---|---|---|---|
 | 1 | `settings.register(ns, schema)` + `scope.get/watch/commit` | ❌ | 插件自己的 `Config` + `Volatile<T>` + `loader/volatile-update` |
 | 2 | `z.dict(...)` 内叶子 `.volatile()` | ❌ 加载期抛错 | 一个 kind 一个 fixed-path volatile |
 | 3 | `ctx.on('agent/created', agent => …)` | ⚠️ | `({ agent, source, signal }) => …` |
-| 4 | `realpathSync` + `workspaceRegistry.list()` 手比对 | ⚠️ | `workspaceRegistry.resolveByPath()` / `⟨sd⟩` `findWorkspace()` |
+| 4 | `realpathSync` + `workspaceRegistry.list()` 手比对 | ⚠️ | `workspaceRegistry.resolveByPath()` / 本包 `findWorkspace()` |
 | 5 | `tools.guard(fn)` | ✅ | 原样（读 `exec.arguments`，不是 `args`） |
 | 6 | `tools.restrict({deny})` 在 agent ctx 上 | ⚠️ | 原样但必须预过滤未知名字，并建议挂 `createScope` |
 | 7 | `agentCtx.on('system-prompt/assemble', (a, next) => …)` | ⚠️ | `(a, context, next) => …`，`next()` 无参 |
@@ -27,13 +27,13 @@
 | 12 | client `inject` 含 `@deepseek-ai/dsh-client-runtime` | ❌ 包不存在 | 删除 |
 | 13 | 组件内 `locale.subscribe` + `useSyncExternalStore` | ❌ | 删；`locale: NS` 自动注入 `t` |
 | 14 | 自建 store | ❌ | `defineStore` + controller + `hooks` |
-| 15 | 字符串 CSS + `head.appendChild` | ❌ | CSS Modules（构建预设内建注入） |
+| 15 | 字符串 CSS + `head.appendChild` | ⚠️ 部分 | 保留文本常量，但注入收口到 `ctx.effect` + `<style data-plugin>`（见 §E15）；`head.appendChild` 不可取 |
 | 16 | `Modal` 缺 `closeLabel` | ❌ 类型不过 | 补 |
 | 17 | 自绘下拉浮层 | ❌ | `Menu` / `MenuSurface` |
 | 18 | `--dsw-alias-brand-primary` 当品牌蓝 | ❌ 语义变了 | `--dsw-alias-state-business-primary` |
 | 19 | 圆角 5px / 6px 字面量 | ❌ 被 lint 拒 | `--dsw-radius-xs/sm` |
 | 20 | `engines.dsh` | ❌ 零读取方 | 删除 |
-| 21 | peer `>=0.1.2-rc.1` | ❌ 零保护 | `>=0.2.0-rc.2` |
+| 21 | peer 只写宽松 `>=` 下界 | ❌ 零保护 | `>=0.2.0-rc.2` |
 | 22 | `exports["./client"] = { import: … }` | ❌ 会抛 | `{ types, default }` |
 | — | `named_subagent` guard 分支 / command 门禁 / `dsh-agent-center` 目录 | ⛔ | 移出范围，见 §4.5 |
 
@@ -43,9 +43,9 @@
 
 ### A1 `ctx.get('settings')` —— ❌ 整个 API 被换掉
 
-0.1.2：`settings.register('ability', schema)` → Scope；`scope.get()` / `scope.watch(cb)` / `scope.commit()`；配置写进 `~/.dsh/settings.yaml` 的 `ability:` 段。
+设计假设：`settings.register('ability', schema)` → Scope；`scope.get()` / `scope.watch(cb)` / `scope.commit()`；配置写进 `~/.dsh/settings.yaml` 的 `ability:` 段。
 
-0.2：`settings` 是 `SettingsForms`，只做「把 **Loader entry 的 Config schema** 投影成表单 + 写回 profile patch」。
+0.2 实际：`settings` 是 `SettingsForms`，只做「把 **Loader entry 的 Config schema** 投影成表单 + 写回 profile patch」。
 
 ```ts
 // packages/settings/settings/src/index.ts:223-236
@@ -65,7 +65,7 @@ async replace(ns: string, section: object, expectedRevision?: number): Promise<v
 async mutate(ns: string, ops: readonly SettingsPathOp[], expectedRevision?: number): Promise<void>
 ```
 
-| 0.1.2 用法 | 0.2 现实 |
+| 设计假设 | 0.2 实际 |
 |---|---|
 | `settings.register('ability', schema)` | **不存在**（全仓无 `settings.register(`） |
 | 返回 scope + owner mode 参数 | **不存在**。只有 `configure({auto?}, owner?)` 控制「是否自动生成表单页」 |
@@ -77,7 +77,7 @@ async mutate(ns: string, ops: readonly SettingsPathOp[], expectedRevision?: numb
 
 - schema 库仍是 `@deepseek-ai/schemastery`，写法 `import z from '@deepseek-ai/schemastery'` + `z.object({...})`。`role('secret')` ✅、`Volatile<T>` + `.volatile()` ✅（`Volatile` 类型来自 `@deepseek-ai/cosmokit`，`vendor/cordis/src/index.ts:16` 再导出）。
 - **非 volatile 字段不能通过 settings 编辑**：`write()` 抛 `Config field "…" is not volatile`（`packages/settings/settings/src/index.ts:386-389`）、`Plugin entry "…" has no volatile fields`（`:385`）。→ 能力策略的每个字段都必须 `.volatile()`，否则 UI 写不进去。
-- **`.volatile()` 不能出现在 dict / array 内部**（这条会直接打死照抄的 schema）：
+- **`.volatile()` 不能出现在 dict / array 内部**（这条会直接打死按直觉写的 schema）：
 
 ```ts
 // vendor/schemastery/src/index.ts:488-509
@@ -149,7 +149,7 @@ private guardReason(exec: ToolExecution): string | undefined {
 }
 ```
 
-执行位置：`tools/pre-execute` waterfall 之后、tool body 之前（`index.ts:1503-1531`）。`return string` = 干净的模型可见拒绝；`throw` 会被外层 catch 成 `toolErrorResult`（异常路径，后续 guard 不再执行）。**原方案「体内不 throw」的纪律仍然正确。**
+执行位置：`tools/pre-execute` waterfall 之后、tool body 之前（`index.ts:1503-1531`）。`return string` = 干净的模型可见拒绝；`throw` 会被外层 catch 成 `toolErrorResult`（异常路径，后续 guard 不再执行）。**「体内不 throw」的纪律仍然正确。**
 
 `ToolExecution` 字段（`index.ts:326-352` + `393-398`）：`callId` / `rootCallId` / `name` / `schema?` / `arguments` / `agent?` / `parent?` / `signal` / `token`。
 **没有 `caller`、没有 `scope`**。参数是 `exec.arguments`（**不是 `args`**）。`exec.agent` 就是 `Agent` 实例。
@@ -173,14 +173,14 @@ restrict(filter: ToolRestriction): () => void {
 }
 ```
 
-| 点 | 0.1.2 方案 | 0.2 现实 | 处置 |
+| 点 | 设计假设 | 0.2 实际 | 处置 |
 |---|---|---|---|
-| 作用域 | 在 `agentCtx` 上调用 | **unscoped 直接抛错**（不是 no-op） | 保持原做法；任何「顶层兜底 restrict」都会抛 |
+| 作用域 | 在 `agentCtx` 上调用 | **unscoped 直接抛错**（不是 no-op） | 保持这一做法；任何「顶层兜底 restrict」都会抛 |
 | 未知名 | 逐个 try/catch 吞错 | **仍然抛错** | 必须保留 try/catch，**并且**先用 `tools.schemas(agent)` 的可见名字预过滤 |
-| own-layer 免疫 | preset 重插的工具移不掉 | **语义变了**：preset 是 agent 的**祖先**，其工具是祖先贡献 → **能被 restrict 移除**；免疫只剩「agent.ctx 自己注册的」 | `raw/` §2.4 的 workflow-redirect 文本兜底**可以降级为可选** |
+| own-layer 免疫 | preset 重插的工具移不掉 | **语义变了**：preset 是 agent 的**祖先**，其工具是祖先贡献 → **能被 restrict 移除**；免疫只剩「agent.ctx 自己注册的」 | workflow-redirect 的文本兜底**可以降级为可选** |
 | `run_code` | RESERVED，不可 restrict | 仍抛错；且 0.2 默认 `mode:'native'` 时 `run_code` 根本不在可见集 | 保留剔除 |
 
-**own-layer 语义变化的源码依据**：
+**own-layer 语义的源码依据**：
 
 ```ts
 // packages/core/tools/src/index.ts:1163-1174
@@ -203,7 +203,7 @@ schemas(scope?: ScopeKey): ToolSchema[] {
 ```
 
 - `tools.schemas(agent)` ✅ 存在，官方自己就这么用（`packages/experimental/browser-use-runtime/src/mcp.ts:114`）。同一个 key 也接受 `Agent`（agent 的 scope key 就是 agent 实例，`packages/core/agent-loop/src/agent.ts:130-131`）。
-- **`tools.schemas()`（无参）只有 global 层**（`chainLayers(undefined)` = `[]`），**不含 preset / agent-plane 工具**。→ `raw/` §6.3 的 `updateInternalTools(schemas(), schemas(agent))` 在 0.2 会漏掉大部分工具。
+- **`tools.schemas()`（无参）只有 global 层**（`chainLayers(undefined)` = `[]`），**不含 preset / agent-plane 工具**。→ 若按直觉给 `updateInternalTools(schemas(), schemas(agent))` 传两个参数，0.2 会漏掉大部分工具。
 - `schemas(agent)` 返回的是**已受限视图**。所以「restrict-free 全量目录」只能**在 restrict 之前**快照。
 - 没有公开的 `tools.view()` / `knownNames` / `restrictableNames`（`ToolView` 是 private 返回类型，`index.ts:713-721`）。
 
@@ -217,7 +217,7 @@ private readonly layers = new ScopedLayers(scope => new ToolLayer(scope), () => 
 // :1119-1123  restrict 用默认 notify=true；:1140 guard 用 notify:false
 ```
 
-→ `raw/` 的 `tools/change → refreshInternal() + restrictHandle.refresh()` 与 `refresh() → restrict()` 构成真实的递归环。**必须加防重入**（见 `02` §8.3）。
+→ 若把 `tools/change → refreshInternal() + restrictHandle.refresh()` 与 `refresh() → restrict()` 直接连起来，就构成真实的递归环。**必须加防重入**（见 `02` §8.3）。
 
 #### A2.5 0.2 有没有官方「工具禁用」？
 
@@ -266,7 +266,7 @@ if (completeSection === undefined && !runtimeContextSuppressed) return transform
 return { …transformed, sections: completeSection === undefined ? transformed.sections : [completeSection], … }
 ```
 
-- **第三个参数才是 `next`**，且 `next()` **不接参数**。0.1.2 的 `(assembly, next)` 写法会把 `context` 当成 `next` → 运行时崩。
+- **第三个参数才是 `next`**，且 `next()` **不接参数**。若按直觉写成 `(assembly, next)`，`context` 会被当成 `next` → 运行时崩。
 - `assembly.sections: AssembledSection[]`（`{name,text,interpolate?}`）**可变**，可以 `await next()` 后 filter 再 return。
 - ⚠️ 若某 scope 注册了 `complete: true` 的 section，waterfall 结果会被**还原成那一段**（`:632`），过滤白做。→ 我们的过滤要放在 `next()` 之后、且接受这个边界。
 - `agent.ctx.on(...)` 能收到，因为 `assembleContextFor` 显式带 `scope: agent`（`packages/core/agent/src/dispatch.ts:174-176`）。
@@ -303,12 +303,12 @@ async resolveByPath(path: string): Promise<Workspace | undefined> {
 }
 ```
 
-→ 手写 `realpathSync.native + toLowerCase + 逐条比 list()` 整段删掉。**注意**：路径不存在时 **reject**（不是返回 `undefined`），必须 try/catch；且它用真实大小写，比手写 `toLowerCase` 更准。
+→ 不要再手写 `realpathSync.native + toLowerCase + 逐条比 list()`。**注意**：路径不存在时 **reject**（不是返回 `undefined`），必须 try/catch；且它用真实大小写，比手写 `toLowerCase` 更准。
 
-**本仓 SDK 已封装**，按 `AGENTS.md` 应直接用：
+**本包已封装**（`src/sessions/ensure-workspace.ts`），按 `AGENTS.md` 应直接用：
 
 ```ts
-// ⟨sd⟩/src/sessions/ensure-workspace.ts:45-50
+// src/sessions/ensure-workspace.ts:45-50
 export async function findWorkspace(ctx: unknown, projectPath: string): Promise<DshWorkspaceLike | undefined> {
   if (projectPath === '') throw new Error('findWorkspace: projectPath must not be empty')
   const registry = getWorkspaceRegistry(ctx)          // ctx.get('workspaceRegistry')，缺则 undefined
@@ -356,7 +356,7 @@ constructor(ctx: Context, config: Config = {}) { super(ctx, 'skills') … }
 > The `skill` REGISTRY stays in the host plane. It is host+per-scope layered (the tools-registry shape): deployment-level providers — repository plugins, a host skill-filesystem row — register into its **global layer**, while a preset's `skill-filesystem` registers into **that preset's layer**, and each agent reads the merged catalog its scope chain selects.
 
 → **结论**：
-- 通过 `agent.ctx.get('skills').register(...)` 注册 → 落 **agent scope 层**（比 preset/global 更近）→ **跨层 nearest-wins 生效，遮蔽成立**。这正是 `raw/dsh-skill-ability.md` §5.2 强调「必须用 `agentCtx.get('skills')`」的原因，0.2 下这条规则**变得更重要**。
+- 通过 `agent.ctx.get('skills').register(...)` 注册 → 落 **agent scope 层**（比 preset/global 更近）→ **跨层 nearest-wins 生效，遮蔽成立**。这正是本方案坚持「必须用 `agentCtx.get('skills')`」的原因：0.2 的跨层 nearest-wins 让这条规则**成为硬约束**。
 - 若图省事从 preset ctx 或 global ctx 注册 → 落**同层** → runtime 250 输给 project 100/200 → **静默漏放**（不报错、不 warn，只有 `.dsh/skills`、`.agents/skills` 里的同名 skill 逃逸）。
 - `skills.register` unscoped 时**静默落 global**（`:441-442`、`packages/core/scope/src/store.ts:236-237`），不 throw 不 warn —— 这是 footgun。
 - → **`02` §9.3 给出实现 + 一条强制回归测试**（用 project 级同名 skill 验证遮蔽）。
@@ -364,11 +364,11 @@ constructor(ctx: Context, config: Config = {}) { super(ctx, 'skills') … }
 另外四处必须注意：
 
 1. `registerProvider(provider)` 契约变了 → **必须传工厂** `(control) => provider`（`:390-428`，直接传对象 `TypeError: create is not a function`）。本方案不注册 provider。
-2. `snapshot` 返回 `{ skills, complete }`，**没有 `incomplete` / `revision`**（`:231-236`）。`raw/` 里的 `incomplete` 改名 `complete`（语义取反）。
+2. `snapshot` 返回 `{ skills, complete }`，**没有 `incomplete` / `revision`**（`:231-236`）；完整性用布尔 `complete` 表示（语义与 `incomplete` 相反）。
 3. `invalidateCache` 已 **private**（`:621-625`），不可外部调用；register/dispose 仍同步 revision+1 + 清缓存 + `skills/change`（`:288-297`、`store.ts:257-262`、`vendor/cordis/src/fiber.ts:375-382`）。
-4. `skills/change` **不在** client 转发白名单（`packages/api/remotes/src/remote-events.ts:20-48`），插件不可扩充 → 斜杠菜单热刷新仍然做不到（`raw/` §5.7 的妥协继续有效）。
+4. `skills/change` **不在** client 转发白名单（`packages/api/remotes/src/remote-events.ts:20-48`），插件不可扩充 → 斜杠菜单热刷新仍然做不到（只能在每次打开菜单时重取一次）。
 
-**0.2 新增的官方「按 skill 开关」**（仅对**自己写的 SKILL.md** 有效）：frontmatter `disable-model-invocation: true` / `user-invocable: false`（`packages/skill/skill-filesystem/src/index.ts:1000-1016`，旧键名会被拒）。→ 若用户只想关自己仓库里的 skill，这是零代码方案；「按项禁用 + 工作区覆盖 + 热加载」仍然只能靠本方案。
+**0.2 新增的官方「按 skill 开关」**（仅对**自己写的 SKILL.md** 有效）：frontmatter `disable-model-invocation: true` / `user-invocable: false`（`packages/skill/skill-filesystem/src/index.ts:1000-1016`，键名不匹配会被拒）。→ 若用户只想关自己仓库里的 skill，这是零代码方案；「按项禁用 + 工作区覆盖 + 热加载」仍然只能靠本方案。
 
 ### A7 `ctx.get('webServer')` —— ✅ 一字不差
 
@@ -391,7 +391,7 @@ register(route: WebRoute): () => void {
 
 handler 就是原生 `IncomingMessage / ServerResponse`，**没有** `WebRequest/WebResponse` 抽象；`ctx.webServer.route(...)` 之类不存在。另有 `registerUpgrade`（WebSocket）、`registerFallback`（SPA 兜底，唯一）、`tapIndex`、`renderIndex`（`:181-218, 356-361`）。
 
-> 服务所在包是 `@deepseek-ai/dsh-host-webserver`。**`dsh-webide` 这个包不存在**（`raw/` 的 `dsh webide HTTP route` 说法作废，不影响用法）。
+> 服务所在包是 `@deepseek-ai/dsh-host-webserver`。**`dsh-webide` 这个包不存在**（别去 `dsh webide HTTP route` 之类的名字下找入口，不影响用法）。
 
 ---
 
@@ -411,7 +411,7 @@ handler 就是原生 `IncomingMessage / ServerResponse`，**没有** `WebRequest
 'agent/disposed'(this: Scoped<Agent>, payload: { agent: Agent }): void
 ```
 
-| 性质 | 0.2 现实 | 证据 |
+| 性质 | 0.2 实际 | 证据 |
 |---|---|---|
 | 载荷 | **`{ agent, source, signal? }` 对象**，不是 agent 实例 | 同上 |
 | throw | **会 veto agent 创建**（serial） | `packages/core/agent/src/index.ts:549-554` |
@@ -420,7 +420,7 @@ handler 就是原生 `IncomingMessage / ServerResponse`，**没有** `WebRequest
 | disposed | `emit`，**异常被吞**，不 veto | `agent/src/index.ts:512-525` |
 | scope | scope-filtered（agent-scoped 监听器只收自己） | 同上 |
 
-> ⚠️ **最危险的静默 bug**：`raw/` 写的 `ctx.on('agent/created', agent => { … agent.id … })` 在 0.2 会拿到 `{agent,source}` 对象，`agent.id` = `undefined` → workspace 索引全部落空 → guard 走「无 agent 归属，只查全局」分支 → **不报错，只是按工作区配置全部失效**。必须解构，并在 `04` §7 的 T-H13 锁死。
+> ⚠️ **最危险的静默 bug**：若按直觉写成 `ctx.on('agent/created', agent => { … agent.id … })`，0.2 传进来的是 `{agent,source}` 对象，`agent.id` = `undefined` → workspace 索引全部落空 → guard 走「无 agent 归属，只查全局」分支 → **不报错，只是按工作区配置全部失效**。必须解构，并在 `04` §7 的 T-H13 锁死。
 
 ### B2 有没有更合适的挂载点？—— ❌ 没有，`agent/created` 仍是唯一正确点
 
@@ -434,7 +434,7 @@ handler 就是原生 `IncomingMessage / ServerResponse`，**没有** `WebRequest
 
 register/dispose 同步失效 → 下一个 pre-step `snapshot` cache key 含 revision → miss → `collectFresh` → `filter(isModelInvocable)` → digest 变化 → 重发 replacement catalog。`MAX_COLLECT_ATTEMPTS = 2`、`snapshot.complete` 优雅跳过（`:23`、`:519-549`、`:643-645`、`tool-skill/src/index.ts:225`）。
 
-且 0.2 把 catalog 状态改由会话历史推导（`:279-311`、`:328-335`），比 0.1.2 更抗 compaction / 重放。
+而 catalog 状态由**会话历史**推导（`:279-311`、`:328-335`），比在内存里自己维护一份状态更抗 compaction / 重放。
 
 ---
 
@@ -477,7 +477,7 @@ export function childSessionMeta(parent: Agent, childDepth: number, isSeeded: bo
 
 ---
 
-## 4. 0.2 的新机制（先确认「不是替代品」，别误判）
+## 4. 三个容易被误判成「替代品」的机制
 
 ### D1 `packages/guard` 是什么 —— ⛔ 不是权限体系
 
@@ -538,7 +538,7 @@ const refreshBlockedMasks = (): void => {
 
 ### 4.5 ⛔ 已移出范围：命令 与 Agent
 
-原始设计有「工具 / 技能 / 命令 / Agent」四个 tab。**本方案只做工具与技能**。两条移出理由都已在 0.2 源码里确认，结论存档于此，**不进入实现**（配置、UI、文案、测试中一律不出现）。
+本方案的评估范围是「工具 / 技能 / 命令 / Agent」四个维度，**落地只做工具与技能**。另两类的移出理由都已在 0.2 源码里确认，结论存档于此，**不进入实现**（配置、UI、文案、测试中一律不出现）。
 
 #### 4.5.1 命令：0.2 没有门禁挂载点
 
@@ -557,29 +557,29 @@ list(agent: Agent): readonly CommandDescriptor[]
 
 #### 4.5.2 Agent：`named_subagent` 工具在 0.2 已不存在
 
-原始方案的 guard 有第三个分支：`exec.name === 'named_subagent'` + `exec.arguments.agent`。
+若 guard 想加第三个分支 `exec.name === 'named_subagent'` + `exec.arguments.agent`——0.2 里没有对应物。
 
 - 全仓 grep `named_subagent` **零命中**。
 - 0.2 的委托工具是 `subagent`（`packages/subagent/tool-subagent/src/index.ts:2`，工具名 `config.toolName ?? 'subagent'`），且**每个 `ctx.subagents` provider 一个独立插件实例**；模型侧参数里的 `provider` 是 **LLM** provider，不是 subagent provider。
 - → 模型根本无法选择 subagent provider，「按 agent 名字禁用」在 0.2 无对应物。想禁「派子代理」只能在**工具**维度禁 `subagent` / `subagent_fork` / `list_agents` —— 那属于工具 tab 的天然能力，不需要单独的 Agent tab。
-- `raw/` 里 `dsh-agent-center` 的 `/…/catalog` HTTP 依赖也随之删除，它本来就是 0.1.2 时代的外部插件。
+- `dsh-agent-center` 的 `/…/catalog` HTTP 依赖也一并移出范围，它是一个外部插件，与本包无关。
 
 #### 4.5.3 对本方案的净影响
 
 | 项 | 影响 |
 |---|---|
-| 配置 | 只有 `tools` / `skills` 两个子树（原设计四个） |
-| 状态 | 只有 `gate` / `skillGate` 两份（原设计四份） |
+| 配置 | 只有 `tools` / `skills` 两个子树（不含命令与 Agent） |
+| 状态 | 只有 `gate` / `skillGate` 两份（不含命令门禁） |
 | policy | 只有 `buildEffective` 一个函数（tool 与 skill 同构复用） |
 | catalog HTTP | 只有 `{ ns, tools, skills, workspaces }`（无 `commands` / `agentPresets`） |
-| 前端 | 2 个 tab（原设计 4 个）；无只读态、无 `readOnly.*` 文案 |
+| 前端 | 2 个 tab；无只读态、无 `readOnly.*` 文案 |
 | 门禁效力 | **不受影响**：工具与技能两个通道本来就是完整实现的 |
 
 ---
 
 ## 5. Client 侧
 
-### E1 `settings.section` —— ✅ 未改名，未换 kind
+### E1 `settings.section` —— ✅ 名称与 `kind` 都稳定
 
 ```ts
 // packages/client/ui-settings/src/client/contract/slots.ts:57
@@ -603,9 +603,9 @@ export interface SettingsSectionOwnerProps { close: () => void }
 export type SlotLabel = string | (() => string)
 ```
 
-`label` **不是** `LocalizedText`（那个只用于 `package.json` 元信息）。`label: () => t('nav')` **完全正确，可照抄**。
+`label` **不是** `LocalizedText`（那个只用于 `package.json` 元信息）。`label: () => t('nav')` **完全正确，可直接采用**。
 
-### E3 `icon` 字段 —— ❌ 仍然没有，`raw/a.md` §10 的 hack **必须保留**
+### E3 `icon` 字段 —— ❌ 仍然没有，DOM 侧 hack **必须保留**
 
 ```tsx
 // packages/client/ui-settings-general/src/client/SettingsRoot.tsx:31-39
@@ -642,7 +642,7 @@ export type ComposedProps<K, EntryKey, S, H, I, M, N> =
 | `PropsStore<H>` | 声明 `store` 才有 `{ useStore, actions }` |
 | `InjectFace<I>` | `inject` 工厂返回值（`hooks` 成员变成 `use<Name>`） |
 
-→ `raw/a.md` §4 的 `inject: () => ({ store, locale: ctx.locale, t })` **里 `locale` 和 `t` 都必须删掉**：`t` 与 `PropsLocale` 撞名；`locale`（整个 service 对象）违反「组件永不接触 ctx」（`packages/client/AGENTS.md:41`）。
+→ 若按直觉写 `inject: () => ({ store, locale: ctx.locale, t })`，**其中 `locale` 和 `t` 都必须删掉**：`t` 与 `PropsLocale` 撞名；`locale`（整个 service 对象）违反「组件永不接触 ctx」（`packages/client/AGENTS.md:41`）。
 
 ### E5 `inject` 工厂签名 —— ⚠️ 现在带参数
 
@@ -671,7 +671,7 @@ bind<N>(ns: N): TranslateNS<N>
 
 `subscribe` / `getSnapshot` 仍在，但**不该由业务组件调用**：渲染器已为每个 outlet 订阅 locale revision（`packages/client/ui-renderer/src/client/scoped-slots.tsx:344-358`），且 `t` 的函数引用**每个 revision 换新**（`:292-316` 注释明确「freshness rides identity」），`React.memo` 子组件也会正常重渲染。
 
-→ `raw/a.md` §4 的 `locale.subscribe(() => setLocaleTick(...))` **必须删除**。
+→ 组件内 `locale.subscribe(() => setLocaleTick(...))` 这种自订阅 **必须删除**。
 
 ### E7 `ctx.remote.settings` —— ✅ 方法名与信封都没变
 
@@ -700,7 +700,7 @@ bind<N>(ns: N): TranslateNS<N>
 
 → `ctx.remote.$on('settings/document-updated', cb)` **仍可用**（插件不可扩充白名单，但这个已在里面）。**载荷多了 `revision`**，建议用它去重，避免自己刚写完又触发一次全量重载。
 
-### E8 client 三层 inject 声明 —— ⚠️ 原方案混用了
+### E8 client 三层 inject 声明 —— ⚠️ 三层容易混用
 
 | 声明 | 单位 | 用途 |
 |---|---|---|
@@ -722,7 +722,7 @@ export const inject = ['slots', 'locale', 'remote', 'remote.settings']
 ] } }
 ```
 
-- **`@deepseek-ai/dsh-client-runtime` 在 0.2.0-rc.2 全仓不存在** → 从 `dsh.client.inject` 删除（`raw/dsh-tool-ability.md` §1.2 列了它）。
+- **`@deepseek-ai/dsh-client-runtime` 在 0.2.0-rc.2 全仓不存在** → 从 `dsh.client.inject` 删除。
 - **不要**列 `ui-primitives` / `ui-slots` / `client-store` / `react` —— 它们是基线 external，`packages/client/AGENTS.md:78` 明确要求不要重复声明。
 - `dsh.client.inject` 只列**被 `import type` 引用**的包名。
 
@@ -763,7 +763,7 @@ size?: 'md' | 'sm'      // md=H36/R12/font14；sm=H28/R8/font12
 
 ### E12 现成原语替换裁决 —— ⚠️ 大部分**不能**替换
 
-| 原自研件 | 可用的官方原语 | 裁决 |
+| 自研件 | 可用的官方原语 | 裁决 |
 |---|---|---|
 | tab 条（下划线 + 13px） | `SegmentedControl` / `SegmentedTabs` | ❌ 是「分段胶囊 + 滑动指示器」，视觉完全不同 |
 | 药丸按钮（H28/R6/0.5px 描边） | `Pill`（H24/R999/无边框） | ❌ 完全不同 |
@@ -779,11 +779,11 @@ size?: 'md' | 'sm'      // md=H36/R12/font14；sm=H28/R8/font12
 
 **官方原语里没有 `SearchInput`**（全仓 `packages/client` 零命中），且 `README.md:83` 明确「need is genuinely specific 时自己写组件是允许的」。→ 搜索框、药丸、tab 条、zone 头、徽标**保持自研**。
 
-**内联 SVG**：`raw/a.md` §5.10 的 caret 是**填充路径**，与 0.2 的 outline chevron 形状不同 → caret / chevron **保留内联 SVG**；「选中对勾」可换 `IconCheckOutlineRegular`（`Menu.tsx:5,477` 同款，14px）。
+**内联 SVG**：本方案的 caret 是**填充路径**，与 0.2 的 outline chevron 形状不同 → caret / chevron **保留内联 SVG**；「选中对勾」可换 `IconCheckOutlineRegular`（`Menu.tsx:5,477` 同款，14px）。
 
 ### E13 `Menu` 复刻下拉的四个视觉差异
 
-| 维度 | 原 `.dwa-popover` | 0.2 `Menu` |
+| 维度 | 本方案自绘浮层 `.dwa-popover` | 0.2 `Menu` |
 |---|---|---|
 | 外圆角 | 12px | **16px**（`MenuSurface.module.css:3` `--dsw-radius-lg`） |
 | 描边 | `0.5px solid border-l4` + elevation | `border:0`，描边在阴影里（stroke 重绑 `border-l1`，`Menu.module.css:8-25`） |
@@ -808,9 +808,9 @@ export type PropsStore<H> = H extends StoreHandle<infer T, infer A>
 
 官方最贴近本需求的范式：`ui-agent-preset/src/client/index.ts:212-230`（`hooks` + 命令回调 + `settings.section` 注册）。
 
-### E15 CSS 交付 —— ❌ 必须换 CSS Modules
+### E15 CSS 交付 —— ✅ 用「文本常量 + `data-plugin` 标签」这条路
 
-共享 tsdown 预设**已内建**三种形态（`packages/client/tsdown.client.ts`）：
+共享 tsdown 预设内建了三种形态（`packages/client/tsdown.client.ts`），**本包不用它们**（本包的构建是 esbuild，不跑 lightningcss / CSS Modules）：
 
 | 形态 | 产物 | 位置 |
 |---|---|---|
@@ -818,13 +818,16 @@ export type PropsStore<H> = H extends StoreHandle<infer T, infer A>
 | `*.css?inline` | 默认导出编译后文本，生命周期交给 `ctx.effect` | `:572-587` |
 | 普通 `*.css` | 同 `.module.css` 的注入路径（无类名映射） | `:588-602` |
 
-模块系统在卸载/HMR 时按 `data-plugin` 回收 `<style>`（`modules/src/client/system.ts:454-459`、`entry-lifecycle.ts:19-27`）。→ **绝不在组件 render 里 append `<style>`**。
+**本包采用的等价做法**：把 CSS 写成 TS 字符串常量（`src/client/styles.ts`），在 plugin `apply` 里用 `ctx.effect`
+注入一个 `data-plugin="@meiyukichan/dsh-magica-rune"` 的 `<style>`，再由 disposer 移除。
+这与上面三种形态共享同一条回收契约——模块系统在卸载/HMR 时按 `data-plugin` 回收 `<style>`
+（`modules/src/client/system.ts:454-459`、`entry-lifecycle.ts:19-27`）。→ **绝不在组件 render 里 append `<style>`**。
 
 ### E16 主题 token —— ⚠️ 全部存在，但有 4 处语义/数值要改
 
 逐个核对见 `03-client-ability-ui.zh.md` §6。四处**必须**改：
 
-| 原写法 | 问题 | 改为 |
+| 直觉写法 | 问题 | 正确做法 |
 |---|---|---|
 | `--dsw-alias-brand-primary` 当品牌蓝（focus 边框 / 选中文字 / 分类色） | 0.2 把它绑到**近黑（浅）/ 近白（深）**（`design-platform.css:192`/`:310`） | `--dsw-alias-state-business-primary` |
 | 批量勾选的 `accent-color: brand-primary` | 语义同上，但**这里要保持** | 保持 `--dsw-alias-brand-primary`（官方 `Checkbox.module.css:16` 同款） |
@@ -835,20 +838,20 @@ export type PropsStore<H> = H extends StoreHandle<infer T, infer A>
 
 ### E17 设置面板几何 —— ✅ 数字全部成立
 
-面板 **800px** / 高 `min(800px, 100vh - 2*max(24px, --dsh-frame-overlay-top))` / 圆角 **28px**（`raw/a.md` 写 32 ❌）/ 导航列 **188px** / `.options` padding `0 24px 24px` / header 54px。
-→ **内容列宽 = 800 − 188 − 48 = 564px** ✅；`max-width: 760px` 确实永不生效，照抄即可。
+面板 **800px** / 高 `min(800px, 100vh - 2*max(24px, --dsh-frame-overlay-top))` / 圆角 **28px**（不是 32 ❌）/ 导航列 **188px** / `.options` padding `0 24px 24px` / header 54px。
+→ **内容列宽 = 800 − 188 − 48 = 564px** ✅；`max-width: 760px` 确实永不生效，直接沿用即可。
 
 ### E18 tab 条 CSS —— ✅ 逐值一致
 
 `gap:22px` / `13px` / `line-height:20px` / `padding:7px 1px 9px` / `border-bottom:0.5px` / 下划线 `height:2px` + `border-radius:2px 2px 0 0` + `bottom:-1px` / `align-items:flex-end` / `margin-top:2px` / 静息 `label-tertiary` / hover+激活 `label-primary` / `data-active="true"`。
 
-两处增量：0.2 让 `:focus-visible::after` **也画下划线**；`focus` 环用 `var(--dsw-focus-ring-width)` + `var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary))`（`PluginsSettingsSection.module.css:48-65`）。原方案的硬编码 `2px solid` 会被 `focus-ring-styles.client.spec.ts:28-31` 拒绝，也无法被指针抑制（`focus.css:18-21`）。
+两处增量：0.2 让 `:focus-visible::after` **也画下划线**；`focus` 环用 `var(--dsw-focus-ring-width)` + `var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary))`（`PluginsSettingsSection.module.css:48-65`）。硬编码的 `2px solid` 会被 `focus-ring-styles.client.spec.ts:28-31` 拒绝，也无法被指针抑制（`focus.css:18-21`）。
 
 ---
 
 ## 6. 包工程
 
-### F1 `dsh.client` 字段集 —— ✅ 但原方案的包名有幽灵
+### F1 `dsh.client` 字段集 —— ✅ 但字段表里有个常被误写的幽灵包名
 
 ```ts
 // packages/util/package-manifest/src/types.ts:80-94
@@ -870,7 +873,7 @@ external?: string[]               // 模块表请求
 
 `./cordis.patch.yml` **不需要**导出（profile 走文件系统 join，`profile.ts:73-75`），但 `files` 必须包含它。
 
-### F4 peer 兼容 —— ❌ `raw/` 的版本范围「能过闸但零保护」
+### F4 peer 兼容 —— ❌ 宽松版本范围「能过闸但零保护」
 
 ```ts
 // packages/boot/app-boot/src/plugin-compatibility.ts:61-88
@@ -882,8 +885,8 @@ semver.satisfies(runtimeVersion, range, { includePrerelease: true })
 
 | range | 结果 |
 |---|---|
-| `>=0.1.2-rc.1` | **true（照样通过——零保护）** |
-| `^0.1.2-rc.1` | **false（被拦）** |
+| `>=` + 任意更低的下界（无上界，越过 minor 也不拦） | **true（照样通过——零保护）** |
+| `^` / `~` 把上界钉在早一个 minor（跨 minor 即被拦） | **false（被拦）** |
 | `>=0.2.0-rc.2` / `^0.2.0-rc.2` / `~0.2.0-rc.2` | true |
 | `workspace:*` | 被替换为 runtime，恒过 |
 
@@ -953,15 +956,15 @@ export const PLATFORM_MODULES = [
 
 `/plugins/<包名>/client.js.map` **不是可达路由**，它只是 indexed map 里 `sources` 的解析基准（`client/modules/src/index.ts:353-368`）。真实路由是 prefix `/plugins`（`:649`），只命中 combo（`/plugins/??<pkg>/client.js[.map]&rev=`，`:227-235`）与 chunk（`/plugins/<pkg>/client.<name>.js[.map]?rev=`，`:248-251,1086-1094`），其它一律 404（`:1146-1148`）。
 
-### F12 `./locale/*.json` + icon —— ⚠️ `raw/` 漏了
+### F12 `./locale/*.json` + icon —— ⚠️ 两个必需项容易漏
 
 要在 Plugins 页显示中文名/描述，必须：`exports` 加 `./locale/*.json`，**且必须存在 `locale/en.json`**（否则一个语言都不读，`app-boot/src/package-meta.ts:101-122,151`）。`icon`：相对路径 + svg/png/jpeg/webp + **≤256 KiB** + realpath 必须在包目录内（`package-meta.ts:14-39`）。
 
-### F13 「参考包」要换
+### F13 参考包怎么挑
 
-- `dsh-magica-spellbook` 是**库**（无 `dsh` 字段；client 产物是 **ESM**；`exports["./client"]` 用了 `import` 键——一旦补 `dsh.client` 就会抛 F3 的错）。只能抄它的 externals 清单。
-- 真正的 0.2 插件范式在本仓：**`dsh-magica-spellbook/.e2e/plugin/`**（`dsh.bundle.patch` + `dsh.client{platform,inject}` + `exports["./client"]` 字符串 + 3 行 insert patch + 闭包工厂 client.js）。实测只 require 3 个基线模块。
-- `dsh-magica-teamwork` 是 host-only CLI（无 `dsh` / 无 `./client` / 无 patch），只能证明「单文件 `lib/` + 独立 `.d.ts`」的构建习惯。
+- **库 ≠ 插件**：纯库包没有 `dsh` 字段、client 产物是 **ESM**、`exports["./client"]` 用 `import` 键——一旦给它补 `dsh.client` 就会抛 F3 的错。这类包只能借它的 externals 清单。
+- 0.2 插件的最小范式就是本包的产物形态：**`dsh.bundle.patch`** + `dsh.client{platform,inject}` + `exports["./client"]` 字符串 + 3 行 insert patch + 闭包工厂 `lib/client.js`（由本包 `scripts/build.mjs` 产出）。实测只 require 3 个基线模块。
+- host-only CLI 包（无 `dsh` / 无 `./client` / 无 patch）只能借它「单文件 `lib/` + 独立 `.d.ts`」的构建习惯，不能当插件范式。
 
 ---
 
@@ -979,7 +982,7 @@ export const PLATFORM_MODULES = [
 
 ## 8. 结论
 
-- **架构骨架成立**：guard（强制）+ restrict（省 token）+ assemble 过滤 + skill 遮蔽 + agent/created 解析 + webServer 目录接口，全部挂载点都在，语义基本不变。
-- **实现层要换的比 `raw/` 预想的多**：配置层是**整体换掉**（不是改签名），`agent/created` 载荷、`system-prompt/assemble` 签名、`tools.schemas` 覆盖面、`tools/change` 自递归、skill 遮蔽落层这五处都会让照抄的代码**静默出错**而不是编译报错。
+- **架构骨架成立**：guard（强制）+ restrict（省 token）+ assemble 过滤 + skill 遮蔽 + agent/created 解析 + webServer 目录接口，全部挂载点都在，语义与 0.2.0-rc.2 源码一致。
+- **实现层要守住的约束比看上去多**：配置层是**整体新写**（不是改签名），`agent/created` 载荷、`system-prompt/assemble` 签名、`tools.schemas` 覆盖面、`tools/change` 自递归、skill 遮蔽落层这五处都会让按直觉写的代码**静默出错**而不是编译报错。
 - **命令与 Agent 移出范围**（§4.5），对工具 / 技能两个通道的效力**零影响**。
 - **前端视觉只需 4 处映射**（brand-primary / border-l4 深色 / 5-6px 圆角 / focus 环），其余 **一字不改**；另一个无法还原的是全站超椭圆圆角。

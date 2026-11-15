@@ -1,6 +1,6 @@
 # 03 · Client 侧：「能力管理」设置页详细设计（视觉保真的唯一依据）
 
-> **本文的第一目标是把 `raw/a.md` + `raw/b.md` 的页面原样搬到 0.2**。凡是 CSS 值，一律照抄；只有「0.2 已不存在的值」按 §6 的映射表替换，替换项逐条给理由。
+> **本文是「能力管理」设置页视觉与交互的唯一依据**：页面结构、CSS 值、圆角、字号与间距全部给在本章各小节内，不依赖任何外部视觉源。0.2 中不存在的 token 名与字面 px 按 §5、§6 的映射表替换，替换项逐条给理由。
 >
 > 路径约定同 `01`。
 
@@ -220,9 +220,9 @@ export class AbilityController {
 }
 ```
 
-**交互观感与 `raw` 一致**：点完立刻变色（乐观更新），失败再回滚；没有 loading 遮罩、没有按钮禁用、没有 toast。
+**交互观感目标**：点完立刻变色（乐观更新），失败再回滚；没有 loading 遮罩、没有按钮禁用、没有 toast。
 
-### 2.3 toggle 语义（**与 `raw` 完全一致**）
+### 2.3 toggle 语义（**本包唯一语义定义**）
 
 ```
 scope = global:
@@ -250,7 +250,7 @@ workspace                                  → ws.disabled.includes(name) ? 'dis
 
 ---
 
-## 3. 组件结构（**与 `raw` 完全一致**）
+## 3. 组件结构（**逐层固定，不增不减**）
 
 ```
 AbilitySection                       ← 根：标题 + tabs + 当前 tab 内容
@@ -262,9 +262,9 @@ AbilitySection                       ← 根：标题 + tabs + 当前 tab 内容
       每个 zone 的标题行右侧可挂 WorkspaceDropdown（仅「工作区」zone、且存在工作区时）
 ```
 
-> **只有 2 个 tab**（工具 / 技能）。原设计的 `CommandsTab` / `AgentsTab` 已移出范围（`01` §4.5），不存在、也不留灰掉的占位。
+> **只有 2 个 tab**（工具 / 技能）。`CommandsTab` / `AgentsTab` 不在范围内（`01` §4.5），既不存在、也不留灰掉的占位。
 
-两个 `List` 是**同一套样式的两份拷贝**（`raw` §3.1 的原始决定，保留；`b.md` §11.3 把「复制粘贴」列为已知瑕疵，可在实现时抽成一个参数化组件，但**视觉输出必须一致**）。
+两个 `List` 是**同一套样式的两份拷贝**（这是有意的设计决定：工具区与技能区的视觉输出必须逐像素一致；实现时可抽成一个参数化组件，但**视觉输出必须一致**）。
 
 props 类型：
 
@@ -316,7 +316,7 @@ export function AbilitySection({ t, useStore, actions, useAbility, load, toggle 
 `{ label, shortcutKeys, side='right', align='center', delayMs=0, focusDelayMs=0, gap=8, disabled=false, portal=false, maxWidth, openOnClick=false, children }`，`side: 'right'|'bottom'|'top'`。**`side/maxWidth/delayMs` 可一字不改**。
 > 加 `portal`：`.toolScroll{overflow-y:auto; max-height:420px}` 会裁掉留在锚点 stacking context 里的气泡。
 
-`Modal` 0.2 签名（`Modal.tsx:23-26`）：**非 headless 时 `closeLabel: string` 必填**（`raw` 漏传，`b.md` §3.2 的警告依然有效）。新增 `description?: string`。
+`Modal` 0.2 签名（`Modal.tsx:23-26`）：**非 headless 时 `closeLabel: string` 必填**（漏传会直接让类型检查失败）。新增 `description?: string`。
 
 ```tsx
 {pending !== null && (
@@ -352,7 +352,7 @@ export function AbilitySection({ t, useStore, actions, useAbility, load, toggle 
 | zone 折叠头（12px 可旋转 caret + h3 13px） | `DisclosureRow` 是 24px 定高 + 两个 chevron 图标 + 不同颜色层级 |
 | 分类色点（**任意**分类色 / 8px） | `StateDot` 只有 4 个语义态 |
 | 「内置禁用」徽标（font10/R5→R4/实心 warn + 反相文字） | `Tag` 的 `warning` 是 12% 淡底 + warn 文字，视觉相反 |
-| 三个内联 SVG（caret / chevron / check） | caret 是**填充路径**，与 0.2 outline chevron 形状不同 → 保留原 SVG；只有 check 可用 `IconCheckOutlineRegular`（14px） |
+| 三个内联 SVG（caret / chevron / check） | caret 是**填充路径**，与 0.2 outline chevron 形状不同 → 保留自绘 SVG（§5.9）；只有 check 可用 `IconCheckOutlineRegular`（14px） |
 
 ### 4.3 必须替换的自研件：工作区下拉 → `Menu`
 
@@ -379,14 +379,14 @@ import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 />
 ```
 
-- **chevron 继续自绘**（`Menu` 只渲染 `anchor`，不提供触发器内部图标），原方案「按钮右侧绝对定位 chevron」**可原样保留**。
+- **chevron 继续自绘**（`Menu` 只渲染 `anchor`，不提供触发器内部图标），§5.7 `.chevron` 里「按钮右侧绝对定位 chevron」的写法**继续沿用**。
 - 选中对勾由 `selection="check"`（默认）提供，是 `IconCheckOutlineRegular` 14px，颜色 `--dsw-alias-label-primary`（不是 brand-primary）。
 - `.wsMenu` **只能**写 `min-width` / `max-width`，**不能**写 `background` / `backdrop-filter`（`ui-theme/tests/menu-surfaces.client.spec.ts:73-80` 会拒）。
 - **无自动上下翻转**：0.2 的 `Menu` 只做视口夹取（`Menu.tsx:276`）。若要翻转，自己算 `side`。
 
 **视觉差异（必须记录，无法避免）**：
 
-| 维度 | `raw` 自绘 | 0.2 `Menu` |
+| 维度 | 常见误用（自绘浮层） | 正确做法（0.2 `Menu`） |
 |---|---|---|
 | 外圆角 | 12px | 16px（`--dsw-radius-lg`，`MenuSurface.module.css:3`） |
 | 描边 | `0.5px solid border-l4` + elevation | `border: 0`，描边在阴影里（stroke 重绑 `border-l1`） |
@@ -398,16 +398,15 @@ import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 
 ---
 
-## 5. CSS 全量清单（照抄 + 4 处映射）
+## 5. CSS 全量清单（数值表 + 4 处映射）
 
-交付方式：**CSS Modules**（`src/client/AbilitySection.module.css`），构建期由共享预设的 lightningcss 插件编译并在**工厂执行期**注入带 `data-plugin` 的 `<style>`。类名不再需要 `dwa-` 前缀（模块作用域已隔离），但**保持相同的层级与命名习惯**以便与 `raw` 对照。
+交付方式：**TS 字符串 + 运行期注入 `<style data-plugin>`**（`src/client/styles.ts` 的 `installStyles()`）。
+这条构建链（esbuild）不跑 CSS Modules、也不跑 lightningcss，所以样式以纯文本常量组织：
+`cls` 映射表给短名加 `rune-` 前缀（`.zone` → `.rune-zone`、`.zoneToggle` → `.rune-zone-toggle`），
+注入的标签带 `data-plugin="@meiyukichan/dsh-magica-rune"`，模块系统在插件卸载 / HMR 时按插件回收。
 
-```ts
-// 每个用 CSS Modules 的包都要有 src/css-modules.d.ts（照抄 ui-theme/src/css-modules.d.ts:1-11）
-declare module '*.module.css' { const classes: Record<string, string>; export default classes }
-declare module '*.css'
-declare module '*.css?inline' { const css: string; export default css }
-```
+> 本节所有选择器都写成**短名**，只为和 §5.1~§5.9 的小节一一对应、便于按 §号定位；
+> 落地时统一加 `rune-` 前缀，数值与声明一字不改。
 
 ### 5.1 骨架与标题（✅ 一字不改）
 
@@ -442,7 +441,7 @@ declare module '*.css?inline' { const css: string; export default css }
   border-radius: 2px 2px 0 0; background: var(--dsw-alias-label-primary); content: '';
 }
 
-/* ⚠️ 唯一必须替换的一处：focus 环改用 token，不再硬编码 2px */
+/* ⚠️ 唯一必须按 token 写的一处：focus 环用 --dsw-focus-ring-*，不硬编码 2px */
 .tab:focus-visible {
   outline: var(--dsw-focus-ring-width)
            solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -579,7 +578,7 @@ declare module '*.css?inline' { const css: string; export default css }
 
 > 空态的 `dashed` 记号 0.2 规范要求保持 **1px**（`docs/web-styling.zh.md:29`）；实线发丝线仍 0.5px。
 
-### 5.9 三个内联 SVG（**直接抄 `raw/a.md`**）
+### 5.9 三个内联 SVG（**路径数据即最终值**）
 
 折叠箭头（`viewBox 0 0 14 14`，展开朝下，折叠时 CSS `rotate(-90deg)`）：
 
@@ -609,15 +608,15 @@ declare module '*.css?inline' { const css: string; export default css }
 
 `label-primary` / `-secondary` / `-tertiary` / `-caption` / `-dimmed` / `-primary-foreground`、`bg-base` / `bg-layer-1` / `-2` / `-3` / `bg-module-platform`、`border-l1`~`l4`、`interactive-bg-hover` / `-active`、`state-business-primary` / `state-warn-primary` / `state-success-primary` / `state-error-primary` / `state-idle-primary`、`brand-primary`、`elevation-panel` / `-prominent` / `-soft`、`menu-surface-fill`、`--ds-font-family-code`、`--dsw-focus-ring-width` / `--dsw-focus-ring-color`、`--dsw-radius-xs`(4) / `-sm`(8) / `-md`(12) / `-lg`(16) / `-xl`(20) / `-panel`(28)。
 
-`b.md` §11.2 的实测对照全部成立（`bg-module-platform` = `rgb(245,246,247)`/`rgb(53,54,56)`；`bg-layer-1` = 白/`rgb(35,35,36)`；`border-l2` = `rgba(0,0,0,.1)`/`rgba(255,255,255,.12)`；面板底 `bg-layer-2` = 白/`rgb(44,44,46)`）。
+本节实测的浅/深值（`bg-module-platform` = `rgb(245,246,247)`/`rgb(53,54,56)`；`bg-layer-1` = 白/`rgb(35,35,36)`；`border-l2` = `rgba(0,0,0,.1)`/`rgba(255,255,255,.12)`；面板底 `bg-layer-2` = 白/`rgb(44,44,46)`）与 `design-platform.css` 一致。
 
 ### 6.2 四处必须改
 
-| # | `raw` 写法 | 0.2 现实 | 改为 |
+| # | 常见误用 | 0.2 实际 | 改为 |
 |---|---|---|---|
 | 1 | `--dsw-alias-brand-primary` 当「品牌蓝」用：搜索/下拉 focus 边框、选中项文字、`CAT_PALETTE` 第 5 色 | 0.2 把它绑成**近黑（浅）/ 近白（深）**（`design-platform.css:192` / `:310`），官方文档明确（`ui-dockkit/README.zh.md:78`） | **`--dsw-alias-state-business-primary`**（浅 `rgb(65,118,230)` / 深 `rgb(122,170,255)`）。若要更强的蓝用 `--dsw-alias-brand-primary-new-colorprimary-new-color`（`:191` = `rgb(65,118,230)`） |
 | 2 | 批量勾选 `accent-color: brand-primary` | 同上——但**这里要保持** | **保持 `--dsw-alias-brand-primary`**（0.2 官方 `Checkbox.module.css:16` 就是黑白勾选，这是设计） |
-| 3 | `border-l4` 深色按 `.16` 理解（`b.md` §11.2 也是 `.16`） | 深色是 **`rgba(255,255,255,.2)`**（`:307`） | 用 token，**不要写死 .16** |
+| 3 | `border-l4` 深色按 `.16` 理解 | 深色是 **`rgba(255,255,255,.2)`**（`:307`） | 用 token，**不要写死 .16** |
 | 4 | `border-radius: 5px`（徽标）/ `6px`（药丸、搜索框） | 0.2 只有 4/8/12/16/20/28，且 lint 拒绝 `>4 且 <99` 的字面 px（`ui-theme/tests/radius-styles.client.spec.ts:22-28`） | 5px → `--dsw-radius-xs`(4)；6px → `--dsw-radius-sm`(8) |
 
 另外两处规范要求：
@@ -625,13 +624,13 @@ declare module '*.css?inline' { const css: string; export default css }
 - `border-radius: 50%`（分类色点）**必须同规则补 `corner-shape: round`**，否则 0.2 的 `superellipse(1.5)` 会把它画成小 squircle（spec 强制：`corner-shape-styles.client.spec.ts:83`）。
 - 浮层若保留自绘（不推荐）：`border: 0` + `box-shadow: var(--dsw-elevation-prominent)`（描边由阴影第一层提供，可重绑 `--dsw-elevation-stroke-color`）。`border + elevation` 并存会被 `elevation-styles.client.spec.ts:149-166` 拒绝。
 
-### 6.3 无法还原的一处（产品决策）
+### 6.3 无法规避的平台级差异（产品决策）
 
-0.2 对全站应用 `corner-shape: superellipse(1.5)`（`ui-theme/src/styles/corner-shape.css:16-25`），所有圆角都是**超椭圆**而非圆弧。规范禁止组件级 opt-out（`docs/ui-radius.zh.md:52`「不要添加组件专用的平滑规则」）。→ **视觉上会比 0.1.2 略「方」一点**，这是平台级的，插件无法规避，需在验收清单里注明。
+0.2 对全站应用 `corner-shape: superellipse(1.5)`（`ui-theme/src/styles/corner-shape.css:16-25`），所有圆角都是**超椭圆**而非圆弧。规范禁止组件级 opt-out（`docs/ui-radius.zh.md:52`「不要添加组件专用的平滑规则」）。→ **视觉上会比常规圆弧略「方」一点**，这是平台级的，插件无法规避，需在验收清单里注明。
 
 ---
 
-## 7. 分类、分组与配色算法（**照抄 `raw/a.md` §6，一行不改**）
+## 7. 分类、分组与配色算法（**本节常量与顺序即最终规格**）
 
 ### 7.1 工具分类（只给 `{name, description}`，无 category 字段，纯名字推断）
 
@@ -692,7 +691,7 @@ function catColor(cat: string): string {
 
 hash 只由分类名决定 → 同一分类在多次渲染/刷新间颜色稳定。
 
-> `b.md` §11.3 的已知瑕疵：`commandCatColor` / `agentCatColor` 用硬编码 `hsl(...)`，深色下对比度不足。**本次统一成 `CAT_PALETTE`**（修正该瑕疵，视觉在浅色下基本一致、深色下更正确）。
+> **反面写法**：按分类各自硬编码 `hsl(...)`（`commandCatColor` / `agentCatColor` 这种写法）在深色下对比度不足。**本包统一走 `CAT_PALETTE`**：浅色下视觉基本一致、深色下更正确。
 
 ### 7.4 隐藏项
 
@@ -706,11 +705,11 @@ hash 只由分类名决定 → 同一分类在多次渲染/刷新间颜色稳定
 
 ---
 
-## 8. 设置导航项的图标（**0.2 仍必须用 hack，必须保留**）
+## 8. 设置导航项的图标（**0.2 无 icon 字段，必须用 hack**）
 
 ### 8.1 为什么不能用官方字段
 
-0.2 的 `settings.section` 注册项**仍然没有 `icon`**；导航图标由 shell 按 id 硬编码，未知 id 回退齿轮：
+0.2 的 `settings.section` 注册项**没有 `icon`**；导航图标由 shell 按 id 硬编码，未知 id 回退齿轮：
 
 ```tsx
 // packages/client/ui-settings-general/src/client/SettingsRoot.tsx:31-39
@@ -726,17 +725,17 @@ function navIcon(id: string) {
 
 ### 8.2 与 0.2 DOM 的对应关系（已核对）
 
-| 0.1.2 假设 | 0.2 现实 | 结论 |
+| 设计假设 | 0.2 实际 | 结论 |
 |---|---|---|
-| 选择器 `[role="dialog"] nav button` | `panel[role="dialog"] > nav > button`（`SettingsRoot.tsx:70-89`） | ✅ 仍命中 |
-| button 第一个子节点是 shell 的 `<svg class="navIcon">` | 一致 | ✅ `[MARKER] > svg:first-child{display:none}` 仍成立 |
+| 选择器 `[role="dialog"] nav button` | `panel[role="dialog"] > nav > button`（`SettingsRoot.tsx:70-89`） | ✅ 命中 |
+| button 第一个子节点是 shell 的 `<svg class="navIcon">` | 一致 | ✅ `[MARKER] > svg:first-child{display:none}` 成立 |
 | 图标 18×18（SVG 自身属性） | 容器是 **16×16**（`size={16}` + `.navIcon{flex:none}`，`SettingsRoot.module.css:167-169`） | ⚠️ CSS 尺寸必须写 **16px** |
-| `characterData: true` 必要 | `label: () => t('nav')` 切语言返回新串，shell 靠 locale 重投影 | ✅ 仍必要 |
+| `characterData: true` 必要 | `label: () => t('nav')` 切语言返回新串，shell 靠 locale 重投影 | ✅ 必要 |
 
-### 8.3 全局样式表（用 `?inline` + `ctx.effect` 管生命周期）
+### 8.3 全局样式表（文本常量 + `ctx.effect` 管生命周期）
 
 ```ts
-// src/client/ability-nav.css —— 这是全局选择器，不能进 CSS Modules
+// src/client/nav-icon.ts —— 全局选择器，按 data-* 标记作用到设置导航项上
 const MARKER = 'data-dsh-ability-nav'
 
 export const NAV_CSS = `
@@ -750,7 +749,7 @@ export const NAV_CSS = `
 `
 ```
 
-`SLIDERS_SVG` 用 `raw/a.md` §10.2 的 data URI **原样**（`<` → `%3C`、`>` → `%3E`、属性用单引号、空格保留、不 base64）。
+`SLIDERS_SVG` 是本节自带的常量：`data:image/svg+xml` + `width='18' height='18' viewBox='18.28 18.54 55.67 53.96'`、`fill='black'`（`mask` 只用 alpha 通道，颜色由 `background: currentColor` 决定）、单条 `<path d>` 画扳手 + 螺丝刀。编码规则：**不 base64**，`<` → `%3C`、`>` → `%3E`、属性用单引号、空格保留。
 
 ```ts
 export function setupNavIcon(label: () => string): () => void {
@@ -781,7 +780,7 @@ export function setupNavIcon(label: () => string): () => void {
 }
 ```
 
-要点（`raw/a.md` §10.3 的四条理由全部仍然成立）：用 `mask` 而非 `<img>` 让颜色跟随 `currentColor`；用 `::before` + `data-*` 标记不碰 React 的 vDOM；用 `MutationObserver` 因为无声明式 icon 字段；**disposer 必须完整**（断 observer、摘标记、删 style）。
+要点（四条设计理由）：用 `mask` 而非 `<img>` 让颜色跟随 `currentColor`；用 `::before` + `data-*` 标记不碰 React 的 vDOM；用 `MutationObserver` 因为无声明式 icon 字段；**disposer 必须完整**（断 observer、摘标记、删 style）。
 
 ---
 
@@ -820,17 +819,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 | `disable.title` / `disable.desc` / `disable.confirm` / `disable.cancel` | 禁用内置工具 / 该工具为 DSH 内置工具，禁用后可能导致 DSH 对话功能无法正常使用，是否禁用 {name}？ / 禁用 / 取消 | … |
 | `loading` / `error` | 加载中… / 加载失败 | Loading… / Load failed |
 
-`raw/a.md` §9 列出的**未使用残留 key**（`tab.mcp`、`scope.hint`、`tool.add`、`tool.enabled`、`tool.restore`、`cat.search`、`cat.browser`、`save`、`cancel`、`comingSoon` …）**本次全部删除**——0.2 的类型化 `LocaleNamespaceMap` 要求键集精确，残留 key 会让字典与类型不一致。
+**不引入的残留 key**（`tab.mcp`、`scope.hint`、`tool.add`、`tool.enabled`、`tool.restore`、`cat.search`、`cat.browser`、`save`、`cancel`、`comingSoon` …）**一律不实现**——0.2 的类型化 `LocaleNamespaceMap` 要求键集精确，残留 key 会让字典与类型不一致。
 
 ---
 
-## 10. 逐条交互规格（`raw/a.md` §8 全保留 + 0.2 增量）
+## 10. 逐条交互规格（完整清单 + 0.2 增量）
 
 | # | 触发 | 行为 | 细节 |
 |---|---|---|---|
 | 1 | 点击 tab | 切本地 state，只换下半部分 | 无动画；`data-active="true"` + 2px 下划线 |
 | 2 | 键盘 Tab 到 tab | `:focus-visible` 环（offset 2px） | **环用 token**，且 0.2 基线在聚焦时**也画下划线** |
-| 2b | tab 上 ←/→/Home/End | roving tabIndex 走查 | 0.2 官方 tab 范式（`PluginsSettingsSection.tsx:61-97`），建议照抄 |
+| 2b | tab 上 ←/→/Home/End | roving tabIndex 走查 | 0.2 官方 tab 范式（`PluginsSettingsSection.tsx:61-97`），建议按此实现 |
 | 3 | 点击 zone 标题 | 折叠/展开 | `aria-expanded` 取反，caret `rotate(-90deg)` 过渡 `.15s`；**全局默认展开、工作区默认折叠** |
 | 4 | 搜索框输入 | 立即客户端过滤（无防抖、无请求） | `name.toLowerCase().includes(q) \|\| category.toLowerCase().includes(q)`；无结果 → 虚线空态 |
 | 5 | 点击药丸（enabled） | 禁用该能力 | **DSH 内置分类**（file/shell/image/agent/job/goal/ralph/cordis/misc/builtin）先弹二次确认 Modal，其它分类直接生效 |
@@ -847,21 +846,21 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 ---
 
-## 11. 验收清单（`raw/b.md` §13 全保留 + 0.2 增量）
+## 11. 验收清单（完整条目 + 0.2 增量）
 
-- [ ] 设置弹窗里出现「能力管理」，位置在「插件」之后、「Agent 预设」之前，**图标不是齿轮**（`order: 17` 在 0.2 仍精确）。
+- [ ] 设置弹窗里出现「能力管理」，位置在「插件」之后、「Agent 预设」之前，**图标不是齿轮**（`order: 17` 在 0.2 中精确生效）。
 - [ ] 标题 18/600、描述 13px 三级色、tab 间距 22px、激活项有 2px 下划线。**逐值比对 `PluginsSettingsSection.module.css`**（可直接在运行时的「插件」页旁对照）。
 - [ ] 全局 zone 默认展开、工作区 zone 默认折叠；caret 折叠时朝右。
 - [ ] 分组头：色点 8px + 11/600 名称 + `·N/M` + 右侧 14px 批量勾选（部分选中显示横杠）。
-- [ ] 药丸按钮高 28px、**圆角 8px**（原 6px，见 §6.2 #4）、发丝描边；启用态淡底 + **分类色**描边；工具名是等宽字体（`--ds-font-family-code`）。
+- [ ] 药丸按钮高 28px、**圆角 8px**（6px → 8px 的映射，见 §6.2 #4）、发丝描边；启用态淡底 + **分类色**描边；工具名是等宽字体（`--ds-font-family-code`）。
 - [ ] 搜索框 30px 高、**圆角 8px**、focus 变**蓝**边（`state-business-primary`，不是黑白 `brand-primary`）；输入即过滤，无结果给虚线空态（dashed **1px**）。
 - [ ] 列表区最高 420px 后内部滚动。
 - [ ] hover 药丸 1s 后出 tooltip（最大宽 500，位于下方，**`portal` 生效不被滚动容器裁剪**）。
 - [ ] 点 DSH 内置分类里的启用工具 → 弹确认框（**`closeLabel` 已传**）；取消不改状态，确认后立即变色。
-- [ ] **只有 2 个 tab**（工具 / 技能），没有命令 / Agent 的残留 tab、灰态占位或文案。
+- [ ] **只有 2 个 tab**（工具 / 技能），没有命令 / Agent 的多余 tab、灰态占位或文案。
 - [ ] 切换工作区后，工作区 zone 自动展开，且开关状态与 `·N/M` 计数立即按新工作区重算。
 - [ ] 深色主题下无「亮块/看不清」；切语言所有文案即时变化（**无任何自订阅代码**）。
 - [ ] 在工作区下拉里，浮层是半透明 + 模糊材质（`MenuSurface`），不是纯色块。
-- [ ] 分类色点在深色下仍是圆的（`corner-shape: round` 已补），不是 squircle。
+- [ ] 分类色点在深色下仍是圆的（`corner-shape: round` 必须写），不是 squircle。
 - [ ] 在别处改 profile 配置的 `dsh-magica-rune` 段，页面静默同步且搜索词不丢。
 - [ ] 已知差异确认：圆角曲率更「方」（超椭圆，平台级，见 §6.3）；下拉浮层圆角 16px、选中态无字重变化（`Menu` 自带，见 §4.3）。

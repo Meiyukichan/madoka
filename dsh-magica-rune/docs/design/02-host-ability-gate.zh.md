@@ -2,7 +2,7 @@
 
 > 目标：在**不触碰 agent loop** 的前提下，按「全局 + 工作区」两级配置，在运行时拦截 / 隐藏被禁的 tool、skill；对 command / agent 提供只读目录。
 >
-> 路径约定同 `01`：`packages/…` = DSH 0.2.0-rc.2 源码；`⟨rune⟩/…` = 本包 `src/…`；`⟨sd⟩/…` = 本仓 `dsh-magica-spellbook`。
+> 路径约定同 `01`：`packages/…` = DSH 0.2.0-rc.2 源码；`⟨rune⟩/…` = 本包 `src/…`。
 
 ---
 
@@ -20,7 +20,7 @@
   restrict.ts           辅通道：per-agent createScope + tools.restrict + system-prompt/assemble 过滤
   skill-gate.ts         skill 遮蔽：agentCtx.get('skills').register(同名, invocation 双 false)
   catalog.ts            HTTP：GET /rune-ability/catalog（+ workspaces）
-  router.ts             极小的 JSON 路由辅助（复用 ⟨sd⟩ 的 createJsonRouter 或自写 60 行）
+  router.ts             极小的 JSON 路由辅助（sendJson / sendMethodNotAllowed / sendError，约 60 行）
 ```
 
 依赖方向：`index → {config, state, workspace, guard, restrict, skill-gate, catalog}`；`state/policy` 不依赖 Cordis；`guard/restrict/skill-gate/catalog` 只依赖 `state` + `ctx`。**policy 是纯函数，可单测，无 ctx。**
@@ -144,7 +144,7 @@ ctx.effect(() => ctx.on('loader/volatile-update', () => {    // ② 热更新
 
 > 前端只需配置 `export const inject = ['slots','locale','remote','remote.settings']`；host 侧**不需要**任何 remote 代码——`@deepseek-ai/dsh-api-settings-controller` 已经把 `settings` 投影成 `ctx.remote.settings`。
 
-**写入最终落盘在哪**（把 raw 的 `~/.dsh/settings.yaml#ability` 对上号）：`settings.replace` → `SettingsForms.write` → `configEditor.edit()`，而 `configEditor.documentPath = profileContext.patchPath`——也就是**用户 profile 自己的 `cordis.patch.yml`**，落成一条按 id 覆盖的行（`packages/boot/config-editor/src/index.ts:33-34, 87-142`）。
+**写入最终落盘在哪**（常见误用：以为存在一个独立的 `~/.dsh/settings.yaml#ability` 段）：`settings.replace` → `SettingsForms.write` → `configEditor.edit()`，而 `configEditor.documentPath = profileContext.patchPath`——也就是**用户 profile 自己的 `cordis.patch.yml`**，落成一条按 id 覆盖的行（`packages/boot/config-editor/src/index.ts:33-34, 87-142`）。
 
 → 因此：
 - **本包自带的 `cordis.patch.yml` 不写 `config`**（只 `insert` 那行）。写了会成为组件期的 base 层；而 patch 整体替换、不深合并，schema 默认值一旦演进，陈旧 yaml 值会盖住新默认。
@@ -171,7 +171,7 @@ effective(wsId) = global(tool)
                 − NON_DISABLEABLE
 ```
 
-**关键不变量**：工作区 `enabled` **只能恢复用户自己加的禁用**，不能恢复 `BUILTIN_DISABLED`（产品决策，替代品存在）。这是 `raw/dsh-tool-ability.md` §2.2 的 `if (!builtin.has(name))` 守卫，保留。
+**关键不变量**：工作区 `enabled` **只能恢复用户自己加的禁用**，不能恢复 `BUILTIN_DISABLED`（产品决策，替代品存在）。实现上就是 `mergeLayer` 里那句 `if (builtin.has(name)) continue` 守卫。
 
 `effective(wsId)` **已折叠 global**，所以 guard 热路径一次查找即可，**不能先查 global 再查 ws**（那会让全局禁用否决工作区 `enabled`）。
 
@@ -192,7 +192,7 @@ export const DEFAULT_SKILL_NON_DISABLEABLE   = [
 export const HARD_RESERVED = new Set(['run_code'])
 ```
 
-**为什么只有三张表**（`raw` 有四张）：「restrict 不能命名」不再单独设表——`restrict` 只 deny 那些**没通过** `toolProtected()` 的名字，所以名单 ② 自动承担了 `raw` 里 `RESERVED` 的职责：
+**为什么只有三张表**（不必凑第四张）：「restrict 不能命名」不单独设表——`restrict` 只 deny 那些**没通过** `toolProtected()` 的名字，所以名单 ② 自动承担了「RESERVED」的职责：
 
 ```ts
 toolProtected(name) = HARD_RESERVED.has(name) || matches(nonDisableable, name)
@@ -208,7 +208,7 @@ toolProtected(name) = HARD_RESERVED.has(name) || matches(nonDisableable, name)
 | restrict | `restrictableNamesFor()` 直接剔除 → 永不进 deny 列表 |
 | catalog / UI | 不下发 → 页面**看不到**一个点了没用的开关 |
 
-> **与原方案的差异**（必须记录）：`raw` 把 `cac_web_search` / `playwright` / `describe_image` / `sandore_*` 写进 `NON_DISABLEABLE`、把 `web_search`/`web_fetch`/`workflow` 写进 `BUILTIN_DISABLED`——那是 `dsh-minecraft` 的**产品决策**（它自带替代品），不是能力管理的通用语义。rune 独立成包后，两张表都变成**可配置**，出厂默认取保守值（`builtinDisabled: []`）。
+> **设计取舍**（必须记录）：把 `cac_web_search` / `playwright` / `describe_image` / `sandore_*` 写进 `NON_DISABLEABLE`、把 `web_search`/`web_fetch`/`workflow` 写进 `BUILTIN_DISABLED`，属于「自带替代品」那类产品的**产品决策**，不是能力管理的通用语义。本包的语义是通用能力管理，所以两张表都是**可配置**的，出厂默认取保守值（`builtinDisabled: []`）。
 
 ### 3.3 折叠函数
 
@@ -285,14 +285,15 @@ export class GuardState {
 }
 ```
 
-**为什么 `denied` 不先查 global**：工作区 set 已折叠 global 与自身覆盖；先查 global 会让「全局禁 A + 工作区恢复 A」失效。这是 `raw` 强调的关键设计，0.2 不变。
+**为什么 `denied` 不先查 global**：工作区 set 已折叠 global 与自身覆盖；先查 global 会让「全局禁 A + 工作区恢复 A」失效。这是本设计最关键的不变量，热路径的所有查找都必须服从它。
 
 ---
 
 ## 5. `workspace.ts` —— cwd → workspaceId
 
 ```ts
-import { findWorkspace } from 'dsh-magica-spellbook'   // ⟨sd⟩ 已封装 resolveByPath
+// findWorkspace 定义在本文件末尾：把 ctx.get('workspaceRegistry') 包成
+// async findWorkspace(ctx, path) => Promise<{ id, title, path } | undefined>
 import type { Scope } from '@deepseek-ai/dsh-scope'
 
 export function installWorkspaceIndex(ctx: Context, state: GuardState): () => void {
@@ -328,7 +329,7 @@ export function installWorkspaceIndex(ctx: Context, state: GuardState): () => vo
 |---|---|
 | **必须解构 `{ agent }`** | 0.2 的载荷是对象（`packages/core/agent/src/runtime-types.ts:261`）。不解构 → `agent.id === undefined` → **全部静默降级为只查全局** |
 | **绝不 throw** | `agent/created` 是 `serial`，throw 会让 **agent 创建失败**（`packages/core/agent/src/index.ts:549-554`） |
-| **`findWorkspace` 而非手写 realpath** | 内部走 `workspaceRegistry.resolveByPath()`（`packages/workspace/workspace/src/index.ts:493-506`），物理 canon 由 dsh 唯一负责；`⟨sd⟩/src/sessions/ensure-workspace.ts:45-50` 已做空串校验与 registry 缺失降级 |
+| **`findWorkspace` 而非手写 realpath** | 内部走 `workspaceRegistry.resolveByPath()`（`packages/workspace/workspace/src/index.ts:493-506`），物理 canon 由 dsh 唯一负责；本包的 `findWorkspace` 自带空串校验与 registry 缺失降级 |
 | **不自己做 Windows 大小写归一** | `resolveByPath` 用 `fs.realpath` 的真实 case，比 `toLowerCase` 准 |
 | **冷路径** | 只在 `agent/created` 跑一次；guard 热路径零 IO，只查 Map |
 | 子代理 | `childSessionMeta()` 让子代理继承父 `cwd`（`packages/subagent/subagent/src/child-agent.ts:139-157`）→ 自动命中同一工作区；若被派到别的 cwd 则命中那个工作区（正确语义） |
@@ -380,7 +381,7 @@ export function installGuard(ctx: Context, state: GuardState): () => void {
 | **单调**：没有任何 guard 能强行放行 | `:1126-1135` |
 | 与 `tools/pre-execute` 的分工 | pre-execute 是**可重排 waterfall**（后续能改回 allow），guard 是**只增不减**。**强制禁用必须用 guard** |
 
-> **不做的分支**：`raw` 里的 `named_subagent` + `args.agent` 分支随「Agent」一类一起移出范围（0.2 无该工具，全仓零命中），guard 只保留 **工具名** 与 **`skill` 参数名** 两条判定。
+> **不做的分支**：`named_subagent` + `args.agent` 这类分支随「Agent」一类一起移出范围（0.2 无该工具，全仓零命中），guard 只保留 **工具名** 与 **`skill` 参数名** 两条判定。
 
 ---
 
@@ -488,7 +489,7 @@ export function installRestrict(ctx: Context, state: GuardState): RestrictHandle
 |---|---|
 | **`restrict` 必须 scoped** | unscoped 直接抛 `tools.restrict() requires a scoped context`（`:1098-1101`） |
 | **未知名仍抛错** | `:1114-1118`；0.2 没有公开 `restrictableNames`（`ToolView` 是 private），所以只能「先看可见名再挑」 |
-| **own-layer 免疫范围收窄** | preset 的工具是**祖先贡献**，**能**被 restrict 移除（`:1163-1174`）；只有「agent.ctx 自己注册的」免役。→ `raw` §2.4 的 workflow-redirect 文本兜底降级为**可选**，见 §10.2 |
+| **own-layer 免疫范围收窄** | preset 的工具是**祖先贡献**，**能**被 restrict 移除（`:1163-1174`）；只有「agent.ctx 自己注册的」免役。→ 用来兜底「own-layer 工具看得到但调不了」的 workflow-redirect 文本因此降级为**可选**，见 §10.2 |
 
 ### 7.4 `system-prompt/assemble` 签名（易错）
 
@@ -498,7 +499,7 @@ export function installRestrict(ctx: Context, state: GuardState): RestrictHandle
   next: () => Promise<PromptAssembly>): Promise<PromptAssembly>
 ```
 
-- **第三个参数才是 `next`**，且 `next()` **不接参数**。0.1.2 的 `(assembly, next)` 会把 `context` 当 `next` → 运行时崩。
+- **第三个参数才是 `next`**，且 `next()` **不接参数**。若按直觉写成 `(assembly, next)`，`context` 就会占住 `next` 的位置 → 运行时崩。
 - `assembly.sections` **可变**，`await next()` 后 filter 再 return。
 - `AssemblySection.name` 就是 `tool:<toolName>`，全仓统一惯例（`packages/fs/tool-fs/src/read.ts:70`、`packages/shell/tool-bash/src/index.ts:260`、`packages/workflow/tool-workflow/src/index.ts:324`、`packages/subagent/tool-subagent/src/index.ts:599`）。
 - ⚠️ 若该 scope 注册了 `complete: true` 的 section，waterfall 结果会被**还原成那一段**（`:632`），过滤白做。我们只用 `tool:` 前缀过滤，不动其它，规避该边界。
@@ -601,7 +602,7 @@ skill 有原生 `SkillInvocationPolicy = { modelInvocable, userInvocable }`（`p
 | preset ctx 注册 | preset 层（同层） | **不能**（250 输给 100/200，**静默漏放**） | ❌ |
 | 插件顶层 ctx 注册（unscoped） | global 层 | **不能**（同层/更远，且静默无 warn） | ❌ footgun |
 
-`skills.register` unscoped 时**静默落 global**（`:441-442`、`packages/core/scope/src/store.ts:236-237`）—— 不 throw 不 warn，这是 0.1.2 时代就有的坑，0.2 依然存在。这正是 `raw/dsh-skill-ability.md` §5.2 强调「必须用 `agentCtx.get('skills')`」的原因，**0.2 下这条规则更重要**（因为 `skill-filesystem` 已下移到 preset 层，诱惑更大）。
+`skills.register` unscoped 时**静默落 global**（`:441-442`、`packages/core/scope/src/store.ts:236-237`）—— 不 throw 不 warn，这是最容易踩的易错点，0.2 依然如此。这是本包把「必须用 `agentCtx.get('skills')`」写成硬规则的原因，**0.2 下这条规则尤其重要**（因为 `skill-filesystem` 已下移到 preset 层，诱惑更大）。
 
 ### 9.3 实现
 
@@ -687,7 +688,7 @@ register/dispose 同步触发 `invalidateCache`（revision+1 + 清缓存 + `skil
 
 **不需要**调用任何额外 invalidate API；**也不能**（`invalidateCache` 已是 private）。
 
-> 斜杠菜单热刷新仍然做不到：`skills/change` **不在** client 转发白名单（`packages/api/remotes/src/remote-events.ts:20-48`），插件不可扩充。这与 0.1.2 的限制一致，`raw` §5.7 的妥协继续有效。
+> 斜杠菜单热刷新仍然做不到：`skills/change` **不在** client 转发白名单（`packages/api/remotes/src/remote-events.ts:20-48`），插件不可扩充。这是白名单机制的固有边界，不接受实时刷新的妥协方案继续有效。
 
 ---
 
@@ -733,7 +734,7 @@ export function installCatalog(ctx: Context, state: GuardState): () => void {
 | `skills` | 两段式 `snapshot`（见下） | 保留原始 description |
 | `workspaces` | `ctx.workspaceRegistry.list()` | `{ id, title, path }`；registry 缺失 → `[]` |
 
-**skills 两段式**（`raw` §5.8 的「global 层拿原始 desc」在 0.2 需要调整）：preset 才有本地 provider，`snapshot({scope: undefined})` 拿不到 preset skill。做法：
+**skills 两段式**（只在 global 层拿原始 desc 是不够的）：preset 才有本地 provider，`snapshot({scope: undefined})` 拿不到 preset skill。做法：
 
 ```ts
 async function collectSkills(ctx: Context, state: GuardState) {
@@ -758,7 +759,7 @@ async function collectSkills(ctx: Context, state: GuardState) {
 
 ### 10.2 workflow-redirect 文本兜底（降级为可选）
 
-`raw` §6.2 用 `systemPrompt.section({order:2650, text:'…workflow disabled…'})` 兜底「own-layer 工具看得到但调不了」。0.2 里 preset 工具**能被 restrict 移除**（§7.3），这段的必要性大幅下降。保留为**可选配置**：
+用 `systemPrompt.section({ order: 2650, text: '…workflow disabled…' })` 硬编码兜底「own-layer 工具看得到但调不了」是常见误用——`order` 写死会在官方 section 顺序变动后错位。0.2 里 preset 工具**能被 restrict 移除**（§7.3），这段的必要性大幅下降。保留为**可选配置**：
 
 ```ts
 if (config.workflowRedirect?.get() === true) {

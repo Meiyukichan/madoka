@@ -16,7 +16,7 @@
 | 1.2 `platform: "web"`；声明 `dsh.client` 就必须有 `./client` 导出 | ✅ | 两者同处 `package.json` |
 | 1.2 `dsh.client.inject` 只写**包名**（不是服务名） | ✅ | `dsh-api-remotes`/`dsh-client-connection`/`dsh-client-locale`/`dsh-client-ui-settings`；服务依赖写在 Cordis `export const inject` |
 | 1.2 不用 `dsh.client.external`、不加 `immediately` | ✅ | 均未声明 |
-| 1.3 共享实例的 dsh 包**同时**写 `peerDependencies` 与 `devDependencies`，范围覆盖运行时 | ⚠️ **偏差** | 见 §四-1 |
+| 1.3 共享实例的 dsh 包**同时**写 `peerDependencies` 与 `devDependencies`，范围覆盖运行时 | ⚠️ **偏差** | 见 §九-1 |
 | 1.4 `cordis.patch.yml` 用 `insert`；`name` 必须与 `package.json.name` 完全一致 | ✅ | 两侧都是 `dsh-magica-rune`；`id` 同时是 settings 命名空间 |
 | 1.5 client bundle 是闭包工厂，banner/intro/footer 三段齐全；externals 只允许基线模块表内 + `dsh.client.external` 声明项 | ✅ | `lib/client.js` 首行 `window.__ModuleLoader__.load({ id: "dsh-magica-rune", factory: (require) => {`，末行 `return module.exports; } });`；实际 external 仅 4 个：`react`、`react/jsx-runtime`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`，全在表内；无裸 import；无 chunk；无 sourcemap |
 
@@ -36,10 +36,10 @@
 | 规则 | 结论 | 证据 |
 |---|---|---|
 | 3.1 先读官方同类实现，对齐 API/命名/返回形状 | ✅ | `docs/design/01-dsh02-audit.zh.md` 逐条记录源码坐标（`tools/src/index.ts:1080-1112`、`settings/src/index.ts:357-360`、`skill/src/index.ts:439-459` 等） |
-| 3.2 UI 风格跟随 ui-primitives，不自造第二套视觉语言 | ✅（**审查中整改**） | 药丸 → `Button variant="ghost" size="sm"`（`sm` 自带 H28，与 raw 同值）；搜索框 → `Input`；`Modal`/`Menu`/`Button`/`Tooltip` 本来就用原语。唯一例外：分组批量勾选保留原生 `<input type="checkbox">` —— `Checkbox` 原语不支持 `indeterminate`，而 raw 要求「半选态」（见 §四-2） |
-| 3.3 优先复用 dsh 已导出的工具/服务/API | ⚠️ **偏差** | 见 §四-3 |
+| 3.2 UI 风格跟随 ui-primitives，不自造第二套视觉语言 | ✅（**审查中整改**） | 药丸 → `Button variant="ghost" size="sm"`（`sm` 自带 H28，与本文视觉规格的 28px 一致）；搜索框 → `Input`；`Modal`/`Menu`/`Button`/`Tooltip` 本来就用原语。唯一例外：分组批量勾选保留原生 `<input type="checkbox">` —— `Checkbox` 原语不支持 `indeterminate`，而分组头必须呈「半选态」（见 §九-2） |
+| 3.3 优先复用 dsh 已导出的工具/服务/API | ⚠️ **偏差** | 见 §九-3 |
 | 3.4 Markdown 页面用官方 `MarkdownText` | ✅ N/A | 本页不渲染 Markdown（工具描述走 `Tooltip` 纯文本） |
-| 3.5 优先使用本仓 0.2 线 SDK `dsh-magica-spellbook` | ⚠️ **偏差** | 见 §四-3 |
+| 3.5 优先复用宿主已导出的工具/服务/API，不重复造轮子 | ⚠️ **偏差** | 见 §九-3（router/workspace 自实现，各 <40 行） |
 
 ## 四、i18n 与明暗主题（SKILL §4）
 
@@ -59,7 +59,7 @@
 | 规则 | 结论 | 证据 |
 |---|---|---|
 | 所有个人开发在 dev profile 进行 | ✅ | 全程只用 `--profile dev`；端口用 **3082**（3081 被别的实例占用） |
-| 首次安装即初始化 profile；dev 只有 `dsh-base`，要 UI 需再装 `dsh-web-app` | ✅ | `dsh plugin --profile dev add` 走过一遍，并手工补了 `@deepseek-ai/dsh-web-app` 进 `bundles`（registry 上的 0.2 版不存在，见 §四-1） |
+| 首次安装即初始化 profile；dev 只有 `dsh-base`，要 UI 需再装 `dsh-web-app` | ✅ | `dsh plugin --profile dev add` 走过一遍，并手工补了 `@deepseek-ai/dsh-web-app` 进 `bundles`（registry 上的 0.2 版不存在，见 §九-1） |
 | 装本地插件须先 `pnpm build` | ✅ | `e2e/run.mjs` 自动起停 dev 实例；`pnpm e2e` 前会先 `pnpm build` |
 
 ## 六、禁止事项（SKILL §6）
@@ -83,11 +83,11 @@
 | 1 | `src/restrict.ts` | `system-prompt/assemble` 中间件的段落过滤没有 try/catch，也不防 `sections` 缺失 → 违反 §2.2 | 过滤逻辑 try/catch，`Array.isArray(result?.sections)` 守卫；上游异常继续冒泡 |
 | 2 | `src/builtin-skill.ts` | `list()` 每次同步 `readdirSync`+`readFileSync`，而它按 skill snapshot 频次调用 → 违反 §2.1（🟡 热路径 + 轻 I/O 应缓存） | 缓存候选行；`get()` 保持每次读盘；`control.invalidate`/abort 失效重扫 |
 | 3 | `src/client/locales.ts` | 缺 `cat.web`/`cat.workflow`/`cat.plugin` 三个键，分组标题回退成英文 id（`web`/`workflow`），违反 §4.1「所有可见文案走 `t()`」 | 补齐 zh/en 三个键，键集仍 30/30 一致 |
-| 4 | `src/client/parts.tsx` + `styles.ts` | §3.2：药丸与搜索框是原生 `<button>`/`<input>`，没有复用原语 | 药丸改 `Button`（`ghost`+`sm`）、搜索框改 `Input`；CSS 只覆盖 raw 与 `sm` 有差异的 4 个声明（padding/字号/行高/圆角/描边），并把 hover 规则提权到双类选择器以压过原语的 `ghost:hover:not(:disabled)`。E2E 的视觉断言全部仍然通过 |
+| 4 | `src/client/parts.tsx` + `styles.ts` | §3.2：药丸与搜索框是原生 `<button>`/`<input>`，没有复用原语 | 药丸改 `Button`（`ghost`+`sm`）、搜索框改 `Input`；CSS 只覆盖相对 `sm` 有差异的 4 个声明（padding/字号/行高/圆角/描边），并把 hover 规则提权到双类选择器以压过原语的 `ghost:hover:not(:disabled)`。E2E 的视觉断言全部仍然通过 |
 
 ## 九、仍存在的偏差与「发布前」清单
 
-> 决策记录：§3.2 已整改（见 §八-4）；§3.3/§3.5 暂缓（本仓 SDK 未就绪）；§1.3 见下面的推荐。
+> 决策记录：§3.2 已整改（见 §八-4）；§3.3/§3.5 按 §九-3 处理（router/workspace 自实现）；§1.3 见下面的推荐。
 
 ### 1. 共享实例包只在 `peerDependencies`，不在 `devDependencies`（§1.3）—— **推荐「双写」**
 
@@ -104,38 +104,43 @@
 `@deepseek-ai/dsh-*` 只有过时的 `0.0.1-rc.1`，`0.2.0-rc.2` 未发布 → 写进 devDependencies 会让
 `pnpm install` 失败或装到不兼容类型；本仓又禁止 `link:`。
 
-**过渡方案（现状）**：类型解析用 `tsconfig.json` 的 `paths` 指向本机 dsh 安装树里的 `.d.ts`。
+**现状：类型解析走 `paths` 映射**：用 `tsconfig.json` 的 `paths` 指向本机 dsh 安装树里的 `.d.ts`。
 只影响 `tsc`；esbuild 把 `@deepseek-ai/*` 全标 external，构建与运行时都不看它。
 代价：换机器 `pnpm typecheck` 可能报 TS2307（build/runtime 不受影响）。
 
 **发布前清单**（5 分钟）：
 
-1. 在 `devDependencies` 补回 8 条与 peer 同范围的条目（`>=0.2.0-rc.2`；`schemastery` 用 `>=3.18.4`、`cordis` 用 `>=4.0.4`）；
+1. 在 `devDependencies` 补齐 8 条与 peer 同范围的条目（`>=0.2.0-rc.2`；`schemastery` 用 `>=3.18.4`、`cordis` 用 `>=4.0.4`）；
 2. 删掉 `tsconfig.json` 里的 `paths` 回退；
 3. 干净 clone 上跑 `pnpm install && pnpm typecheck && pnpm build && pnpm test && pnpm e2e`。
 
 ### 2. 分组批量勾选仍是原生 `<input type="checkbox">`（§3.2 的残留）
 
 `Checkbox` 原语的参数是 `{ checked, onChange, label, disabled, title, className }` ——
-**没有透传 ref / `indeterminate`**。而 raw 明确要求分组头呈「半选态」（部分启用）。
+**没有透传 ref / `indeterminate`**。而分组头必须呈「半选态」（部分启用）—— 这是本包视觉规格的硬要求。
 换过去会静默丢掉这个状态，所以保留原生元素：`<input type="checkbox">` + `accent-color: brand`，
 尺寸 14×14 由 `.rune-batch-toggle input` 覆盖。
 
 **若要完全合规**：需要 `Checkbox` 支持 `indeterminate`（或暴露 input ref）；在那之前这是唯一的例外。
 
-### 3. 未采用本仓 SDK `dsh-magica-spellbook`（§3.3 / §3.5）—— **暂缓**
+### 3. 未引入外部 SDK：router/workspace 自实现（各 <40 行）（§3.3 / §3.5）
 
-用户决定：**spellbook 还没开发好，先忽略这条**。因此 `src/router.ts`（`sendJson`/`sendText`/
-`sendMethodNotAllowed`）与 `src/workspace.ts`（`normalizeProjectPath`）保留各自不到 40 行的实现。
+本包不引入外部 SDK。`src/router.ts`（`sendJson`/`sendText`/`sendMethodNotAllowed`）与
+`src/workspace.ts`（`normalizeProjectPath`）各自保留不到 40 行的自实现，行为直接对齐宿主
+`webServer` 的响应约定：`content-type` 与状态码由同一处决定，写响应前一律先判 `headersSent`。
 
-SDK 就绪后，替换点是明确的：`import { sendJson, sendMethodNotAllowed, normalizeProjectPath } from 'dsh-magica-spellbook'`
-（构建会把 SDK 打进 `lib/index.js`，符合它「纯库随插件打包」的定位）。
+这样切分的理由：两处逻辑的输入输出都很窄（一个 JSON body、一条路径的规范化），自实现比多一层
+依赖更好审计，也不必再为「SDK 版本与宿主版本是否同步」维护一条额外的兼容约束。
+
+若将来这些函数被上提为宿主侧公共能力，替换点是单点的：
+`import { sendJson, sendMethodNotAllowed, normalizeProjectPath } from '<宿主公共包>'`
+（构建会把该依赖打进 `lib/index.js`，产物仍是单文件）。
 
 ---
 
-## 十一、插件市场（`docs/contribute-plugins.md`）合规
+## 十、插件市场投稿要求合规
 
-市场那边（madoka 仓库根）的投稿要求分三档：硬性（CI/评审核对）、推荐、以及提交物本身。
+投稿要求来自 dsh-market 仓库的贡献指南，分三档：硬性（CI/评审核对）、推荐、以及提交物本身。
 
 ### 硬性要求
 
@@ -163,22 +168,22 @@ SDK 就绪后，替换点是明确的：`import { sendJson, sendMethodNotAllowed
 `docs/marketplace/entry.yml`（monorepo 子包形态：`url` 指向子目录、`name` 用 `owner/repo#subname`、
 分类取 `tools`）。**不要**手工改两个 README，也**不要**往 `data/screenshots.json` 加键。
 
-### 顺手修掉的一个真实坑：peer 范围要覆盖预发布，但**不能过界到 0.3**
+### peer 范围要覆盖预发布，但**不能过界到 0.3**
 
 市场文档专门警告：`"^0.2.0-rc.2"` 这种写法在 npm 解析时**匹配不到 `0.4.0-rc.1`**。
-实测确认我们原来的 `>=0.2.0-rc.2` 同样有该问题（semver 元组规则，与 DSH 自己的 gate 用
+同样地，只写下界 `>=0.2.0-rc.2` 也会踩进同一个坑（semver 元组规则，与 DSH 自己的 gate 用
 `includePrerelease` 不同，所以 **gate 放行、用户却装不上**）。
 
 但反过来也不能图省事写 `|| >=0.3.0-rc.1` —— 那等于宣称兼容 0.3，而本包只对 **0.2.0-rc.2**
 验证过（0.3 的 API 尚未审查）。所以取「只覆盖 0.2 线」的写法，与市场文档示例
 `>=0.1.0-rc.1 <0.2.0-0` 同形：
 
-| 版本 | `>=0.2.0-rc.2`（最初） | `>=0.2.0-rc.2 \|\| >=0.3.0-rc.1`（过界） | **`>=0.2.0-rc.2 <0.3.0-0`（现）** |
+| 版本 | 仅下界 `>=0.2.0-rc.2` | 放行到 0.3：`>=0.2.0-rc.2 \|\| >=0.3.0-rc.1` | **`>=0.2.0-rc.2 <0.3.0-0`（本包采用）** |
 |---|---|---|---|
 | `0.2.0-rc.2` | ✅ | ✅ | ✅ |
 | `0.2.0-rc.3`（未来 rc） | ✅ | ✅ | ✅ |
 | `0.2.0` / `0.2.1` | ✅ | ✅ | ✅ |
-| `0.1.2` | ✅（不该） | ✅（不该） | ❌ 正确拒绝 |
+| 低于 `0.2.0-rc.2` 的 0.x 线 | ✅（不该） | ✅（不该） | ❌ 正确拒绝 |
 | `0.2.1-rc.1` | ❌ | ❌ | ❌（patch 线预发布，DSH 未发布过这种形态） |
 | `0.3.0-rc.1` / `0.3.0` | ❌ 但 gate 会放行 | ✅ 不该放 | ❌ 正确拒绝 |
 
@@ -187,7 +192,7 @@ SDK 就绪后，替换点是明确的：`import { sendJson, sendMethodNotAllowed
 
 ---
 
-## 十二、复核方式
+## 十一、复核方式
 
 ```bash
 pnpm typecheck    # 0 error

@@ -1,8 +1,8 @@
 # 04 · 包工程、测试与验收
 
-> 路径约定同 `01`。本文的 `package.json` / `cordis.patch.yml` / 构建配置**可直接抄**。
+> 路径约定同 `01`（`packages/…` = DSH `0.2.0-rc.2` 源码）。本文的 `package.json` / `cordis.patch.yml` / 构建配置**可直接采用**，且与仓库里的实际文件逐字段一致。
 >
-> 本仓 0.2 线唯一真实的插件范式是 **`dsh-magica-spellbook/.e2e/plugin/`**（`dsh.bundle.patch` + `dsh.client{platform,inject}` + `exports["./client"]` + 3 行 insert patch + 闭包工厂 `client.js`）。`dsh-magica-spellbook` 本身是**库**（client 产物是 ESM、`exports["./client"]` 用 `import` 键），**不要照它抄插件声明**。
+> 插件形态固定为四件套：`dsh.bundle.patch` 指向 `cordis.patch.yml`、`dsh.client{platform,inject}`、`exports["./client"]` 给 `default` 键、`lib/client.js` 是闭包工厂；patch 只需要 3 行 insert（`- insert:` + `id` + `name`）。本包是**插件**（host 侧 ESM + client 侧 CJS 闭包工厂），不是 client 产物走 ESM 的**库**——库形态要求 `exports["./client"]` 用 `import` 键，插件声明写成那样会被模块系统判为形状不合法。
 
 ---
 
@@ -18,40 +18,45 @@ dsh-magica-rune/
   locale/
     zh.json                  ← meta.title / meta.description（Plugins 页显示名）
     en.json                  ← 必须存在，否则一个语言都不读
+  resources/
+    dsh-plugins-principles/SKILL.md  ← 随包发布的内置技能（files 覆盖）
   assets/
-    icon.svg                 ← 相对路径，≤256 KiB
+    icon-180.png             ← 相对路径，≤256 KiB
   scripts/
-    build.mjs                ← esbuild CLI：lib/index.js + lib/client.js（压缩）
-    build-dts.mjs            ← 或者用 tsc -p tsconfig.dts.json
+    build.mjs                ← esbuild CLI：lib/index.js + lib/client.js（压缩）+ 可选 dts
+    clean.mjs                ← 清 lib/（含 *.js.map 残留）
   src/
     index.ts                 ← host 入口：name / inject / Config / apply
-    config.ts  namespace.ts  types.ts  policy.ts  state.ts
+    config.ts  namespace.ts  policy.ts  state.ts
     workspace.ts  guard.ts  restrict.ts  skill-gate.ts  catalog.ts  router.ts
+    builtin-skill.ts         ← 内置技能 provider（registerProvider）
     client.ts                ← client 入口：inject + re-export apply
-    css-modules.d.ts
+    shared/
+      ability.ts  dsh.ts     ← 纯数据层 + dsh 结构性类型
     client/
       index.ts               ← apply(ctx)
-      controller.ts          ← async 数据/写入
+      controller.ts          ← async 数据/写入（乐观锁 + 重试）
       store.ts               ← defineStore 视图状态
       AbilitySection.tsx     ← 根组件
-      AbilitySection.module.css
-      tabs/ ToolsTab.tsx SkillsTab.tsx
-      parts/  ToolList.tsx SkillList.tsx
-              ToolToggle.tsx SkillToggle.tsx
-              WorkspaceDropdown.tsx  icons.tsx
-      ability-nav.css        ← 全局 sheet（?inline 用）
+      tabs.tsx  parts.tsx    ← tab 容器 / zone / 药丸 / 下拉 / 确认弹窗
+      styles.ts              ← CSS 文本常量 + <style data-plugin> 注入
       nav-icon.ts            ← MutationObserver + mask hack
+      categorize.ts          ← 工具分类 + 搜索匹配
+      face.ts  icons.tsx     ← 注入面 / 图标
       locales.ts             ← zh / en 字典
   lib/                       ← 产物：index.js / client.js / types/**
   tests/
-    policy.test.ts  state.test.ts  toggle.test.ts
-    guard.host.test.ts  restrict.host.test.ts  skill-gate.host.test.ts
-    config-volatile.test.ts  catalog.host.test.ts
+    ability.test.ts  policy.test.ts  state.test.ts
+    categorize.test.ts  builtin-skill.test.ts  artifacts.test.ts
+  e2e/
+    harness.mjs  run.mjs
+    style.test.mjs  toggle.test.mjs  scope.test.mjs
+    search.test.mjs  skills.test.mjs
 ```
 
 ---
 
-## 2. `package.json`（可直接抄）
+## 2. `package.json`（与本仓实际文件逐字段一致）
 
 ```json
 {
@@ -59,8 +64,20 @@ dsh-magica-rune/
   "version": "0.2.0-alpha.1",
   "type": "module",
   "license": "MIT",
-  "description": "DSH 能力管理：tool / skill 的启用禁用，精确到工作区",
-  "engines": { "node": ">=22.5", "pnpm": ">=11" },
+  "publishConfig": {
+    "access": "public"
+  },
+  "icon": "./assets/icon-180.png",
+  "description": "DSH 能力管理：按全局或工作区启用 / 禁用任意工具与技能。被禁项同时从模型的工具清单与系统提示词中移除，运行期再兜底拦截；支持搜索、分组批量与内置保护，改动即时生效、无需重启。",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Meiyukichan/madoka.git",
+    "directory": "dsh-magica-rune"
+  },
+  "engines": {
+    "node": ">=22.5",
+    "pnpm": ">=11"
+  },
 
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
@@ -74,7 +91,8 @@ dsh-magica-rune/
     "lib",
     "cordis.patch.yml",
     "locale",
-    "assets/icon.svg",
+    "resources",
+    "assets/icon-180.png",
     "README.md"
   ],
 
@@ -90,80 +108,63 @@ dsh-magica-rune/
       ]
     }
   },
-  "icon": "assets/icon.svg",
 
   "scripts": {
-    "build": "pnpm build:js && pnpm build:dts",
-    "build:js": "node scripts/build.mjs",
-    "build:dts": "tsc -p tsconfig.dts.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import ./tests/setup.mjs --test --test-isolation=none \"tests/**/*.test.ts\"",
-    "clean": "node scripts/rm.mjs lib"
+    "build": "node scripts/build.mjs",
+    "test": "node --test --test-isolation=none \"tests/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.dts.json --noEmit",
+    "e2e": "node e2e/run.mjs",
+    "prepare": "node scripts/build.mjs",
+    "prepublishOnly": "node scripts/build.mjs",
+    "clean": "node scripts/clean.mjs"
   },
 
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-settings": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-system-prompt": ">=0.2.0-rc.2"
+    "@deepseek-ai/cordis": ">=4.0.4",
+    "@deepseek-ai/dsh-client-store": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-scope": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/schemastery": ">=3.18.4"
   },
+
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-settings": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-system-prompt": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-agent": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-session": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-skill": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-scope": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-api-remotes": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-client-connection": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-client-locale": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-client-store": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-test-support": ">=0.2.0-rc.2",
-    "@deepseek-ai/schemastery": "^3.18.4",
     "@types/node": "^22.20.5",
     "@types/react": "~18.3.1",
-    "clsx": "^2.1.1",
     "esbuild": "^0.25.10",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "typescript": "^5.9.3",
-    "dsh-magica-spellbook": "workspace:*"
-  },
-  "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.4"
+    "playwright": "1.61.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.9.3"
   }
 }
 ```
 
-### 2.1 逐条理由（每条都对应一处 `raw` 的过时）
+### 2.1 逐条理由（每个字段都有明确依据）
 
 | 字段 | 为什么这样写 | 反例 / 依据 |
 |---|---|---|
-| **`engines.dsh` 不写** | 0.2 **零读取方**（`packages/util/package-manifest/README.md:93` 明文「不强制检查」） | `raw` 写 `engines.dsh: ~0.1.2-rc.1` → 无任何保护 |
-| peer 全部 `>=0.2.0-rc.2` | 兼容性校验只查 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-*`，且 `semver.satisfies(rt, range, {includePrerelease:true})`。实测 `>=0.1.2-rc.1` 对 `0.2.0-rc.2` **返回 true（零保护）**；`^0.1.2-rc.1` 才会被拦 | `packages/boot/app-boot/src/plugin-compatibility.ts:61-88` |
-| `cordis ^4.0.4` / `schemastery ^3.18.4` | **不进那道闸**，只能靠自查；写实际版本便于阅读 | 同上（第 75 行只匹配 `@deepseek-ai/dsh*`） |
+| **`engines.dsh` 不写** | 0.2 **零读取方**（`packages/util/package-manifest/README.md:93` 明文「不强制检查」） | 写 `engines.dsh` 得不到任何保护：唯一的闸是 peer 校验（下一行），这个字段连读的人都没有 |
+| peer 全部 `>=0.2.0-rc.2 <0.3.0-0` | 兼容性校验只查 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-*`，且 `semver.satisfies(rt, range, {includePrerelease:true})`。只有**带上界**的范围才拦得住次版本跃迁：裸 `>=` 下限写得再高也是零保护，所以必须显式封顶 `<0.3.0-0` | `packages/boot/app-boot/src/plugin-compatibility.ts:61-88` |
+| `cordis >=4.0.4` / `schemastery >=3.18.4` | **不进那道闸**，只能靠自查；写实际版本便于阅读 | 同上（第 75 行只匹配 `@deepseek-ai/dsh*`） |
 | `exports["./client"]` 用 **`default`** | 有形状校验：必须 string 或**含 `default`** 的对象；写 `import` 会抛 `exports["./client"] must be a string or an object with a string default` | `packages/client/modules/src/index.ts:194-205, 845-848` |
 | `exports["./cordis.patch.yml"]` **不需要** | profile 走文件系统 `join` 读 patch，不经 exports；但 `files` **必须**包含它 | `packages/boot/app-boot/src/profile.ts:73-75` |
 | `exports["./locale/*.json"]` + **`locale/en.json` 必须存在** | 否则一个语言都不读（只认 `en` 作为回退基线） | `packages/boot/app-boot/src/package-meta.ts:101-122, 151` |
-| `icon: "assets/icon.svg"` | 相对路径 + svg/png/jpeg/webp + **≤256 KiB** + realpath 必须在包目录内 | `package-meta.ts:14-39` |
-| `dsh.client.inject` 只列 **4 个包** | 只列被 `import type` 引用的**非基线**包 | ✅ 删掉了 `raw` 里的 `@deepseek-ai/dsh-client-runtime`（0.2 全仓**不存在**）；也不再重复 `ui-primitives` / `ui-slots` / `client-store` / `react`（基线 external 隐式，`packages/client/AGENTS.md:78`） |
+| `icon: "./assets/icon-180.png"` | 相对路径 + svg/png/jpeg/webp + **≤256 KiB** + realpath 必须在包目录内 | `package-meta.ts:14-39` |
+| `dsh.client.inject` 只列 **4 个包** | 只列被 `import type` 引用的**非基线**包 | 不写 `@deepseek-ai/dsh-client-runtime`（0.2 全仓**不存在**）；也不重复 `ui-primitives` / `ui-slots` / `client-store` / `react`（基线 external 隐式，`packages/client/AGENTS.md:78`） |
 | `dsh.client.platform: "web"` | 只认 `=== 'web'`，其它值静默不算 client 行 | `client/modules/src/index.ts:841-844` |
 | **不写 `immediately`** | 一阶段预取只给基础设施（`client/web/src/boot.ts:115-122`） | 功能插件加了会改变启动时序 |
 | **不写 `dsh.client.external`** | 功能插件不该用它取其它插件的运行时值；构建期 purity gate 会拒 | `client/tsdown.client.ts:528-546` |
-| client 包 + react 全放 **devDependencies** | 基线模块由 shell 模块表注入 | `packages/client/AGENTS.md:62-66`、`docs/user/develop/basic/publish.zh.md:103` |
-| `peerDependencies` 与 `devDependencies` **双写** 4 个包 | 与宿主共享实例 | `AGENTS.md` §一.5 |
+| `devDependencies` 只放**工具链**（`@types/*`、esbuild、playwright、react、react-dom、typescript） | 基线模块（react / ui-primitives / ui-slots / client-store）由 shell 模块表注入，不需要装进包 | `packages/client/AGENTS.md:62-66`、`docs/user/develop/basic/publish.zh.md:103` |
+| dsh 包**只写 `peerDependencies`**，不双写 devDependencies | 实例由宿主运行时提供；本地 `autoInstallPeers: false`，避免 registry 上的同名陈旧版本污染 `node_modules` | `pnpm-workspace.yaml` 里 `autoInstallPeers: false` 那段注释 |
 
-> **可发布**：已去掉 `private`，包名为 `@meiyukichan/dsh-magica-rune`（scoped）。发布前只剩三件事：`version` 改成正式号、`devDependencies` 补回 8 条 dsh 依赖、删掉 tsconfig 的 `paths` 回退（见 `05-skill-compliance.zh.md` §九-1）。
+> **可发布**：包名 `@meiyukichan/dsh-magica-rune`（scoped）+ `publishConfig.access = "public"`，不写 `private`（写了 `npm publish` 会直接拒绝）。发布前只剩两件事：`version` 改成正式号、复核 tsconfig 的 `paths` 回退（见 `05-skill-compliance.zh.md` §九-1）。
 
 ---
 
-## 3. `cordis.patch.yml`（可直接抄）
+## 3. `cordis.patch.yml`（可直接采用）
 
 ```yaml
 # 刻意不写 config：默认值由 Config schema 的 .default() 提供（src/config.ts）。
@@ -177,7 +178,7 @@ dsh-magica-rune/
 
 | 点 | 说明 |
 |---|---|
-| `id` = **settings namespace** | 0.2 的 `ns` 就是这条 patch 行的 `id`（`packages/settings/settings/src/index.ts:317`）→ 必须与 `⟨rune⟩/src/namespace.ts` 的 `ABILITY_NS` 一致，**不能随意改名** |
+| `id` = **settings namespace** | 0.2 的 `ns` 就是这条 patch 行的 `id`（`packages/settings/settings/src/index.ts:317`）→ 必须与本包 `src/namespace.ts` 的 `ABILITY_NS` 一致，**不能随意改名** |
 | `name` = package `name` | insert 行的 `name` 就是模块 specifier，profile 据此去 `node_modules/<name>` 定位包 |
 | **不写 `config`** | 默认值交给 schema `.default()`。在这里写一份是**有害**的：本行会成为组件期的 **base 层**，而 patch **整体替换、不深合并**（`vendor/include/src/index.ts:120-123`），schema 默认值一旦演进，陈旧的 yaml 值会盖住新默认值 |
 | 用户配置落在**哪** | `<DSH_HOME>/profiles/<profile>/cordis.patch.yml`（即 `~/.dsh/profiles/web/cordis.patch.yml`）。profile 初始化时这个文件被写成 `# Your patch layer for this dsh profile, applied after every bundle layer: … []`（`packages/boot/app-boot/src/profile.ts:40, 220-224, 259-260`）。用户点一次开关后，里面会多出一段**不带 `insert`、只按 id 覆盖**的行（见下） |
@@ -294,16 +295,19 @@ var module = { exports: {} }; var exports = module.exports;
 return module.exports; } });
 ```
 
-（与 `dsh-magica-spellbook/.e2e/plugin/client.js` 的形状逐字一致；官方 tsdown 预设的 banner/intro/footer 见 `packages/client/tsdown.client.ts:618-624`。）
+（`id` 必须等于包名 `@meiyukichan/dsh-magica-rune`，`var module/exports` 两段声明不可省——模块系统要靠工厂返回值注册导出；官方 tsdown 预设的 banner/intro/footer 见 `packages/client/tsdown.client.ts:618-624`。）
 
 ### 4.2 CSS 的处理
 
 | 形态 | esbuild 这条路线怎么做 |
 |---|---|
-| `*.module.css` | esbuild **不做 CSS Modules**。两条选项：<br>**(A) 推荐**：改用 `tsdown`/`rolldown` + 自写 CSS Modules 插件，复刻 `packages/client/tsdown.client.ts:36-56,548-571`（哈希类名 + 工厂期注入带 `data-plugin` 的 `<style>`）。<br>**(B) 轻量**：类名自己保证唯一（`rune-` 前缀），用 `.css` 直出，把 `<style>` 的注入也交给同一套 banner 之外的 effect。视觉等价，但失去作用域隔离 |
-| `*.css?inline` | esbuild 无虚拟模块；用 `--loader:.css=text` 把 CSS 变成字符串导出，再 `ctx.effect` 注入 |
+| `*.module.css` | esbuild **不做 CSS Modules**。两条选项：<br>**(A)** 改用 `tsdown`/`rolldown` + 自写 CSS Modules 插件，复刻 `packages/client/tsdown.client.ts:36-56,548-571`（哈希类名 + 工厂期注入带 `data-plugin` 的 `<style>`）。<br>**(B) 本包采用**：类名自己保证唯一（`rune-` 前缀），CSS 以 **TS 字符串常量**写在 `src/client/styles.ts`，在 `apply` 里 `ctx.effect` 注入 `<style data-plugin="<包名>">`。视觉等价，代价是没有作用域隔离 |
+| `*.css?inline` | esbuild 无虚拟模块；若要走这条路，用 `--loader:.css=text` 把 CSS 变成字符串导出，再 `ctx.effect` 注入 |
 
-**若采用 (A)**，需复刻的契约（全部来自官方预设）：
+**本包采用 (B)**：`styles.ts` 导出 `CSS` 字符串与 `cls` 短名→`rune-*` 映射，
+注入函数按 `data-plugin-css` 做幂等判断、disposer 负责移除（与官方预设的第 3、4 条契约一致）。
+
+**若将来改用 (A)**，需复刻的契约（全部来自官方预设）：
 
 1. 类名哈希：lightningcss `cssModules: { pattern: '[hash]_[local]' }`。
 2. 注入时机：**模块工厂执行期**（不是组件 render）。
@@ -352,14 +356,18 @@ return module.exports; } });
 ```yaml
 packages:
   - '.'
-  - 'packages/*'
+
+# 单包工程：'.' 必须在列表里，否则 pnpm 不认为它是 workspace 成员。
+# autoInstallPeers: false —— 本包的 @deepseek-ai/* 全是 peerDependencies，由宿主运行时提供；
+# 让 pnpm 自动装 peer 会去 registry 拉，拉到的同名版本与 0.2.0-rc.2 不兼容，会污染 node_modules。
+autoInstallPeers: false
 
 # pnpm 11 构建脚本白名单（写在 workspace 根才生效）
 allowBuilds:
   esbuild: false
 ```
 
-（与 `⟨sd⟩/pnpm-workspace.yaml` 同形；本仓是**每个子包各自一份** workspace 文件，不是仓库根一份。）
+（`allowBuilds` 只认 workspace 根这一份；`autoInstallPeers: false` 是 `peerDependencies` 策略的配套——少了它，pnpm 会自己拉一份同名 dsh 装进 `node_modules`，本地类型与运行时就和宿主不是同一个版本。）
 
 ---
 
@@ -382,7 +390,7 @@ allowBuilds:
 | T-S1 | `agentId === undefined` → 只查 `global` |
 | T-S2 | `agentWorkspace` 未命中 → 回退 `global` |
 | T-S3 | **不先查 global**：全局禁 A + 工作区 `enabled: A` → `denied(wsAgent, 'A') === false` |
-| T-S4 | `internalTools` **只增不减**：restrict 后再次 `updateInternalTools([])` 仍保留旧项 |
+| T-S4 | `internalTools` **只增不减**：restrict 后再次 `updateInternalTools([])` 仍保留此前已加入的项 |
 
 ### 7.3 `toggle` 语义单测（前端逻辑，纯函数抽出）
 
@@ -463,11 +471,11 @@ allowBuilds:
 | 用 `tools.schemas()` 当全量 | preset 工具在 UI 看不到、永远禁不掉 | 只用 `schemas(agent)` 且在 restrict 之前快照；T-H16 |
 | `tools/change` 自递归 | CPU 打满 | 防重入标记；T-H12 |
 | restrict 抛错被宽 catch 吞掉 | 该 agent 无 restrict，只靠 guard（token 没省） | catch 里 `logger.warn` 带 agentId；T-H6 |
-| `remote.settings` 写失败 / revision 冲突 | UI 状态与磁盘不一致 | 乐观更新 + 失败 `load()` 对账；无 toast（与 `raw` 一致） |
+| `remote.settings` 写失败 / revision 冲突 | UI 状态与磁盘不一致 | 乐观更新 + 失败 `load()` 对账；静默失败，不出 toast |
 | settings namespace 被改名（patch id 变了） | 前端写不回去 | 启动自检 warn（`02` §2.2）；文档明示「`ns` = patch 行 id」 |
 | 前端自绘浮层 | 被 0.2 的 UI spec 拒绝 / 材质不一致 | 用 `Menu`；`.wsMenu` 只调宽度 |
 | 圆角/颜色用了不存在的 token | 深色主题失效 | 只用 `03` §6 列出的真名；**不存在 6px/5px 档** |
-| 超椭圆圆角（平台级） | 与 0.1.2 观感略有差异 | 无法规避，写进验收清单（`03` §11 末条） |
+| 超椭圆圆角（平台级） | 圆角观感与纯直角矩形有细微差异 | 无法规避，写进验收清单（`03` §11 末条） |
 | 本包崩溃 | profile 启动失败（fail-loud） | 所有 `agent/created` 处理器 try/catch；所有副作用可逆 |
 
 **总体回退策略**：每个模块（guard / restrict / skill-gate / catalog / workspace-index / watch / redirect）独立 dispose，全部收口进 `index.ts` 的 `ctx.effect`。任一出问题 → 整个模块 stop/update 即回到 DSH 原生行为。最差情况：`dsh-magica-rune` 完全卸载，DSH 不受任何影响。
@@ -487,7 +495,7 @@ allowBuilds:
 | **S6 catalog** | `catalog.ts` + `router.ts` | T-H15、T-H16 |
 | **S7 前端骨架** | `client/index.ts` + `AbilitySection.tsx` + CSS 骨架 + tab | 设置里出现「能力管理」，版式/字号/tab 与「插件」页**并排对比一致**；T-C5 |
 | **S8 前端数据** | `controller.ts` + `store.ts` + 四态 | T-C8；loading/error/empty/ready 四态可见 |
-| **S9 前端列表** | `categorize` + 分组 + `catColor` + 药丸 + 批量 | T-C1~C3；分组头与药丸视觉逐项对比 `raw/a.md` §5.5/5.6 |
+| **S9 前端列表** | `categorize` + 分组 + `catColor` + 药丸 + 批量 | T-C1~C3；分组头（11px/600 标题 + 8px 色点，勾选右推）与药丸（高 28px、字号 13px、0.5px 描边、圆角 `--dsw-radius-sm`）逐项比对 `03` §5.5/5.6 的数值 |
 | **S10 前端开关** | `effectiveState` + `toggle` + 乐观更新 | T-T1~T6；点一下立刻变色，刷新后保留 |
 | **S11 两 zone + 下拉** | `Menu` 复刻工作区下拉 | 浮层材质正确、点外部关闭、切工作区自动展开 |
 | **S12 确认 + tooltip** | `Modal`（含 `closeLabel`）+ `Tooltip`（含 `portal`） | 内置分类弹确认；1s 后出 tooltip 且不被滚动区裁剪 |
