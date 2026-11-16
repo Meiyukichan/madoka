@@ -1,0 +1,13 @@
+# spellbook 是单包工程：'.' 必须在列表里，否则 pnpm 不认为它是 workspace 成员。
+# packages/* 是预留位：将来把可嵌入组件（如 directory-browser）拆成独立子包时不必改这里。
+packages:
+  - '.'
+  - 'packages/*'
+
+# pnpm 11 的构建脚本白名单（写在 workspace 根才生效）。
+# 两者都设为 false：本机沙箱禁止 pnpm 用管道 spawn 子进程（EPERM），
+# esbuild 的平台二进制来自 @esbuild/win32-x64 可选依赖（不跑 postinstall 也能用），
+# @primno/dpapi 是可选原生依赖（不构建即降级 AES-256-GCM）。
+allowBuilds:
+  esbuild: false
+  '@primno/dpapi': false

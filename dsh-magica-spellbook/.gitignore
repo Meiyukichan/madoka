@@ -1,0 +1,12 @@
+lib/
+node_modules/
+.pnpm-store/
+.pnpm-cache/
+.pnpm-local/
+.corepack/
+*.tsbuildinfo
+
+# 真机 E2E（dev profile 隔离）的运行时目录：体积大、可重建
+.e2e/dsh-home/
+.e2e/pnpm-store/
+.e2e/pnpm-cache/

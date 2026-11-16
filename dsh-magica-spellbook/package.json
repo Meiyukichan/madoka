@@ -1,0 +1,46 @@
+{
+  "name": "@meiyukichan/dsh-magica-spellbook",
+  "version": "0.2.0-alpha.1",
+  "type": "module",
+  "license": "MIT",
+  "description": "DSH 0.2 插件 SDK：会话门面 / 待决交互 / 核心工具层（纯库，零运行时 @deepseek-ai 依赖）",
+  "engines": { "node": ">=22.5", "pnpm": ">=11" },
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "import": "./lib/index.js" },
+    "./client": { "types": "./lib/types/client/index.d.ts", "import": "./lib/client.js" },
+    "./directory-browser": { "default": "./src/client/directory-browser/DirectoryBrowser.tsx" },
+    "./package.json": "./package.json"
+  },
+  "files": ["lib", "src/client/directory-browser", "README.md"],
+  "scripts": {
+    "build": "pnpm build:js && pnpm build:dts",
+    "build:js": "node scripts/build.mjs",
+    "build:dts": "tsc -p tsconfig.dts.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "pnpm build && node scripts/verify.mjs",
+    "test": "node --import ./tests/setup.mjs --test --test-isolation=none \"tests/**/*.test.ts\"",
+    "test:watch": "node --import ./tests/setup.mjs --test --test-isolation=none --watch \"tests/**/*.test.ts\"",
+    "version:set": "node scripts/set-version.mjs",
+    "clean:report": "node scripts/rm.mjs lib"
+  },
+  "dependencies": {
+    "undici": "^7.16.0"
+  },
+  "optionalDependencies": {
+    "@primno/dpapi": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.2.0",
+    "esbuild": "^0.25.10",
+    "react": "^19.2.0",
+    "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Meiyukichan/madoka.git",
+    "directory": "dsh-magica-spellbook"
+  }
+}

@@ -1,0 +1,315 @@
+/* 目录选择器样式：全部走 --dsw-alias-* 语义 token，发丝描边一律 0.5px。 */
+
+.dialog.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: min(72vh, 640px);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 20px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  box-shadow: var(--dsw-elevation-panel);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px 16px 12px 24px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.title {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 510;
+  color: var(--dsw-alias-label-primary);
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.iconButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.crumbBar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 8px 16px 0 24px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.crumbBar:has(.pathInput),
+.crumbBar:has(.crumb:focus-visible) {
+  border-color: var(--dsw-alias-border-l2);
+}
+
+.crumbSeat {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.crumb {
+  max-width: 160px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 22px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.crumb:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.crumbChevron {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pathInput {
+  flex: 1;
+  min-width: 160px;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 22px;
+  outline: none;
+}
+
+.driveBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 16px 0 24px;
+  padding-bottom: 6px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.driveBtn {
+  padding: 2px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.driveBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.driveBtnActive,
+.driveBtnActive:hover {
+  background: var(--dsw-alias-interactive-bg-active, var(--dsw-alias-interactive-bg-hover));
+  color: var(--dsw-alias-label-primary);
+}
+
+.content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 12px 16px 12px 24px;
+  position: relative;
+}
+
+.column {
+  flex: 1;
+  min-width: 256px;
+  overflow-y: auto;
+}
+
+.divider {
+  flex: 0 0 0.5px;
+  margin: 0 8px;
+  background: var(--dsw-alias-border-l3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.rowSelected,
+.rowSelected:hover {
+  background: var(--dsw-alias-interactive-bg-active, var(--dsw-alias-interactive-bg-hover));
+}
+
+.rowIcon {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rowIconSelected {
+  color: var(--dsw-alias-button-info-fill);
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowChevron {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.loadingFloat {
+  position: absolute;
+  right: 24px;
+  bottom: 20px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.footerBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 10px 24px;
+  border-top: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.footerGap {
+  flex: 1;
+}
+
+.footerAction {
+  min-width: 72px;
+}
+
+.showHiddenToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.showHiddenToggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.showHiddenToggleActive {
+  color: var(--dsw-alias-label-primary);
+}
+
+.error {
+  padding: 0 24px 10px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: right;
+}
+
+.createDialog.createDialog {
+  width: min(380px, 100%);
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-elevation-panel);
+}
+
+.createBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.createTitle {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 510;
+}
+
+.createInput {
+  height: 44px;
+  padding: 0 16px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 22px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.createInput::placeholder {
+  color: var(--dsw-alias-label-caption);
+}
+
+.createActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.status {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
