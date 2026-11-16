@@ -1,0 +1,59 @@
+{
+  "name": "dsh-magica-teamwork",
+  "version": "0.2.0-alpha.1",
+  "description": "DSH Teamwork：本地协作服务（issue / 项目 / 设备 / 文件）+ 客户端 SDK",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "dsh-teamwork": "./lib/index.js"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
+    "smoke": "tsc -p tsconfig.tests.json && node lib-tests/tests/smoke-script.js",
+    "pretest": "tsc -p tsconfig.tests.json",
+    "test": "node scripts/run-tests.mjs",
+    "saturate:sdk": "node scripts/sdk-saturate.mjs",
+    "start": "node lib/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "dts-bundle-generator": "^10.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@meiyukichan/dsh-magica-spellbook": "^0.2.0-alpha.1",
+    "@sinclair/typebox": "^0.34.52",
+    "fastify": "^5.12.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Meiyukichan/madoka.git",
+    "directory": "dsh-magica-teamwork"
+  },
+  "homepage": "https://github.com/Meiyukichan/madoka/tree/main/dsh-magica-teamwork#readme",
+  "bugs": {
+    "url": "https://github.com/Meiyukichan/madoka/issues"
+  }
+}

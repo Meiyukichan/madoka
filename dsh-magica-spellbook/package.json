@@ -3,17 +3,35 @@
   "version": "0.2.0-alpha.1",
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "DSH 0.2 插件 SDK：会话门面 / 待决交互 / 核心工具层（纯库，零运行时 @deepseek-ai 依赖）",
-  "engines": { "node": ">=22.5", "pnpm": ">=11" },
+  "engines": {
+    "node": ">=22.5",
+    "pnpm": ">=11"
+  },
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
   "exports": {
-    ".": { "types": "./lib/types/index.d.ts", "import": "./lib/index.js" },
-    "./client": { "types": "./lib/types/client/index.d.ts", "import": "./lib/client.js" },
-    "./directory-browser": { "default": "./src/client/directory-browser/DirectoryBrowser.tsx" },
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "import": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "import": "./lib/client.js"
+    },
+    "./directory-browser": {
+      "default": "./src/client/directory-browser/DirectoryBrowser.tsx"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["lib", "src/client/directory-browser", "README.md"],
+  "files": [
+    "lib",
+    "src/client/directory-browser",
+    "README.md"
+  ],
   "scripts": {
     "build": "pnpm build:js && pnpm build:dts",
     "build:js": "node scripts/build.mjs",

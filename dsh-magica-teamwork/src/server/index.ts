@@ -1,0 +1,13 @@
+/** 服务端子入口：可编程启动（测试 / 内嵌部署用） */
+export { startServer, main } from './main.js'
+export type { StartServerOptions } from './main.js'
+export { openDatabase } from './db/database.js'
+export type { DatabaseHandle, OpenDatabaseOptions } from './db/database.js'
+export { migrate, loadMigrations, currentVersion } from './db/migrate.js'
+export type { Migration, MigrateResult } from './db/migrate.js'
+export { resolveConfig, HELP, defaultDataDir, defaultHome } from './config.js'
+export type { Config } from './config.js'
+export { createContext, ENDPOINTS, PROTOCOL, SERVICE_VERSION } from './context.js'
+export type { AppContext } from './context.js'
+export { buildApp } from './app.js'
+export { BusinessError, errors } from './errors.js'

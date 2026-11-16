@@ -1,0 +1,5 @@
+﻿# dsh-teamwork 是「多包」工程：根包（服务端 + SDK）+ packages/ 下的独立插件包。
+# 用 pnpm workspace 统一管理，构建一律 `pnpm build` / `pnpm test`。
+packages:
+  - '.'
+  - 'packages/*'
