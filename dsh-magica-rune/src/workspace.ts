@@ -6,8 +6,10 @@
  * 归一，所以不需要手写 `realpathSync` + 大小写归一。
  *
  * 两条不变量：
- * - 映射**只增不删**（除 `agent/disposed`）：解析失败时保留上一次结果，
- *   否则 guard / restrict 会回退到「只看全局层」，静默丢掉工作区级禁用。
+ * - 映射**按解析结果覆写**：解析成功则 `set`，解析不出（`cwd` 为空 / registry 未就绪 /
+ *   `realpath` 抛错 / 不是已注册工作区根）则 `delete`；只有 `agent/disposed` 才无条件清理。
+ *   解析不出时 `state.workspaceOf` 返回 undefined，门禁与 restrict 会**回退到全局层** ——
+ *   这是设计意图（不是工作区根的会话不套用工作区级策略），不是丢数据。
  * - 处理器绝不 throw：`agent/created` 是 serial 监听器，throw 会让 agent 创建失败。
  * @module dsh-magica-rune/workspace
  */

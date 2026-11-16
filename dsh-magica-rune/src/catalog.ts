@@ -106,18 +106,32 @@ function readTools(ctx: DshContext, agent?: DshAgent): Array<{ name: string; des
   }
 }
 
-async function collectSkills(
+export async function collectSkills(
   ctx: DshContext, state: GuardState, agent: DshAgent | undefined,
 ): Promise<Array<{ name: string; description: string; source?: string }>> {
   const skills = ctx.get<DshSkills>('skills')
   if (skills === undefined) return []
 
+  // cwd 必须传给 provider：项目级 skill 的 provider 只按 cwd 枚举（`SkillLookupOptions.cwd`，
+  // `packages/skill/skill/src/index.ts:102-108`）；官方 `tool-skill` 也是这么传的
+  // （`:222` `snapshot({ cwd: agent.session.header.cwd, signal, scope: agent })`）。
+  // 不传的后果：这些 skill 在目录里**永远不出现**（不是"晚一点出现"）。
+  let cwd: string | undefined
+  try {
+    cwd = agent?.session?.header?.cwd
+  } catch {
+    cwd = undefined
+  }
+  const lookup = cwd === undefined || cwd === '' ? {} : { cwd }
+
   // ① global 层：拿原始 description（不被 agent 层遮蔽成占位符）
-  const globalSnapshot = await snapshotOrUndefined(skills, {})
+  const globalSnapshot = await snapshotOrUndefined(skills, lookup)
   if (globalSnapshot !== undefined) state.updateSkillDesc(globalSnapshot)
 
   // ② agent 层：补充 preset provider 发现的、global 视图里没有的项
-  const scopedSnapshot = agent === undefined ? undefined : await snapshotOrUndefined(skills, { scope: agent })
+  const scopedSnapshot = agent === undefined
+    ? undefined
+    : await snapshotOrUndefined(skills, { scope: agent, ...lookup })
   if (scopedSnapshot !== undefined) state.updateSkillDesc(scopedSnapshot)
 
   // ③ 合并：global 优先（原始 desc），agent 补缺，最后填本地缓存里被遮蔽掉的那些
@@ -129,7 +143,7 @@ async function collectSkills(
 }
 
 async function snapshotOrUndefined(
-  skills: DshSkills, options: { scope?: object },
+  skills: DshSkills, options: { scope?: object; cwd?: string },
 ): Promise<SkillSummary[] | undefined> {
   try {
     // 收集期发生并发改版时 `complete === false`；这一轮仍可用已有结果，
