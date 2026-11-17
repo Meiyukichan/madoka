@@ -14,6 +14,14 @@ export interface FakeAgentOptions {
   neverIdle?: boolean
   provider?: string
   model?: string
+  /** 初始 `agent.status`（`pushNamedContext` 的三档投递靠它区分）。 */
+  status?: 'idle' | 'running' | 'closed'
+}
+
+/** 一次投递记录（followup / steer / inject）。 */
+export interface FakeDelivery {
+  kind: 'followup' | 'steer' | 'inject'
+  id: string
 }
 
 export interface FakeAgentBundle {
@@ -27,6 +35,12 @@ export interface FakeAgentBundle {
   created: any[]
   resumed: any[]
   disposed: number
+  /** 每一次投递（按发生顺序）。 */
+  calls: FakeDelivery[]
+  /** 改 `agent.status`（模拟运行中 / 已结束）。 */
+  setStatus(next: 'idle' | 'running' | 'closed'): void
+  /** 当前 `agent.status`。 */
+  status(): string
   /** 手动结束一轮（autoTurn 关闭时用）。 */
   endTurn(kind?: string, text?: string): void
 }
@@ -38,6 +52,8 @@ export function fakeAgents(options: FakeAgentOptions = {}): FakeAgentBundle {
   const resumed: any[] = []
   const appended: Array<{ type: string; data: unknown }> = []
   const idleWaiters: Array<() => void> = []
+  const calls: FakeDelivery[] = []
+  let status: 'idle' | 'running' | 'closed' = options.status ?? 'idle'
   const bundle: FakeAgentBundle = {
     registry: {
       async create(createOptions: any) {
@@ -67,6 +83,13 @@ export function fakeAgents(options: FakeAgentOptions = {}): FakeAgentBundle {
     created,
     resumed,
     disposed: 0,
+    calls,
+    setStatus(next) {
+      status = next
+    },
+    status() {
+      return status
+    },
     endTurn(kind = 'completed', text) {
       if (text !== undefined) {
         agentCtx.emit('session/event', session, {
@@ -87,12 +110,20 @@ export function fakeAgents(options: FakeAgentOptions = {}): FakeAgentBundle {
     return {
       id: sessionId,
       session: bundle.session,
-      followup() {
+      get status() {
+        return status
+      },
+      followup(_message: unknown) {
+        calls.push({ kind: 'followup', id: sessionId })
         if (options.autoTurn === false) return
         queueMicrotask(() => bundle.endTurn(options.endKind ?? 'completed', options.text ?? 'done'))
       },
-      steer() {},
-      inject() {},
+      steer(_message: unknown) {
+        calls.push({ kind: 'steer', id: sessionId })
+      },
+      inject(_message: unknown) {
+        calls.push({ kind: 'inject', id: sessionId })
+      },
       cancel() {},
       whenIdle() {
         if (options.neverIdle === true) return new Promise<void>(() => {})
