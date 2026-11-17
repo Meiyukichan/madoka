@@ -57,7 +57,8 @@ describe('injectInteractionStyles', () => {
     const tag = dom.children[0]
     assert.equal(tag?.id, INTERACTION_STYLE_ID)
     assert.equal(tag?.dataset['plugin'], '@acme/panel')
-    assert.equal(tag?.dataset['pluginCss'], '')
+    // 0.2 的 HMR 按这个属性回收样式产物（diff D11-3）：必须是样式 id，不能是空串
+    assert.equal(tag?.dataset['pluginCss'], INTERACTION_STYLE_ID)
     release()
   })
 

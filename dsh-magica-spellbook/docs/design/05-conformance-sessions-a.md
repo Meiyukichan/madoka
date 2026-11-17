@@ -185,7 +185,7 @@
 ### G1 · P0 · 门面缺 fiber 兜底 `dispose()`，插件卸载后 agent 与 observers 泄漏
 
 - **现状**：`runWorkspaceSession`（`workspace.ts:138-560`）与 `runEphemeralSession`（`ephemeral.ts:158-512`）只在句柄上暴露 `dispose()`，**没有任何 `ctx.effect`**；`grep 'effectOf\|\.effect(' src/sessions` 仅命中 `core.ts:15,705`（`manageWaterfallListener` 内部）。因此 `uninstall`（审批/提问接管）会随 fiber 卸载被摘掉，但 `installObservers` 的两条 `agentCtx.on(...)`、`installContextDelivery` 的 `agent/pre-step` 监听、以及 `agents.create/resume` 出来的 agent handle 都不会被回收。
-- **原始要求**：I-016 / INV-9「每个副作用都有归属回收点——监听、timer、挂住的 Promise、**以及 `ctx.effect` 自己返回的 disposer**」（i.md:110）；`j.md:45`「`ctx.effect(() => () => { void dispose() }, 'magica:sessions/workspace')`（`:862-866`）是 fiber 销毁时的兜底」；`j.md:191`「magica 自己的 `ctx.effect` 会调 `handle.dispose()`」。
+- **原始要求**：I-016 / INV-9「每个副作用都有归属回收点——监听、timer、挂住的 Promise、**以及 `ctx.effect` 自己返回的 disposer**」（i.md:110）；`j.md:45`「`ctx.effect(() => () => { void dispose() }, 'magica:sessions/workspace')`（`:862-866`）是 fiber 销毁时的兜底」；`j.md:191`「旧实现 自己的 `ctx.effect` 会调 `handle.dispose()`」。
 - **最小修法**：两个门面在 `const firstTurn = ensureFirstTurn()` 之后、`return` 之前各加一行（`effectOf` 已可从 `../shared/dsh.ts` 取）：
   ```ts
   try { effectOf(ctx, () => () => { void dispose() }, 'magica:sessions/workspace') } catch { /* fiber 已 inactive */ }

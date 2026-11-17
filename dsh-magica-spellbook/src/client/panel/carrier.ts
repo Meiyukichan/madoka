@@ -4,32 +4,38 @@
  * 认领靠**标记字段**（`tag`）而不是 `instanceof`：热重载后旧实例仍在注册表里，
  * 类身份会失效，标记不会。
  *
+ * 基类形状直接取 dsh 的 `SessionPendingInteractionBase`
+ * （`@deepseek-ai/dsh-client-ui-session/client`）——`registerPendingInteraction<T>` 的约束就是它。
+ * 我们只额外加"标记 + 视图"两个自有字段。
+ *
  * @module dsh-magica-spellbook/client/panel/carrier
  */
 
-import { INTERACTION_TAG, type InteractionAnswerItem, type PendingInteractionRecord } from '../../shared/wire.ts'
+import {
+  INTERACTION_TAG,
+  type InteractionAnswerItem,
+  type PendingInteractionRecord,
+} from '../../shared/interaction.ts'
+import { asSessionId } from '../../shared/dsh.ts'
+import type { SessionPendingInteractionBase } from '@deepseek-ai/dsh-client-ui-session/client'
 
 export { INTERACTION_TAG }
 
-/** dsh `SessionPendingInteractionBase` 的结构面（不 import 它的类型）。 */
-export interface SessionPendingInteractionBase {
-  readonly key: string
-  readonly kind: string
-  readonly sessionId: string
-}
+/** dsh 的待决交互基类（我们发布的载体必须满足它；形状直接来自 dsh）。 */
+export type { SessionPendingInteractionBase }
 
-/** 一条待决项的浏览器侧载体。 */
+/** 一条待决项的浏览器侧载体（dsh 待决项基类 + 我们自己的标记与视图）。 */
 export class PendingInteractionCarrier implements SessionPendingInteractionBase {
   readonly tag = INTERACTION_TAG
   readonly key: string
   readonly kind: 'question' | 'approval'
-  readonly sessionId: string
+  readonly sessionId: SessionPendingInteractionBase['sessionId']
   readonly view: PendingInteractionRecord
 
   constructor(view: PendingInteractionRecord) {
     this.view = view
     this.kind = view.kind
-    this.sessionId = view.sessionId
+    this.sessionId = asSessionId(view.sessionId)
     this.key = `${view.kind}:${view.id}`
   }
 }

@@ -6,7 +6,7 @@
 
 import { InteractionCard } from './Card.tsx'
 import { interactionRuntime } from './runtime.ts'
-import type { PendingInteractionRecord } from '../../shared/wire.ts'
+import type { PendingInteractionRecord } from '../../shared/interaction.ts'
 
 /**
  * 槽位组件。

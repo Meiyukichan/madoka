@@ -156,7 +156,7 @@
 | D-092 | ✅ | `route.ts:144-151`，文案逐字一致 | — |
 | D-093 | ✅ | `route.ts:152-154` `the interaction was not answered: <result>` | — |
 | D-094 | ✅ | `route.ts:144-151`；03:203 | — |
-| D-095 | ⚠️ | `route.ts:121-126`：403 `forbidden`，message = `this interaction surface only serves sessions created through this SDK` | **文案漂移**：需求逐字要求 `...created through magica`。见 GAP-8 |
+| D-095 | ⚠️ | `route.ts:121-126`：403 `forbidden`，message = `this interaction surface only serves sessions created through this SDK` | **文案漂移**：需求逐字要求 `...created through 旧实现`。见 GAP-8 |
 | D-096 | ✅ | `route.ts:114-128` 只判归属，不判「谁发的」 | — |
 | D-097 | ✅ | `route.ts:169-177` 无 `allowSession` 调用 | — |
 | D-098 | ✅ | `route.ts:179-188` 顺序完全一致 | — |
@@ -243,7 +243,7 @@
 | E-061 | ✅ | `src/interactions/*.ts` 检索无 `slots` / `style` / `dsw-` 命中 | — |
 | E-062 | ✅ | 检索 `@deepseek-ai` 零命中 | — |
 | E-063 | ✅ | 本模块零调用这两个服务，故无服务名漂移风险 | — |
-| E-064 | ✅ | `route.ts:16-17` 只 import magica 自己的 `answerApproval` / `answerQuestion` / `cancelQuestion` | — |
+| E-064 | ✅ | `route.ts:16-17` 只 import 旧实现 自己的 `answerApproval` / `answerQuestion` / `cancelQuestion` | — |
 | E-065 | ✅ | 结论仍成立（结算只能靠监听器自己 resolve/reject）；00 §4.3 已固化 | — |
 | E-066 | ✅ | 同上：本模块未使用任何 `answer`/`cancel`/`list` 远端能力 | — |
 | E-067 | ✅ | `Card.tsx:328-334` 按 `kind` 分流；`Card.tsx:270-273` 审批侧字段独立读取 | — |
@@ -304,7 +304,7 @@
 | E-122 | ✅ | dsh 在派发前就返回 `'rejected'`（`user-approval/src/index.ts` 的 `decide`），本模块无须处理 | — |
 | E-123 | ✅ | `workspace.ts:160,175-181,311` + `approval.ts:111-118` | — |
 | E-124 | ✅ | `route.ts:257` `trust:'browser'` + `:213-217` 可选 `strictMutations`；对照 `api-request-trust.ts:91-118` | 对照结论成立，但默认姿态不安全（GAP-1/GAP-2） |
-| E-125 | ⚠️ | dsh 强制 Host（`api-request-trust.ts:99-103`：缺失/不可解析/非 loopback 且不在白名单 → false）；magica 默认不看 Host，只有可选 `trustedHosts`（`router.ts:354-360`） | 「magica 不做」升级为「可开但默认关」。**仍是默认无 DNS-rebinding 防护** → GAP-1 |
+| E-125 | ⚠️ | dsh 强制 Host（`api-request-trust.ts:99-103`：缺失/不可解析/非 loopback 且不在白名单 → false）；旧实现 默认不看 Host，只有可选 `trustedHosts`（`router.ts:354-360`） | 「旧实现 不做」升级为「可开但默认关」。**仍是默认无 DNS-rebinding 防护** → GAP-1 |
 | E-126 | ✅ | `router.ts:182` `String(site).toLowerCase() === 'cross-site'`；dsh `api-request-trust.ts:106` `=== 'cross-site'` | 大小写不敏感是更宽的一侧（等价或更严），语义等价成立 |
 | E-127 | ✅ | `router.ts:183` 无 Origin 放行；理由确为「没有 Host 围栏」，风险留给部署层 | — |
 | E-128 | ✅ | `router.ts:184` → `sameOrigin`（`:64-73`）`new URL('null')` 抛 → `false` | 「解析失败即拒」而非专门分支，与需求描述一致 |
@@ -378,8 +378,8 @@
 **原始要求（Q-09 关联）**
 
 - D-113：「**Host 头围栏（防 DNS-rebinding）不在本模块**：那是部署策略，不该由 SDK 决定，由注册方自己加」。
-- E-125：「Host 头围栏对照：dsh **强制**（Host 缺失即拒、且必须 loopback 或命中 `trustedHosts`）；magica **不做**，`isTrustedInbound` 完全不看 Host 头 ⇒ `/magica` 前缀默认**没有** DNS-rebinding 防护，注册方必须自己加」。
-- Q-09：「0.2 官方 API 面**强制** Host 围栏且 `trustedHosts` 由部署配置注入。magica 若继续不做，与主壳安全姿态不一致，这条应从『已知限制』升级为『须显式决策 + 默认值必须安全』」。
+- E-125：「Host 头围栏对照：dsh **强制**（Host 缺失即拒、且必须 loopback 或命中 `trustedHosts`）；旧实现 **不做**，`isTrustedInbound` 完全不看 Host 头 ⇒ `/magica` 前缀默认**没有** DNS-rebinding 防护，注册方必须自己加」。
+- Q-09：「0.2 官方 API 面**强制** Host 围栏且 `trustedHosts` 由部署配置注入。旧实现 若继续不做，与主壳安全姿态不一致，这条应从『已知限制』升级为『须显式决策 + 默认值必须安全』」。
 
 **dsh 0.2 里有没有现成等价实现（可复用路径）**
 
@@ -502,9 +502,9 @@ const _assertOutcomes: OutcomesMatchDsh = true
 
 **现状**：`route.ts:121-126` message = `this interaction surface only serves sessions created through this SDK`。
 
-**原始要求**：D-095「message 逐字 `this interaction surface only serves sessions created through magica`」（E-114 的失败集里也复述为 `forbidden`）。
+**原始要求**：D-095「message 逐字 `this interaction surface only serves sessions created through 旧实现`」（E-114 的失败集里也复述为 `forbidden`）。
 
-**最小修法**：改回逐字文案（若「magica → spellbook」更名是有意为之，则同步改 D-095 的需求原文并记入白名单，二者择一，不能两边都留着）。
+**最小修法**：改回逐字文案（若「旧实现 → spellbook」更名是有意为之，则同步改 D-095 的需求原文并记入白名单，二者择一，不能两边都留着）。
 
 **需要补的断言**：403 体 `error.message` 全等断言（现有 `route.test.ts:147-168` 只断言 state code）。
 
@@ -555,7 +555,7 @@ const _assertOutcomes: OutcomesMatchDsh = true
 | Q-05 | **不采纳** | 0.2 的 `intent.kind` 仍只有 `'plan-review'`（`user-questions/src/types.ts:26`），没有扩充取值；放宽成 `string` 仍是纯前向兼容，`BAD_INTENT` 语义未变。 |
 | Q-06 | **采纳（已核实不变）** | `ApprovalOutcome` 仍四值（`user-approval/src/types.ts:32`、`index.ts:55`），`decision` 收窄两值仍正确；但「双向断言」本身没落地（GAP-4）。 |
 | Q-07 | **不采纳** | 0.2 仍无 `user-questions/no-answerer` 事件，`noAnswerer` 仍是 `ctx.waterfall(...)` 的最后一个实参（`user-questions/src/index.ts:318-329`），「兜底是函数返回值」成立。 |
-| Q-08 | **部分采纳** | 六阶段闸门与信封仍是自研 `core/router.ts`（不是 dsh 能力），这一组条目可继续按 magica 实现核对；但 Q-09 的 Host 围栏应改用 dsh 等价实现（GAP-1）。 |
+| Q-08 | **部分采纳** | 六阶段闸门与信封仍是自研 `core/router.ts`（不是 dsh 能力），这一组条目可继续按 旧实现 实现核对；但 Q-09 的 Host 围栏应改用 dsh 等价实现（GAP-1）。 |
 | Q-09 | **采纳（头等安全）** | 默认无 Host 围栏 + `trust:'browser'` 完全不看 Host，rebinding 可读可写；`trustedHosts` 只实现了「可开」而非「默认安全」→ GAP-1/GAP-3。 |
 | Q-10 | **采纳** | 现状只有「卸载即 dispose」与 hidden 跳过，缺「任务完成即停」与「达上限」，不可断言 → GAP-10。 |
 | Q-11 | **不采纳** | 0.2 `home-paths` 的解析优先级仍是 configured > `$DSH_HOME` > `~/.dsh`，未改成 profiles 目录；台账路径假设成立（`store.ts:116-124`）。 |

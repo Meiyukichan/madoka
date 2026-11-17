@@ -7,7 +7,7 @@
 import { listPendingApprovals } from '../sessions/approval.ts'
 import { listPendingQuestions } from '../sessions/questions.ts'
 import { isMagicaSession, type InteractionHostFace } from './ownership.ts'
-import type { PendingInteractionRecord } from '../shared/wire.ts'
+import type { PendingInteractionRecord } from '../shared/interaction.ts'
 
 /** 采集选项。 */
 export interface CollectInteractionOptions {

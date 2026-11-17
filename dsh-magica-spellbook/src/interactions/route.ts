@@ -22,7 +22,7 @@ import {
   type AnswerApprovalBody,
   type InteractionAnswerItem,
   type InteractionEnvelope,
-} from '../shared/wire.ts'
+} from '../shared/interaction.ts'
 
 /** 请求体上限（一组答案或一个决定几百字节就够）。 */
 export const MAX_BODY_BYTES = 64 * 1024

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { InteractionRegistry, carrierKey, claim } from '../../src/client/panel/registry.ts'
-import type { PendingInteractionRecord } from '../../src/shared/wire.ts'
+import type { PendingInteractionRecord } from '../../src/shared/interaction.ts'
 
 function question(id: string, sessionId: string, since = 1): PendingInteractionRecord {
   return { kind: 'question', id, sessionId, since, questions: [{ id: 'q', question: 'x' }] }

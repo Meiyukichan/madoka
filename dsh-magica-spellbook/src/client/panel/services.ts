@@ -4,28 +4,28 @@
  * 抽出来的原因：装配代码在 `surface.ts`（依赖 `Composer.tsx`），而 Node 的测试进程
  * 不能 import `.tsx`，导致"属性回退是否安全"这类关键韧性没有可测入口。
  *
+ * 三个服务面**都是 dsh 的真实类型**：
+ * - {@link InteractionScopeFace} = cordis `Context`（`dsh-client-ui-renderer` / `ui-session` /
+ *   `ui-conversation` 的声明合并已经把 `ctx.slots`、`ctx.uiSession` 与
+ *   `SlotMap['conversation.composer']` 合进来）；
+ * - {@link UiSessionFace} = `dsh-client-ui-session` 的 `UiSession`；
+ * - {@link SlotsFace} = `dsh-client-ui-renderer` 的 `SlotRegistry`。
+ *
  * @module dsh-magica-spellbook/client/panel/services
  */
 
-/** 客户端 context 的最小结构面（不 import cordis / dsh 的类型）。 */
-export interface InteractionScopeFace {
-  get?(name: string): unknown
-  effect?(callback: () => unknown, label?: string): unknown
-  [key: string]: unknown
-}
+import type { Context } from '@deepseek-ai/cordis'
+import type { UiSession } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 
-/** `uiSession` 的最小面。 */
-export interface UiSessionFace {
-  registerPendingInteraction?<T extends { key: string; kind: string; sessionId: string }>(
-    precedence: (interaction: T) => number,
-  ): (interaction: T, delegate: () => Promise<void>) => () => void
-}
+/** 客户端 context（cordis 的真实 `Context`）。 */
+export type InteractionScopeFace = Context
 
-/** `slots` 的最小面。 */
-export interface SlotsFace {
-  inject?(key: string, callback: () => () => void): () => void
-  register?(options: Record<string, unknown>, component: unknown): () => void
-}
+/** `uiSession`（会话 UI 状态与被控注册表）。 */
+export type UiSessionFace = UiSession
+
+/** `slots`（slot 注册表）。 */
+export type SlotsFace = SlotRegistry
 
 /**
  * 取服务：先 `ctx.get(name)`，再退到属性访问。
@@ -40,14 +40,15 @@ export interface SlotsFace {
 export function serviceOf<T>(scope: InteractionScopeFace, name: string): T | undefined {
   if (typeof scope.get === 'function') {
     try {
-      const value = scope.get(name)
+      const value: unknown = scope.get(name)
       if (value !== undefined && value !== null) return value as T
     } catch {
       // 未注册：退回属性访问
     }
   }
   try {
-    const direct = scope[name]
+    // `Context` 是代理，服务是**动态属性**：类型上不可枚举，只能运行时读。
+    const direct: unknown = Reflect.get(scope, name)
     return direct === undefined || direct === null ? undefined : (direct as T)
   } catch {
     return undefined

@@ -12,6 +12,8 @@
  */
 
 import {
+  asMessageId,
+  asSessionId,
   effectOf,
   serviceOf,
   type DshAgentHandleLike,
@@ -21,15 +23,18 @@ import {
   type DshAgentRegistryLike,
   type DshAgentSetup,
   type DshAgentSetupCommit,
+  type DshApprovalPolicy,
   type DshCancelCause,
   type DshContextLike,
   type DshPermissionPresetsLike,
+  type DshSandboxMode,
   type DshSessionEvent,
   type DshSessionLike,
   type DshTurnEndReason,
   type DshUserMessageLike,
+  type SessionIdLike,
 } from '../shared/dsh.ts'
-import { WATERFALL_TAKEOVER } from '../shared/wire.ts'
+import { WATERFALL_TAKEOVER } from '../shared/interaction.ts'
 import type { SessionRecord } from './store.ts'
 
 /** 0.2 的 7 种结局（`.0.1.6` 只有 6 种，缺 `forked`）。 */
@@ -54,6 +59,23 @@ type KindsMatchDsh = DshTurnEndReason['kind'] extends TurnEndKind
 const _assertKindsMatchDsh: KindsMatchDsh = true
 void _assertKindsMatchDsh
 
+/**
+ * 三个合法沙箱模式（dsh `SandboxMode` 全集）。
+ *
+ * 为什么还要在运行时枚举：`applyPermission` 的 `name` 来自调用方字符串（可能来自 HTTP /
+ * 配置），dsh 的 `session.append('sandbox/mode', …)` 只接受 brand 过后的联合成员。
+ * 下面的编译期断言保证这个数组与 dsh 的联合始终一致。
+ */
+export const SANDBOX_MODES = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+] as const satisfies readonly DshSandboxMode[]
+
+type MissingSandboxMode = Exclude<DshSandboxMode, (typeof SANDBOX_MODES)[number]>
+const _assertAllSandboxModes: MissingSandboxMode extends never ? true : never = true
+void _assertAllSandboxModes
+
 /** 只有 `completed` 算完成；`undefined`（没观察到 `turn/end`）也算未完成。 */
 export function isTurnCompleted(reason: DshTurnEndReason | undefined): boolean {
   return reason?.kind === 'completed'
@@ -70,7 +92,10 @@ export function describeTurnEnd(reason: DshTurnEndReason | undefined): string {
     case 'blocked':
       return 'blocked'
     case 'error': {
-      const message = (reason.error as { message?: string }).message ?? 'unknown'
+      // dsh 给的是结构化 `LlmFailure`；缺 `message` 的历史数据仍要能读
+      const message = typeof reason.error.message === 'string' && reason.error.message !== ''
+        ? reason.error.message
+        : 'unknown'
       return `error: ${message}`
     }
     case 'max-tokens':
@@ -80,6 +105,7 @@ export function describeTurnEnd(reason: DshTurnEndReason | undefined): string {
     case 'forked':
       return 'forked (fork seed)'
     default:
+      // 理论上不可达（联合是穷尽的）；历史日志里的未知 kind 仍要能读出一个词
       return String((reason as { kind?: unknown }).kind)
   }
 }
@@ -202,18 +228,16 @@ export function mintSessionId(prefix: string): string {
     .slice(2, 10)}`
 }
 
-/** 品牌类型在运行时是 no-op，转换点集中在一处。 */
-export function asSessionId(id: string): string {
-  return id
-}
+/** 会话 id 的 brand 铸造器集中在 `shared/dsh.ts`（这里转出以保持公开 API 不变）。 */
+export { asSessionId }
 
 /** 普通用户消息（`string[]` → 同一条消息的多个 block）。 */
 export function buildUserMessage(text: string | string[]): DshUserMessageLike {
   const blocks = Array.isArray(text) ? text : [text]
   return {
-    id: mintMessageId(),
+    id: asMessageId(mintMessageId()),
     role: 'user',
-    content: blocks.map((item) => ({ type: 'text', text: item })),
+    content: blocks.map((item): { type: 'text'; text: string } => ({ type: 'text', text: item })),
     source: { kind: 'user' },
   }
 }
@@ -230,7 +254,8 @@ export const DEFAULT_CONTEXT_KIND = 'spellbook-context'
  * - 传了 `section` → 用 section 名当 kind（GUI 的上下文行显示它，例：`lattice-rules`）；
  * - 没传 → 用 {@link DEFAULT_CONTEXT_KIND}。
  *
- * `plugin` 字段保留（表达"谁注入的"），`form`/`sections` 按 snapshot 形状给出。
+ * 这个生产者形状由 `shared/dsh.ts` 里的 `MessageSourceMap` 声明合并登记（dsh 的官方扩展点），
+ * 所以返回的是真正的 `UserMessage`，不再是"长得像"的对象。
  */
 export function buildPluginMessage(
   plugin: string,
@@ -243,17 +268,16 @@ export function buildPluginMessage(
       "context section must not be 'plugin': dsh session format v4 rejects the retired plugin source kind",
     )
   }
-  const source: Record<string, unknown> = {
-    kind,
-    plugin,
-    form: 'snapshot',
-    sections: [{ name: kind, text }],
-  }
   return {
-    id: mintMessageId(),
+    id: asMessageId(mintMessageId()),
     role: 'user',
     content: [{ type: 'text', text }],
-    source,
+    source: {
+      kind,
+      plugin,
+      form: 'snapshot',
+      sections: [{ name: kind, text }],
+    },
   }
 }
 
@@ -384,12 +408,6 @@ export function resolveAgentPresets(ctx: unknown): DshAgentPresetsLike | undefin
   return presets
 }
 
-function readPresetId(mounted: unknown): string | undefined {
-  if (typeof mounted !== 'object' || mounted === null) return undefined
-  const id = (mounted as { id?: unknown }).id
-  return typeof id === 'string' && id !== '' ? id : undefined
-}
-
 /** 解析默认 preset 的**具体 id**（`meta.agentPreset` 是创建参数，必须在创建前拿到）。 */
 export async function resolveAgentPresetId(
   ctx: unknown,
@@ -399,7 +417,7 @@ export async function resolveAgentPresetId(
   const presets = resolveAgentPresets(ctx)
   if (presets === undefined || typeof presets.resolve !== 'function') return undefined
   try {
-    return readPresetId(await presets.resolve())
+    return (await presets.resolve()).id
   } catch {
     return undefined
   }
@@ -407,15 +425,11 @@ export async function resolveAgentPresetId(
 
 /** 从会话事件里抽纯文本（只取 text block，多 block 用 `join('')`）。 */
 export function extractAssistantText(event: DshSessionEvent): string | null {
-  const data = event.data as { message?: { content?: unknown } } | undefined
-  const content = data?.message?.content
-  if (!Array.isArray(content)) return null
+  if (event.type !== 'assistant/message') return null
   const parts: string[] = []
-  for (const block of content) {
-    if (typeof block !== 'object' || block === null) continue
-    const candidate = block as { type?: unknown; text?: unknown }
-    if (candidate.type !== 'text' || typeof candidate.text !== 'string') continue
-    parts.push(candidate.text)
+  for (const block of event.data.message.content) {
+    if (block.type !== 'text') continue
+    parts.push(block.text)
   }
   const text = parts.join('').trim()
   return text === '' ? null : text
@@ -462,7 +476,6 @@ export function installObservers(
       // disposed 闸门（l.md:192）：句柄释放后事件还会漏一拍，回调不该再触发用户的观察者
       if (state.disposed) return
       if (String(session.id) !== String(sessionId)) return
-      const data = event.data as Record<string, unknown> | undefined
       switch (event.type) {
         case 'assistant/message': {
           const text = extractAssistantText(event)
@@ -473,37 +486,38 @@ export function installObservers(
           return
         }
         case 'turn/end': {
-          const reason = data?.['reason'] as DshTurnEndReason | undefined
+          const reason = event.data.reason
+          // 未知/损坏的结局不写进账：否则 `outcome` 会变成 undefined
           if (reason === undefined || typeof reason.kind !== 'string') return
-          const turn = typeof data?.['turn'] === 'number' ? data['turn'] : state.turnEnds.length + 1
           state.turnEnds.push(reason)
           state.outcome = reason.kind
           // 审批对是 turn-enclosed 的：turn 结束时还挂着的必然悬空
           openApprovals.clear()
+          const turn = Number.isFinite(event.data.turn) ? event.data.turn : state.turnEnds.length + 1
           safeHook('onTurnEnd', hooks.onTurnEnd === undefined ? undefined : () => hooks.onTurnEnd?.(reason, turn))
           return
         }
         case 'approval/asked': {
-          const id = String(data?.['id'] ?? '')
+          const id = String(event.data.id ?? '')
           if (id === '') return
           const entry: { toolName: string; callId?: string; reason?: string; since: number } = {
-            toolName: String(data?.['toolName'] ?? ''),
+            toolName: event.data.toolName ?? '',
             since: typeof event.time === 'number' ? event.time : Date.now(),
           }
-          if (data?.['callId'] !== undefined) entry.callId = String(data['callId'])
-          if (typeof data?.['reason'] === 'string') entry.reason = data['reason']
+          if (event.data.callId !== undefined) entry.callId = String(event.data.callId)
+          if (typeof event.data.reason === 'string') entry.reason = event.data.reason
           openApprovals.set(id, entry)
           return
         }
         case 'approval/decided': {
-          const id = String(data?.['id'] ?? '')
+          const id = String(event.data.id ?? '')
           const open = openApprovals.get(id)
           if (open === undefined) return
           openApprovals.delete(id)
           const at = typeof event.time === 'number' ? event.time : Date.now()
           const record: ApprovalRecord = {
             toolName: open.toolName,
-            outcome: String(data?.['outcome'] ?? 'unavailable'),
+            outcome: String(event.data.outcome ?? 'unavailable'),
             since: open.since,
             waitedMs: Math.max(0, at - open.since),
           }
@@ -513,30 +527,31 @@ export function installObservers(
           return
         }
         case 'approval/policy': {
-          const policy = data?.['policy']
+          const policy: DshApprovalPolicy = event.data.policy
+          // 历史日志里可能有非法值：运行时仍按闭集收窄
           if (policy === 'ask' || policy === 'never') state.approvalPolicy = policy
           return
         }
         case 'sandbox/mode': {
-          const mode = data?.['mode']
+          const mode: DshSandboxMode = event.data.mode
           if (typeof mode === 'string') state.sandboxMode = mode
           return
         }
         case 'plan/mode': {
-          const active = data?.['active']
+          const active: boolean = event.data.active
           if (typeof active === 'boolean') state.planMode = active
           return
         }
         case 'tool/call': {
-          const callId = data?.['callId']
+          const callId = event.data.callId
           if (callId === undefined) return
-          const name = typeof data?.['name'] === 'string' ? data['name'] : ''
-          const args = typeof data?.['arguments'] === 'string' ? data['arguments'] : ''
+          const name = event.data.name ?? ''
+          const args = event.data.arguments ?? ''
           safeHook('onToolCall', hooks.onToolCall === undefined ? undefined : () => hooks.onToolCall?.(String(callId), name, args))
           return
         }
         case 'tool/result': {
-          const callId = (data?.['message'] as { source?: { callId?: unknown } } | undefined)?.source?.callId
+          const callId = event.data.message?.source?.callId
           if (callId === undefined) return
           safeHook('onToolResult', hooks.onToolResult === undefined ? undefined : () => hooks.onToolResult?.(String(callId)))
           return
@@ -599,16 +614,13 @@ export function installContextDelivery(
   try {
     off = ctx.on(
       'agent/pre-step',
-      async (
-        _payload: unknown,
-        next: () => Promise<{ kind: string; messages?: DshUserMessageLike[] }>,
-      ) => {
+      async (_payload, next) => {
         const decision = await next()
         if (pending.length === 0) return decision
         if (decision.kind === 'reject') return decision
         const batch = pending
         pending = []
-        return { ...decision, messages: [...(decision.messages ?? []), ...batch] }
+        return { ...decision, messages: [...decision.messages, ...batch] }
       },
       { prepend: true },
     )
@@ -669,8 +681,11 @@ export function applyPermission(
       // 未知预设名 / 服务内部错误：降级
     }
   }
+  // `sandbox/mode` 只接受 dsh 的 `SandboxMode`；非法名不能假装写进去了
+  const mode = SANDBOX_MODES.find((candidate) => candidate === name)
+  if (mode === undefined) return 'none'
   try {
-    session.append('sandbox/mode', { mode: name })
+    session.append('sandbox/mode', { mode })
     return 'sandbox'
   } catch {
     return 'none'
@@ -722,13 +737,20 @@ export function manageWaterfallListener(
 }
 
 /** 看门狗超时的结算（形状完整，不再用 `as` 断言绕过）。 */
-function timeoutSettlement(): TurnSettlement {
+/**
+ * 看门狗超时的结算。
+ *
+ * **必须带上本轮已产出的文本**（旧实现 `core.ts:778-786` 的语义）：模型可能已经说了
+ * 一半、卡在工具调用上；超时只代表"本轮没收敛"，不代表"什么都没说"。
+ * 早前这里硬编码 `texts: []`，调用方会以为模型没输出（D11-1 退步）。
+ */
+function timeoutSettlement(texts: string[], externallyDisposed: boolean): TurnSettlement {
   return {
     reason: { kind: 'aborted', reason: { kind: 'hook', reason: 'magica:idle-timeout' } },
     kind: 'aborted',
     completed: false,
-    texts: [],
-    externallyDisposed: false,
+    texts,
+    externallyDisposed,
     timedOut: true,
   }
 }
@@ -761,7 +783,7 @@ export async function runTurnVerified(
       } catch {
         // 已结束
       }
-      return timeoutSettlement()
+      return timeoutSettlement(state.messages.slice(msgCountBefore), state.externallyDisposed)
     }
   } else {
     await handle.agent.whenIdle()
@@ -798,7 +820,7 @@ export class SessionResumeError extends Error {
 /** 续跑分派结果。 */
 export interface ResumeTarget {
   resumed: boolean
-  sessionId: string
+  sessionId: SessionIdLike
   record?: SessionRecord
 }
 
@@ -835,7 +857,7 @@ export function resolveResumeTarget(
 }
 
 /** 会话是否还在活层（提前查是为了给可读错误，而不是让调用方去猜 `already exists`）。 */
-export function assertSessionNotLive(agents: DshAgentRegistryLike, sessionId: string): void {
+export function assertSessionNotLive(agents: DshAgentRegistryLike, sessionId: SessionIdLike): void {
   let live: DshAgentLike | undefined
   try {
     live = agents.get(sessionId)
@@ -896,24 +918,24 @@ export async function composeAgentScope(options: {
   try {
     if (options.presetId !== false) {
       const presets = resolveAgentPresets(options.ctx)
-      if (presets !== undefined && typeof presets.mount === 'function') {
-        const mounted = await presets.mount(options.agentCtx, options.presetId)
-        mountedPresetId = readPresetId(mounted) ?? (typeof options.presetId === 'string' ? options.presetId : undefined)
+      if (presets !== undefined) {
+        const mounted = await presets.mount(options.agentCtx as DshContextLike, options.presetId)
+        mountedPresetId = mounted.id === '' ? options.presetId : mounted.id
       } else if (typeof options.presetId === 'string') {
         mountedPresetId = options.presetId
       }
     }
     let commit: DshAgentSetupCommit | undefined
     if (options.userSetup !== undefined) {
-      const result = await options.userSetup(options.agentCtx)
+      const result = await options.userSetup(options.agentCtx as DshContextLike)
       if (result !== undefined && result !== null) {
-        if (typeof (result as DshAgentSetupCommit).commit !== 'function') {
+        if (typeof result.commit !== 'function') {
           throw new Error(
             'setup 的返回值必须是 `{ commit(): void }` 对象或 undefined；'
               + '返回裸函数会让 dsh 的 setupCommit?.commit() 抛 "is not a function"',
           )
         }
-        commit = result as DshAgentSetupCommit
+        commit = result
       }
     }
     return {

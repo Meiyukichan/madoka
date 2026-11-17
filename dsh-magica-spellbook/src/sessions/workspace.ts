@@ -41,7 +41,7 @@ import { installApprovalAnswerer, snapshotPendingApprovals, type PendingApproval
 import { installQuestionAnswerer, snapshotPendingQuestions, type PendingQuestion } from './questions.ts'
 import { getWorkspaceRegistry, normalizeProjectPath, type EnsureWorkspaceOptions } from './ensure-workspace.ts'
 import { noteMagicaSession } from '../interactions/ownership.ts'
-import { effectOf, serviceOf } from '../shared/dsh.ts'
+import { effectOf, serviceOf, asReasoningEffortId, asWorkspaceId } from '../shared/dsh.ts'
 import type {
   DshAgentHandleLike,
   DshAgentSetup,
@@ -205,13 +205,23 @@ export function runWorkspaceSession(
       })
       unsubscribe = composition.unsubscribe
       if (composition.presetId !== undefined) mountedPresetId = composition.presetId
-      if (!reattached) delivery = installContextDelivery(agentCtx, resumed ? [] : contexts)
+      if (!reattached) {
+        // 续跑也要投调用方 context（D14）：旧实现 `workspace.ts:566` 是总投——
+        // "续跑传 context" 的语义就是"给唤醒轮一批新上下文"，丢掉等于调用方白传。
+        delivery = installContextDelivery(agentCtx, contexts)
+      }
       return composition.commit
     }
   }
 
   async function createAgent(agents: ReturnType<typeof resolveAgents>): Promise<DshAgentHandleLike> {
-    let presetId = options.agentPresetId
+    // 续跑优先沿用台账里的 preset（D15）：旧实现 `workspace.ts:452` 的设计约束是
+    // 「默认 preset 后来被改了，不该把老会话的工具集换掉」。
+    const remembered =
+      options.agentPresetId === undefined && resumed && record?.agentPresetId !== undefined
+        ? (record.agentPresetId as string)
+        : undefined
+    let presetId = options.agentPresetId ?? remembered
     if (presetId !== false) presetId = await resolveAgentPresetId(ctx, presetId)
     return agents.create({
       sessionId,
@@ -223,7 +233,9 @@ export function runWorkspaceSession(
         provider: model.provider,
         model: model.model,
         // 公开选项不暴露 reasoningEffort，但 dsh 默认选择里的值要透传下去
-        ...(model.reasoningEffort !== undefined ? { reasoningEffort: model.reasoningEffort } : {}),
+        ...(model.reasoningEffort !== undefined
+          ? { reasoningEffort: asReasoningEffortId(model.reasoningEffort) }
+          : {}),
       },
       setup: makeSetup(),
     })
@@ -243,7 +255,9 @@ export function runWorkspaceSession(
       agentOptions: {
         provider: model.provider,
         model: model.model,
-        ...(model.reasoningEffort !== undefined ? { reasoningEffort: model.reasoningEffort } : {}),
+        ...(model.reasoningEffort !== undefined
+          ? { reasoningEffort: asReasoningEffortId(model.reasoningEffort) }
+          : {}),
       },
       setup: makeSetup(),
     }).catch((error: unknown) => {
@@ -258,7 +272,7 @@ export function runWorkspaceSession(
       attachError = 'workspaceRegistry service unavailable'
       return
     }
-    const workspace = registry.get(options.workspaceId)
+    const workspace = registry.get(asWorkspaceId(options.workspaceId))
     if (workspace === undefined) {
       attachError = `workspace "${options.workspaceId}" not found in registry`
       return
@@ -434,7 +448,13 @@ export function runWorkspaceSession(
     } catch {
       // 已注销
     }
-    delivery?.dispose()
+    // 投递器 dispose 也要容错（D16）：它抛错会中断 runDispose 后面的
+    // unsubscribe / handle.dispose，表现为"会话关不干净"
+    try {
+      delivery?.dispose()
+    } catch {
+      // best-effort
+    }
     delivery = null
     state.running = false
     state.done = true
@@ -494,7 +514,10 @@ export function runWorkspaceSession(
   }
 
   function followup(message: string | string[]): Promise<TurnSettlement> {
-    const previous = turnDone
+    // 首轮必须先落定（D13）：早前 `turnDone` 初值是已 resolve 的空 Promise，
+    // firstTurn 又从不接进来 → "建会话后不 await 直接 followup" 会并发跑两个 turn。
+    // 旧实现 `workspace.ts:767` 是把 turnDone 挂在 firstTurn 之后，这里等价地先等首轮。
+    const previous = turnDone.then(() => ensureFirstTurn().then(() => undefined, () => undefined))
     const mine = previous.then(async () => {
       if (disposed) throw new Error('session disposed')
       if (handle === null) throw new Error('agent handle not created yet')

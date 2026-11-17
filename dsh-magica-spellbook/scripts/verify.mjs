@@ -95,6 +95,28 @@ for (const [key, target] of Object.entries(manifest.exports ?? {})) {
   check(existsSync(path), `exports["${key}"] 目标不存在: ${path}`)
 }
 
+// d.ts 声明过、但曾经因为中间 index 漏再导出而在产物里缺席的符号（diff「幽灵声明」十条）。
+// 这条守卫的作用：以后谁删掉再导出，构建会当场红，而不是让消费方 import 到 undefined。
+const DECLARED_EXPORTS = {
+  host: ['ephemeralPending', 'isLoopbackHost', 'isTrustedHost'],
+  client: [
+    'pickDisplayText',
+    'currentLang',
+    'parseRecommended',
+    'carrierKey',
+    'claim',
+    'InteractionRegistry',
+    'serviceOf',
+  ],
+}
+for (const [side, names] of Object.entries(DECLARED_EXPORTS)) {
+  const text = side === 'host' ? host : client
+  const file = side === 'host' ? 'lib/index.js' : 'lib/client.js'
+  for (const name of names) {
+    check(text.includes(name), `${file} 缺少已声明导出: ${name}`)
+  }
+}
+
 if (failures.length > 0) {
   console.error('verify 失败:')
   for (const failure of failures) console.error(` - ${failure}`)

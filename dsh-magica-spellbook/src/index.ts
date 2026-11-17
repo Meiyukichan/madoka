@@ -25,6 +25,8 @@ export type { FieldCryptoHandle, FieldCryptoOptions } from './core/crypto.ts'
 export {
   HttpRouteError,
   createJsonRouter,
+  isLoopbackHost,
+  isTrustedHost,
   isTrustedInbound,
   jsonRoute,
   queryOf,
@@ -59,6 +61,16 @@ export {
   stepOutputBill,
 } from './core/pricing.ts'
 export type { PriceEntry, PriceTable } from './core/pricing.ts'
+
+// ── 宿主契约（服务/事件清单；不是 npm 依赖）──────────────────────
+export {
+  CLIENT_SERVICES,
+  HOST_EVENTS,
+  HOST_SERVICES,
+  describeHostRequirements,
+  requiredHostServices,
+} from './shared/host-contract.ts'
+export type { HostServiceRequirement } from './shared/host-contract.ts'
 
 // ── sessions / interactions ────────────────────────────────────
 export * from './sessions/index.ts'

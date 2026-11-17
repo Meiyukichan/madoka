@@ -4,6 +4,8 @@
  * @module dsh-magica-spellbook/client/panel/locales
  */
 
+import type {} from '@deepseek-ai/dsh-client-ui-slots' // 合并 LocaleNamespaceMap
+
 /** 命名空间（`ctx.locale.register` 与槽位 `locale:` 都必须用它）。 */
 export const INTERACTION_LOCALE_NS = 'magica-interaction'
 
@@ -44,10 +46,18 @@ export const zh = {
   'browser.editPath': '编辑路径',
   'browser.truncated': '目录太大，只显示前一部分',
   'browser.empty': '这里没有可显示的目录',
+  'browser.drives': '磁盘驱动器',
 } as const
 
 /** 文案 key 域。 */
 export type InteractionKey = keyof typeof zh
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    /** spellbook 的待决交互文案（`ix.*` + `browser.*`）。 */
+    'magica-interaction': InteractionKey
+  }
+}
 
 /** 英文文案（与中文逐 key 对齐）。 */
 export const en: Record<InteractionKey, string> = {
@@ -84,6 +94,7 @@ export const en: Record<InteractionKey, string> = {
   'browser.editPath': 'Edit path',
   'browser.truncated': 'This folder is large; only the first entries are shown',
   'browser.empty': 'No folders to show here',
+  'browser.drives': 'Drives',
 }
 
 /** 翻译函数形状（比 dsh 的 `Translate` 更窄：参数值必须是字符串）。 */

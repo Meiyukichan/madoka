@@ -16,7 +16,8 @@ import { serviceOf as pickService, type InteractionScopeFace, type SlotsFace, ty
 import { injectInteractionStyles } from './styles.ts'
 import { createInteractionTransport, type InteractionTransport } from './transport.ts'
 import type { InteractionTranslate } from './locales.ts'
-import type { PendingInteractionRecord } from '../../shared/wire.ts'
+import type { PendingInteractionRecord } from '../../shared/interaction.ts'
+import type { ComposerChainProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 export type { InteractionScopeFace } from './services.ts'
 const serviceOf = pickService
@@ -183,13 +184,12 @@ export function createInteractionSurface(
   const slots = serviceOf<SlotsFace>(scope, 'slots')
   if (slots !== undefined && typeof slots.inject === 'function' && typeof slots.register === 'function') {
     try {
-      const register = slots.register.bind(slots)
       disposeSlot = slots.inject('conversation.composer', () =>
-        register(
+        slots.register(
           {
             name: 'conversation.composer',
             // 只认带标记的载体，绝不抢 dsh 自己的提问/审批卡片
-            select: (owner: { pendingInteraction?: unknown }) => {
+            select: (owner: ComposerChainProps) => {
               const candidate = owner.pendingInteraction
               return isInteractionCarrier(candidate) ? candidate.view : null
             },

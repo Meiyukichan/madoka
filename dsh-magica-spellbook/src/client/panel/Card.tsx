@@ -8,15 +8,15 @@
 
 import { useMemo, useState } from 'react'
 import { Button, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-// 0.2 的 primitives 不再导出 Icon*（真机表现为 React #130），图标自带
+// 图标全部来自 primitives 的真实组件（见 ./icons.tsx 头注释）
 import {
-  IconCheckOutline14,
-  IconChevronDownOutline14,
-  IconChevronLeftOutline14,
-  IconChevronRightOutline14,
-  IconChevronUpOutline14,
-  IconCloseOutline16,
-  IconEditOutline16,
+  IconCheckOutlineRegular,
+  IconChevronDownOutlineRegular,
+  IconChevronLeftOutlineRegular,
+  IconChevronRightOutlineRegular,
+  IconChevronUpOutlineRegular,
+  IconCloseOutlineRegular,
+  IconEditOutlineRegular,
 } from './icons.tsx'
 import { currentLang, pickDisplayText } from './display-text.ts'
 import { parseRecommended } from './recommended.ts'
@@ -26,7 +26,7 @@ import type {
   InteractionAnswerItem,
   InteractionQuestion,
   PendingInteractionRecord,
-} from '../../shared/wire.ts'
+} from '../../shared/interaction.ts'
 
 /** 卡片入参。 */
 export interface InteractionCardProps {
@@ -74,10 +74,11 @@ interface QuestionFlowProps {
   onAnswered?: () => void
 }
 
-function QuestionFlow({ view, questions, t, actions, onAnswered }: QuestionFlowProps): React.ReactElement {
+function QuestionFlow({ view, questions, t, actions, onAnswered, takeover = true }: QuestionFlowProps & { takeover?: boolean }): React.ReactElement {
   const [index, setIndex] = useState(0)
   const [drafts, setDrafts] = useState<Draft[]>(() => questions.map(() => emptyDraft()))
-  const [busy, setBusy] = useState(false)
+  // 三态 busy（D4）：只有 answer 态显示「提交中…」，cancel 态不该这么写
+  const [busy, setBusy] = useState<'answer' | 'cancel' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [minimized, setMinimized] = useState(false)
 
@@ -101,48 +102,76 @@ function QuestionFlow({ view, questions, t, actions, onAnswered }: QuestionFlowP
       return
     }
     patch({ selected: [option], custom: '' })
+    // 单选选定后自动进下一题（diff D1，旧实现 `Card.tsx:192` 同款）：末题不动，
+    // 多选不自动翻页（用户还在勾）。想回头改可以用「上一题」。
+    if (!isLast) setIndex((at) => Math.min(total - 1, at + 1))
   }
 
   function skip(): void {
+    // 末题跳过要提交**整组**草稿（D3）：早前只提交当前一题，多题时前面
+    // 已答的草稿会被丢弃——那是退步，不是设计。
     patch({ skipped: true, selected: [], custom: '' })
-    if (isLast) void submit([{ id: question?.id ?? '', selected: [] }])
-    else setIndex((at) => Math.min(total - 1, at + 1))
-  }
-
-  async function advance(): Promise<void> {
-    if (question === undefined) return
-    if (!hasAnswer(draft, question)) {
-      setError(t('ix.error.unanswered'))
-      return
-    }
     if (!isLast) {
       setIndex((at) => Math.min(total - 1, at + 1))
       return
     }
-    const answers = questions.map((item, at) => toAnswer(item, drafts[at] ?? emptyDraft()))
-    await submit(answers)
+    const next = drafts.map((item, at) =>
+      at === index ? { ...item, skipped: true, selected: [], custom: '' } : item,
+    )
+    void submit(questions.map((item, at) => toAnswer(item, next[at] ?? emptyDraft())))
+  }
+
+  async function advance(): Promise<void> {
+    if (question === undefined) return
+    // 末题提交做**整组**校验并跳到第一条缺答题（D2，`ix.error.incomplete` 不再是死键）
+    if (isLast) {
+      const missing = questions.findIndex((item, at) => !hasAnswer(drafts[at] ?? emptyDraft(), item))
+      if (missing >= 0) {
+        setIndex(missing)
+        setError(t('ix.error.incomplete'))
+        return
+      }
+      await submit(questions.map((item, at) => toAnswer(item, drafts[at] ?? emptyDraft())))
+      return
+    }
+    if (!hasAnswer(draft, question)) {
+      setError(t('ix.error.unanswered'))
+      return
+    }
+    setIndex((at) => Math.min(total - 1, at + 1))
   }
 
   async function submit(answers: InteractionAnswerItem[]): Promise<void> {
-    setBusy(true)
-    const result = await actions.answerQuestion(view, answers)
-    setBusy(false)
-    if (!result.ok) {
-      setError(result.error)
-      return
+    setBusy('answer')
+    try {
+      const result = await actions.answerQuestion(view, answers)
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
+      onAnswered?.()
+    } catch (error) {
+      // actions reject（网络/装配异常）绝不能变成未处理 rejection + busy 永卡（D4）
+      setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(null)
     }
-    onAnswered?.()
   }
 
   async function cancel(): Promise<void> {
-    setBusy(true)
-    const result = await actions.cancelQuestion(view)
-    setBusy(false)
-    if (!result.ok) {
-      setError(result.error)
-      return
+    setBusy('cancel')
+    try {
+      const result = await actions.cancelQuestion(view)
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
+      onAnswered?.()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(null)
     }
-    onAnswered?.()
   }
 
   if (question === undefined) return <div className="magica-ix-frame" />
@@ -154,8 +183,7 @@ function QuestionFlow({ view, questions, t, actions, onAnswered }: QuestionFlowP
     [t],
   )
 
-  return (
-    <div className="magica-ix-frame">
+  const card = (
       <section className="magica-ix-card">
         <header className="magica-ix-header">
           <div className="magica-ix-headings">
@@ -171,22 +199,25 @@ function QuestionFlow({ view, questions, t, actions, onAnswered }: QuestionFlowP
             <h3 className="magica-ix-title">{question.question}</h3>
           </div>
           <div className="magica-ix-actions">
-            <button
-              type="button"
-              className="magica-ix-icon"
-              title={minimized ? t('ix.expand') : t('ix.minimize')}
-              onClick={() => setMinimized((value) => !value)}
-            >
-              {minimized ? <IconChevronUpOutline14 /> : <IconChevronDownOutline14 />}
-            </button>
+            {/* 收起按钮只在 takeover 形态有意义（D5）：plain 卡由宿主控制显隐 */}
+            {takeover ? (
+              <button
+                type="button"
+                className="magica-ix-icon"
+                title={minimized ? t('ix.expand') : t('ix.minimize')}
+                onClick={() => setMinimized((value) => !value)}
+              >
+                {minimized ? <IconChevronUpOutlineRegular /> : <IconChevronDownOutlineRegular />}
+              </button>
+            ) : null}
             <button
               type="button"
               className="magica-ix-icon"
               title={t('ix.cancel')}
-              disabled={busy}
+              disabled={busy !== null}
               onClick={() => void cancel()}
             >
-              <IconCloseOutline16 />
+              <IconCloseOutlineRegular />
             </button>
           </div>
         </header>
@@ -223,12 +254,12 @@ function QuestionFlow({ view, questions, t, actions, onAnswered }: QuestionFlowP
                         on ? 'magica-ix-on' : '',
                         recommended ? 'magica-ix-approve' : '',
                       ].filter(Boolean).join(' ')}
-                      disabled={busy}
+                      disabled={busy !== null}
                       onClick={() => toggle(option.label)}
                     >
                       <span className="magica-ix-num">{at + 1}</span>
                       <span className={on ? 'magica-ix-check magica-ix-checkon' : 'magica-ix-check'}>
-                        {on ? <IconCheckOutline14 size={12} /> : null}
+                        {on ? <IconCheckOutlineRegular size={12} /> : null}
                       </span>
                       <span className="magica-ix-copy">
                         <span className="magica-ix-label">
@@ -244,7 +275,7 @@ function QuestionFlow({ view, questions, t, actions, onAnswered }: QuestionFlowP
                 })}
               </div>
               <div className={question.options === undefined || question.options.length === 0 ? 'magica-ix-block' : 'magica-ix-customrow'}>
-                <IconEditOutline16 size={12} />
+                <IconEditOutlineRegular size={12} />
                 {/* 自增高 textarea（B-161/B-162）：`rows={1}` + 输入时同步高度，
                     长答案不再被单行输入框截断 */}
                 <textarea
@@ -252,7 +283,7 @@ function QuestionFlow({ view, questions, t, actions, onAnswered }: QuestionFlowP
                   rows={1}
                   value={draft.custom}
                   placeholder={t('ix.custom')}
-                  disabled={busy}
+                  disabled={busy !== null}
                   onChange={(event) => {
                     patch({ custom: event.target.value, skipped: false })
                     const field = event.currentTarget
@@ -274,28 +305,31 @@ function QuestionFlow({ view, questions, t, actions, onAnswered }: QuestionFlowP
                 {t('ix.progress', { current: String(index + 1), total: String(total) })}
               </span>
               <div className="magica-ix-footerbtns">
-                <Button variant="outline" disabled={index === 0 || busy} onClick={() => setIndex((at) => Math.max(0, at - 1))}>
-                  <IconChevronLeftOutline14 /> {t('ix.prev')}
+                <Button variant="outline" disabled={index === 0 || busy !== null} onClick={() => setIndex((at) => Math.max(0, at - 1))}>
+                  <IconChevronLeftOutlineRegular /> {t('ix.prev')}
                 </Button>
-                <Button variant="outline" disabled={busy} onClick={skip}>
+                <Button variant="outline" disabled={busy !== null} onClick={skip}>
                   {t('ix.skip')}
                 </Button>
                 <Button
                   variant="primary"
-                  disabled={busy || !hasAnswer(draft, question)}
+                  // 末题（提交）**不能**因为"当前题没答"就禁用：整组校验要能点下去，
+                  // 才会跳到缺答的那题并提示（D2）；中间题仍然要求先答完才放行。
+                  disabled={busy !== null || (!isLast && !hasAnswer(draft, question))}
                   onClick={() => void advance()}
                 >
-                  {busy ? t('ix.submitting') : isLast ? t('ix.submit') : t('ix.next')}
-                  {isLast ? null : <IconChevronRightOutline14 />}
+                  {busy === 'answer' ? t('ix.submitting') : isLast ? t('ix.submit') : t('ix.next')}
+                  {isLast ? null : <IconChevronRightOutlineRegular />}
                 </Button>
               </div>
             </footer>
-            {error === null ? null : <div className="magica-ix-feedback" role="status">{error}</div>}
+            {error === null ? null : <div className="magica-ix-feedback" role="alert">{error}</div>}
           </>
         )}
       </section>
-    </div>
   )
+  // `plain`：只出裸卡，浮层外壳交给宿主（D5；官方卡片就是这样嵌在 composer 里）
+  return takeover ? <div className="magica-ix-frame">{card}</div> : card
 }
 
 interface ApprovalFlowProps {
@@ -305,8 +339,9 @@ interface ApprovalFlowProps {
   onAnswered?: () => void
 }
 
-function ApprovalFlow({ view, t, actions, onAnswered }: ApprovalFlowProps): React.ReactElement {
-  const [busy, setBusy] = useState(false)
+function ApprovalFlow({ view, t, actions, onAnswered, takeover = true }: ApprovalFlowProps & { takeover?: boolean }): React.ReactElement {
+  // 三态 busy（D4）：只有 answer 态显示「提交中…」，cancel 态不该这么写
+  const [busy, setBusy] = useState<'answer' | 'cancel' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const toolName = view.kind === 'approval' ? view.toolName : ''
@@ -326,21 +361,26 @@ function ApprovalFlow({ view, t, actions, onAnswered }: ApprovalFlowProps): Reac
   }, [args])
 
   async function settle(decision: 'allowed-once' | 'rejected'): Promise<void> {
-    setBusy(true)
-    const result = await actions.answerApproval(view, decision)
-    setBusy(false)
-    if (!result.ok) {
-      setError(result.error)
-      return
+    // 与提问流同一套兜底（D4）：reject 既不能变成未处理 rejection，也不能把 busy 卡死
+    setBusy('answer')
+    try {
+      const result = await actions.answerApproval(view, decision)
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
+      onAnswered?.()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(null)
     }
-    onAnswered?.()
   }
 
   // 按当前界面语言取（a.md:788）：英文界面不该显示中文标题
   const heading = pickDisplayText(displayReason, currentLang(), reason ?? toolName)
 
-  return (
-    <div className="magica-ix-apprroot">
+  const card = (
       <section className="magica-ix-appr">
         <div className="magica-ix-strip">
           <span className="magica-ix-dot" />
@@ -354,25 +394,44 @@ function ApprovalFlow({ view, t, actions, onAnswered }: ApprovalFlowProps): Reac
           {command === '' ? null : <pre className="magica-ix-command">{command}</pre>}
         </div>
         <div className="magica-ix-appractions">
-          <Button variant="outline" className="magica-ix-reject" disabled={busy} onClick={() => void settle('rejected')}>
+          <Button variant="outline" className="magica-ix-reject" disabled={busy !== null} onClick={() => void settle('rejected')}>
             {t('ix.approval.reject')}
           </Button>
-          <Button variant="primary" disabled={busy} onClick={() => void settle('allowed-once')}>
+          <Button variant="primary" disabled={busy !== null} onClick={() => void settle('allowed-once')}>
             {t('ix.approval.allow')}
           </Button>
         </div>
-        {error === null ? null : <div className="magica-ix-feedback" role="status">{error}</div>}
+        {error === null ? null : <div className="magica-ix-feedback" role="alert">{error}</div>}
       </section>
-    </div>
   )
+  return takeover ? <div className="magica-ix-apprroot">{card}</div> : card
 }
 
-/** 一条待决交互的卡片。 */
-export function InteractionCard({ view, t, actions, onAnswered }: InteractionCardProps): React.ReactElement {
+/**
+ * 一条待决交互的卡片。
+ *
+ *  + 'ariant' + @ 是真参数（D5）： + '	akeover' + @（缺省）= 接管形态，自带浮层外壳与收起按钮；
+ *  + 'plain' + @ = 裸卡，交给宿主自己套壳（官方卡片就是这样嵌在 composer 里的）。
+ */
+export function InteractionCard({
+  view,
+  t,
+  actions,
+  variant = 'takeover',
+  onAnswered,
+}: InteractionCardProps): React.ReactElement {
+  const takeover = variant !== 'plain'
   if (view.kind === 'approval') {
-    return <ApprovalFlow view={view} t={t} actions={actions} onAnswered={onAnswered} />
+    return <ApprovalFlow view={view} t={t} actions={actions} onAnswered={onAnswered} takeover={takeover} />
   }
   return (
-    <QuestionFlow view={view} questions={view.questions} t={t} actions={actions} onAnswered={onAnswered} />
+    <QuestionFlow
+      view={view}
+      questions={view.questions}
+      t={t}
+      actions={actions}
+      onAnswered={onAnswered}
+      takeover={takeover}
+    />
   )
 }

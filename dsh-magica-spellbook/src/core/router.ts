@@ -86,9 +86,10 @@ export async function readJsonBody(request: IncomingMessage, maxBytes = 8192): P
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
 }
 
-function safeDecode(text: string): string | null {
+function safeDecode(text: string, plusAsSpace = false): string | null {
   try {
-    return decodeURIComponent(text.replace(/\+/g, ' '))
+    // `+` 只在 query 里表示空格；路径参数里的 `+` 是加号本身（diff C20）
+    return decodeURIComponent(plusAsSpace ? text.replace(/\+/g, ' ') : text)
   } catch {
     return null
   }
@@ -108,9 +109,10 @@ export function queryOf(request: IncomingMessage, key: string): string | null {
     if (pair === '') continue
     const eq = pair.indexOf('=')
     const rawKey = eq < 0 ? pair : pair.slice(0, eq)
-    if (safeDecode(rawKey) !== key) continue
+    if (safeDecode(rawKey, true) !== key) continue
     if (eq < 0) return ''
-    const value = safeDecode(pair.slice(eq + 1))
+    // query 的 value 也把 `+` 当空格（form-encoded 约定）；只有路径参数才保留加号
+    const value = safeDecode(pair.slice(eq + 1), true)
     if (value === null) continue
     return value
   }
@@ -336,7 +338,7 @@ function matchRoute(
         // 路径参数解码失败：**保留原文**（c.md:433 / `decodePathSegment` 的语义）。
         // 早前改成"整条不匹配"是错的口径：形如 `/x/a%2Fb` 的合法编码、
         // 以及 `%ZZ` 这类脏串都应当照原样落到 params，由 handler 自己决定怎么处理。
-        const decoded = safeDecode(actual)
+        const decoded = safeDecode(actual, false)
         params[expected.slice(PARAM_PREFIX.length)] = decoded ?? actual
         continue
       }

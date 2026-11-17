@@ -118,7 +118,7 @@ export function resolveStoreDir(ctx: unknown, override?: string): string {
   const home = serviceOf<DshHomePath>(ctx, 'dshHomePath')
   if (typeof home === 'function') return join(home('storages', 'magica'), STORE_SUBDIR)
   throw new Error(
-    'session store needs ctx.dshHomePath (provided by @deepseek-ai/dsh-app-boot); '
+    'session store needs ctx.dshHomePath (provided by dsh-app-boot); '
       + 'pass `storeDir` explicitly when running outside a full dsh composition',
   )
 }

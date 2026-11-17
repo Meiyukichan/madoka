@@ -250,3 +250,27 @@ describe('queryOf / isTrustedInbound', () => {
     )
   })
 })
+
+describe('query 与路径参数的 + 语义（diff C20）', () => {
+  it('query value 里 + 是空格，路径参数里 + 是加号本身', async () => {
+    const seen: Array<{ query: string | null; param: string | undefined }> = []
+    const router = createJsonRouter({
+      prefix: '/api',
+      // 默认 strict 档要求同源 Origin；这条只测解码，用 browser 档放行裸 GET
+      trust: 'browser',
+      routes: [
+        {
+          method: 'GET',
+          path: '/a/:name',
+          handler: ({ request, params, response }) => {
+            seen.push({ query: queryOf(request, 'q'), param: params['name'] as string | undefined })
+            response.writeHead(200, { 'content-type': 'application/json' })
+            response.end('{}')
+          },
+        } as JsonRouterRoute,
+      ],
+    })
+    await router(fakeRequest({ method: 'GET', url: '/api/a/x+y?q=b+c' }), fakeResponse())
+    assert.deepEqual(seen, [{ query: 'b c', param: 'x+y' }])
+  })
+})

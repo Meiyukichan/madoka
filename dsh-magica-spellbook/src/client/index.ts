@@ -13,11 +13,12 @@ export {
   INTERACTION_PATHS,
   INTERACTION_PREFIX,
   INTERACTION_TAG,
-} from '../shared/wire.ts'
+} from '../shared/interaction.ts'
 export type {
   AnswerApprovalBody,
   AnswerQuestionBody,
   CancelQuestionBody,
+  InteractionAnswer,
   InteractionAnswerItem,
   InteractionAnswerValue,
   InteractionEnvelope,
@@ -26,4 +27,4 @@ export type {
   InteractionOption,
   InteractionQuestion,
   PendingInteractionRecord,
-} from '../shared/wire.ts'
+} from '../shared/interaction.ts'

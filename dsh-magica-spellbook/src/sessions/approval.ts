@@ -10,20 +10,29 @@
 
 import { randomUUID } from 'node:crypto'
 import { manageWaterfallListener } from './core.ts'
-import { WATERFALL_TAKEOVER } from '../shared/wire.ts'
-import type { DshAgentLike, DshContextLike } from '../shared/dsh.ts'
+import { WATERFALL_TAKEOVER } from '../shared/interaction.ts'
+import type { ApprovalOutcome as DshApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
+import type { DshContextLike } from '../shared/dsh.ts'
 
 /**
- * 审批结果闭集（= dsh 0.2 的 `ApprovalOutcome`）。
+ * 审批结果闭集 = dsh 的 `ApprovalOutcome`（`@deepseek-ai/dsh-user-approval`）。
  *
- * 说明：spellbook 对 dsh 是**零 import**（连类型都不引），无法做真正的跨包编译期断言；
- * 这里用 `Object.freeze` + 精确元组测试钉住契约。dsh 若增删取值，那条测试会红，
- * 提醒同步 `settle` 的 `cancelled` / `unavailable` 分支。
+ * 为什么还要在运行时列一遍：`settle` 的分支与 HTTP 入参校验需要**值**。
+ * 下面的编译期断言保证这个元组与 dsh 的联合始终一致（dsh 增删取值 → `tsc` 当场报错）。
  */
-export const APPROVAL_OUTCOMES = Object.freeze(['allowed-once', 'rejected', 'cancelled', 'unavailable'] as const)
+export const APPROVAL_OUTCOMES = Object.freeze([
+  'allowed-once',
+  'rejected',
+  'cancelled',
+  'unavailable',
+] as const satisfies readonly DshApprovalOutcome[])
+
+type MissingOutcome = Exclude<DshApprovalOutcome, (typeof APPROVAL_OUTCOMES)[number]>
+const _assertAllOutcomes: MissingOutcome extends never ? true : never = true
+void _assertAllOutcomes
 
 /** 审批结果。 */
-export type ApprovalOutcome = (typeof APPROVAL_OUTCOMES)[number]
+export type ApprovalOutcome = DshApprovalOutcome
 
 /** 运行时类型守卫（HTTP 入参收窄用）。 */
 export function isApprovalOutcome(value: unknown): value is ApprovalOutcome {
@@ -38,8 +47,8 @@ export interface PendingApproval {
   reason?: string
   /** 原始工具入参 JSON（可能被截断，截断后不再是合法 JSON）。 */
   args?: string
-  /** 0.2 新增：本地化展示用，不持久化。 */
-  displayReason?: Record<string, string>
+  /** 0.2 新增：本地化展示用，不持久化（形状直接取 dsh 的 `ApprovalRequestEvent.displayReason`）。 */
+  displayReason?: ApprovalRequestEvent['displayReason']
   since: number
 }
 
@@ -62,16 +71,6 @@ interface Bridge {
 }
 
 const bridges = new Map<string, Bridge>()
-
-/** 请求载荷里我们关心的字段。 */
-interface ApprovalRequestLike {
-  readonly agent?: DshAgentLike
-  readonly toolName?: string
-  readonly callId?: unknown
-  readonly reason?: string
-  readonly displayReason?: Record<string, string>
-  readonly signal?: AbortSignal
-}
 
 function toPending(entry: PendingEntry): PendingApproval {
   const { settle: _settle, ...rest } = entry
@@ -110,7 +109,7 @@ export function installApprovalAnswerer(
   const bridge = bridgeFor(key)
   let uninstalled = false
 
-  const hold = (request: ApprovalRequestLike): Promise<ApprovalOutcome> => {
+  const hold = (request: ApprovalRequestEvent): Promise<ApprovalOutcome> => {
     const signal = request.signal
     const callId = request.callId === undefined ? undefined : String(request.callId)
     const id = randomUUID()
@@ -118,7 +117,7 @@ export function installApprovalAnswerer(
     const entry: PendingApproval = { id, toolName: request.toolName ?? '', since }
     if (callId !== undefined) entry.callId = callId
     if (request.reason !== undefined) entry.reason = request.reason
-    if (request.displayReason !== undefined) entry.displayReason = request.displayReason
+    if (request.displayReason !== undefined) entry.displayReason = { ...request.displayReason }
     if (callId !== undefined) {
       try {
         const args = resolveArgs?.(callId)
@@ -152,6 +151,8 @@ export function installApprovalAnswerer(
         settle('cancelled')
       }
 
+      // `timeoutMs: 0` = **不超时**（diff C17 定口径；旧实现的 0 = 立即超时）。
+      // "0 秒就取消"太反直觉，想要立刻失败请传一个很小的正数。
       if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
         timer = setTimeout(() => settle('cancelled'), options.timeoutMs)
         timer.unref?.()
@@ -171,7 +172,7 @@ export function installApprovalAnswerer(
     () =>
       (ctx as DshContextLike).on(
         'approval/request',
-        (request: ApprovalRequestLike, next: () => Promise<ApprovalOutcome>) => {
+        (request: ApprovalRequestEvent, next: () => Promise<ApprovalOutcome>) => {
           if (uninstalled) return next()
           const owner = request.agent?.session?.id
           if (owner === undefined || String(owner) !== key) return next()
@@ -197,7 +198,7 @@ export function installFailFastAnswerer(ctx: unknown, sessionId: string): () => 
     () =>
       (ctx as DshContextLike).on(
         'approval/request',
-        (request: ApprovalRequestLike, next: () => Promise<ApprovalOutcome>) => {
+        (request: ApprovalRequestEvent, next: () => Promise<ApprovalOutcome>) => {
           if (uninstalled) return next()
           const owner = request.agent?.session?.id
           if (owner === undefined || String(owner) !== key) return next()

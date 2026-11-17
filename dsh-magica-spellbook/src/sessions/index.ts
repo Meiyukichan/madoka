@@ -73,6 +73,7 @@ export {
   DEFAULT_SANDBOX,
   DEFAULT_TTL_MS,
   NO_INTERACTION_PREFIX,
+  ephemeralPending,
   runEphemeralSession,
 } from './ephemeral.ts'
 

@@ -1,7 +1,7 @@
 /**
  * 同源 `fetch` 传输：列表 + 三种应答，统一信封解包。
  *
- * 路径常量与 host 路由**同源**（都来自 `shared/wire.ts`），不会两边各写一份而漂移。
+ * 路径常量与 host 路由**同源**（都来自 `shared/interaction.ts`），不会两边各写一份而漂移。
  *
  * @module dsh-magica-spellbook/client/panel/transport
  */
@@ -12,7 +12,7 @@ import {
   type InteractionAnswerItem,
   type InteractionEnvelope,
   type PendingInteractionRecord,
-} from '../../shared/wire.ts'
+} from '../../shared/interaction.ts'
 import type { InteractionActions, InteractionResult } from './carrier.ts'
 
 /** 请求超时。 */

@@ -457,7 +457,7 @@ pnpm build
 | 0.2 能力 | 用不用 | 理由 |
 |---|---|---|
 | `SessionProjectionMap.userQuestions` | **读**（展示层） | 给"待决项在崩溃后仍可见"提供日志级证据；但**不能**替代 pending 表（它只知道"有个未答的 timed 调用"，无法结算） |
-| `MessageSourceMap['user-question-reply']` | 不用 | 那是 dsh 自己的迟到回复通道，magica 的答案是同步 resolve 的 |
+| `MessageSourceMap['user-question-reply']` | 不用 | 那是 dsh 自己的迟到回复通道，旧实现的答案是同步 resolve 的 |
 | `Agent.runMaintenance()` | 暂不用 | 会话门面不做非 turn 维护任务；将来做「会话内周期对账」时再评估 |
 | `startsRequestSeries` | 不用 | 我们的上下文追加不改请求序列边界 |
 | `approval.displayReason` | **用** | 直接解决 0.1.6「reason 是英文长句、无法本地化」的问题 |
@@ -492,7 +492,7 @@ pnpm build
 | 坑 | 0.1.6 现象 | 本设计的处置 |
 |---|---|---|
 | `runTurnVerified(..., idleTimeoutMs)` 看门狗 | 能力完整，但两个门面的 `runOneTurn` **都没传**该参数 → `whenIdle()` 不收敛时 `firstTurn`/`followup` 永久 pending | **必须在门面传入**（默认 `ttlMs` 之外再给一个 `idleTimeoutMs` 选项），且先修超时结算的形状：`{ kind:'aborted', reason:{ kind:'hook', reason:'magica:idle-timeout' } }`，不再用 `as TurnEndReason` 断言绕过（见 02 文档 §4.3） |
-| `agentPresets` 缺失 | 不挂 preset = 空全局层（无工具、无 prompt section、无 skill catalog），magica 自己**不 warn** | 降级 + `warn`（走 stderr 兜底），并在 `state` 里留 `presetApplied: false` |
+| `agentPresets` 缺失 | 不挂 preset = 空全局层（无工具、无 prompt section、无 skill catalog），旧实现 自己**不 warn** | 降级 + `warn`（走 stderr 兜底），并在 `state` 里留 `presetApplied: false` |
 | 台账写失败 | 该会话的审批/提问**不会**出现在看板（归属判定失败），而它们默认无超时 → 任务永久挂起 | `ledgerWriteFailed` 必须被消费方读到；本设计额外要求：写失败时**同时**把待决项留在进程内供同进程轮询（归属判定加"进程内白名单"兜底，见 03 文档 §3.2） |
 
 ### 6.4 可观测性

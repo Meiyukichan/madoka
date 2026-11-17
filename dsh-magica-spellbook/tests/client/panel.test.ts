@@ -10,7 +10,7 @@ import { en, makeTranslate, zh } from '../../src/client/panel/locales.ts'
 import { INTERACTION_STYLE_ID, INTERACTION_STYLES } from '../../src/client/panel/styles.ts'
 import { createInteractionTransport } from '../../src/client/panel/transport.ts'
 import { serviceOf } from '../../src/client/panel/services.ts'
-import type { PendingInteractionRecord } from '../../src/shared/wire.ts'
+import type { PendingInteractionRecord } from '../../src/shared/interaction.ts'
 
 const questionRecord: PendingInteractionRecord = {
   kind: 'question',

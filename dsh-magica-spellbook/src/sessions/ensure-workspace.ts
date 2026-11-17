@@ -11,7 +11,12 @@
  */
 
 import { normalize } from 'node:path'
-import { serviceOf, type DshWorkspaceLike, type DshWorkspaceRegistryLike } from '../shared/dsh.ts'
+import {
+  asSessionId,
+  serviceOf,
+  type DshWorkspaceLike,
+  type DshWorkspaceRegistryLike,
+} from '../shared/dsh.ts'
 
 /** 登记选项。 */
 export interface EnsureWorkspaceOptions {
@@ -62,7 +67,7 @@ export async function ensureWorkspace(
   const existing = await registry.resolveByPath(normalized)
   const workspace = existing ?? (await registry.create(normalized, options.title))
   if (options.attachSessionId !== undefined && typeof workspace.attachSession === 'function') {
-    await workspace.attachSession(options.attachSessionId)
+    await workspace.attachSession(asSessionId(options.attachSessionId))
   }
   return workspace
 }

@@ -99,7 +99,8 @@ export function injectInteractionStyles(pluginId: string): () => void {
   }
   const element = styleState.element
   element.dataset['plugin'] = pluginId
-  element.dataset['pluginCss'] = ''
+  // 0.2 的 HMR 按这个属性回收样式产物：写空串等于回收不到（diff D11-3）
+  element.dataset['pluginCss'] = INTERACTION_STYLE_ID
   styleState.refs += 1
   let released = false
   return () => {

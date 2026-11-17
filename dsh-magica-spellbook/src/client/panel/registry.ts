@@ -9,7 +9,7 @@
  * @module dsh-magica-spellbook/client/panel/registry
  */
 
-import type { PendingInteractionRecord } from '../../shared/wire.ts'
+import type { PendingInteractionRecord } from '../../shared/interaction.ts'
 
 /** 一条记录的载体 key（`kind:id`）。 */
 export function carrierKey(record: { kind: string; id: string }): string {

@@ -22,6 +22,7 @@ import {
   resolveAgentPresetId,
   resolvePermission,
   resolveResumeTarget,
+  assertSessionNotLive,
   toResumeError,
   runTurnVerified,
   SessionResumeError,
@@ -44,13 +45,14 @@ import {
   type SessionRecordStore,
 } from './store.ts'
 import { installFailFastAnswerer, snapshotPendingApprovals } from './approval.ts'
-import { effectOf } from '../shared/dsh.ts'
+import { effectOf, asReasoningEffortId } from '../shared/dsh.ts'
 import { installFailFastQuestionAnswerer, snapshotPendingQuestions } from './questions.ts'
 import { noteMagicaSession } from '../interactions/ownership.ts'
 import type {
   DshAgentHandleLike,
   DshAgentSetup,
   DshCancelCause,
+  DshSandboxMode,
   DshTurnEndReason,
   DshUserMessageLike,
 } from '../shared/dsh.ts'
@@ -62,8 +64,8 @@ export interface EphemeralModel {
   reasoningEffort?: string
 }
 
-/** 权限名（与 dsh `SandboxMode` 取值一致）。 */
-export type SessionPermission = 'read-only' | 'workspace-write' | 'danger-full-access'
+/** 权限名（= dsh 的 `SandboxMode`，从 `PresetSpec` 转出，不另抄一份联合）。 */
+export type SessionPermission = DshSandboxMode
 
 /** 默认沙箱。 */
 export const DEFAULT_SANDBOX: SessionPermission = 'workspace-write'
@@ -205,7 +207,12 @@ export function runEphemeralSession(ctx: unknown, options: RunEphemeralSessionOp
       })
       unsubscribe = composition.unsubscribe
       if (composition.presetId !== undefined) mountedPresetId = composition.presetId
-      if (!reattached) delivery = installContextDelivery(agentCtx, resumed ? [] : contexts)
+      // 投递器必须**常驻安装**（D11-2 / 旧实现 `ephemeral.ts:461`）：wake 之后
+      // `injectContext` 还要能用。早前用 `if (!reattached)` 跳过安装，结果 wake 过的
+      // 临时会话 injectContext 恒 false。续跑/wake 时初始队列传空（context 已消费过）。
+      if (delivery === null) {
+        delivery = installContextDelivery(agentCtx, resumed || reattached ? [] : contexts)
+      }
       return composition.commit
     }
   }
@@ -222,7 +229,9 @@ export function runEphemeralSession(ctx: unknown, options: RunEphemeralSessionOp
       agentOptions: {
         provider: model.provider,
         model: model.model,
-        ...(model.reasoningEffort !== undefined ? { reasoningEffort: model.reasoningEffort } : {}),
+        ...(model.reasoningEffort !== undefined
+          ? { reasoningEffort: asReasoningEffortId(model.reasoningEffort) }
+          : {}),
       },
       setup: makeSetup(),
     })
@@ -237,13 +246,17 @@ export function runEphemeralSession(ctx: unknown, options: RunEphemeralSessionOp
           + '(closures cannot be stored in the ledger)',
       )
     }
+    // 早期预检（C22）：会话还活着就直接给 `SESSION_LIVE`，别等 dsh 抛出再归一
+    assertSessionNotLive(agents, sessionId)
     try {
       return await agents.resume({
         resumeSessionId: sessionId,
         agentOptions: {
           provider: model.provider,
           model: model.model,
-          ...(model.reasoningEffort !== undefined ? { reasoningEffort: model.reasoningEffort } : {}),
+          ...(model.reasoningEffort !== undefined
+            ? { reasoningEffort: asReasoningEffortId(model.reasoningEffort) }
+            : {}),
         },
         setup: makeSetup(),
       })

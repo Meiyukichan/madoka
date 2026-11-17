@@ -39,5 +39,5 @@
 - **http-route 的读体超时 / 入站并发上限**（点 4 两问）：c.md 全文未要求；并发限制只针对**出站**（c.md:554-559 `createLimitedFetch`）。slowloris 归 webserver/部署层。
 - **proxy-fetch 重试**（点 5 追问）：c.md 无 retry 要求（"不制造重试风暴"只针对 logger 落盘，c.md:224）。
 - **pricing 的币种/四舍五入/未知模型兜底**（点 3）：c.md:655 只把 pricing 列进「未使用的 dsh 组件」，**没有任何原始要求**，无从判"缺"。现状供决策：元/百万 token、不四舍五入（浮点直加，pricing.ts:117）、未知模型回退 deepseek-flash（pricing.ts:95-103）、坏表→空表→账单 0（pricing.ts:56-63）。是否补素材**待人工确认**。
-- **「谁批了什么」的 actor 审计**（点 9）：e.md:483-484 的审计由 dsh 自身 `approval/asked` / `approval/decided` 承担，magica 只镜像成 `ApprovalRecord`（core.ts:88-95、484-511）；提问侧 dsh 零日志，故自记 `question.*`（questions.ts:82-88、218-228）。HTTP 面无身份模型 → 没有"谁"可记；只缺"经 HTTP 面结算"这一动作行（点 9 唯一可补项，非 raw 要求）。
+- **「谁批了什么」的 actor 审计**（点 9）：e.md:483-484 的审计由 dsh 自身 `approval/asked` / `approval/decided` 承担，旧实现 只镜像成 `ApprovalRecord`（core.ts:88-95、484-511）；提问侧 dsh 零日志，故自记 `question.*`（questions.ts:82-88、218-228）。HTTP 面无身份模型 → 没有"谁"可记；只缺"经 HTTP 面结算"这一动作行（点 9 唯一可补项，非 raw 要求）。
 - **双击重复提交**（点 10）：e.md:629 认定「第二次 404 是幂等失败，符合预期」；卡片 busy 期间按钮 `disabled`（Card.tsx:225、355-360），host 侧二次应答恒 404/409（questions.ts:248、409）。

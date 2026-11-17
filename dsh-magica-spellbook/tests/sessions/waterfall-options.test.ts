@@ -7,7 +7,7 @@ import {
   resetQuestions,
   snapshotPendingQuestions,
 } from '../../src/sessions/questions.ts'
-import { WATERFALL_TAKEOVER } from '../../src/shared/wire.ts'
+import { WATERFALL_TAKEOVER } from '../../src/shared/interaction.ts'
 import { fakeCtx } from '../helpers/fake.ts'
 
 afterEach(() => {

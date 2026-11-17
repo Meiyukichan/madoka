@@ -1,12 +1,12 @@
 {
   "name": "@meiyukichan/dsh-magica-spellbook",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.3",
   "type": "module",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
-  "description": "DSH 0.2 插件 SDK：会话门面 / 待决交互 / 核心工具层（纯库，零运行时 @deepseek-ai 依赖）",
+  "description": "DSH 0.2 插件 SDK：会话门面 / 待决交互 / 核心工具层（纯库：运行时零 @deepseek-ai 导入，类型直接引用真实 dsh 包）",
   "engines": {
     "node": ">=22.5",
     "pnpm": ">=11"
@@ -46,10 +46,49 @@
   "dependencies": {
     "undici": "^7.16.0"
   },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.4",
+    "@deepseek-ai/dsh-agent": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-agent-preset-registry": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-session": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-home-paths": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-permission-presets": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-plan-mode": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-sandbox-policy": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-session": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-session-title": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-user-approval": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-user-questions": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-workspace": ">=0.2.0-rc.2 <0.3.0-0",
+    "react": ">=19"
+  },
   "optionalDependencies": {
     "@primno/dpapi": "^1.0.0"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-agent": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-agent-preset-registry": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-session": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-home-paths": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-permission-presets": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-plan-mode": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-title": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-user-approval": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-user-questions": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-workspace": "^0.2.0-rc.2",
     "@types/node": "^22.20.5",
     "@types/react": "^19.2.0",
     "esbuild": "^0.25.10",
@@ -60,5 +99,52 @@
     "type": "git",
     "url": "git+https://github.com/Meiyukichan/madoka.git",
     "directory": "dsh-magica-spellbook"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent-preset-registry": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-conversation": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-primitives": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-renderer": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-session": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-slots": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-home-paths": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-permission-presets": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-plan-mode": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-sandbox-policy": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session-title": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-user-approval": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-user-questions": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-workspace": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
   }
 }

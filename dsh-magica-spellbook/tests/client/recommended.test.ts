@@ -28,3 +28,17 @@ describe('parseRecommended', () => {
     assert.equal(parsed.recommended, true)
   })
 })
+
+describe('parseRecommended 的 旧实现 并集口径（diff D9）', () => {
+  it('小写后缀也识别', () => {
+    assert.deepEqual(parseRecommended('Allow (recommended)'), { clean: 'Allow', recommended: true })
+  })
+
+  it('全角括号 + 英文后缀', () => {
+    assert.deepEqual(parseRecommended('Allow（Recommended）'), { clean: 'Allow', recommended: true })
+  })
+
+  it('后缀前空白被吞掉', () => {
+    assert.deepEqual(parseRecommended('Allow   (Recommended)  '), { clean: 'Allow', recommended: true })
+  })
+})

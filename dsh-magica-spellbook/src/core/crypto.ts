@@ -38,9 +38,41 @@ const KEY_BYTES = 32
 const IV_BYTES = 12
 const ALGORITHM = 'aes-256-gcm'
 
-interface DpapiModule {
+/**
+ * `@primno/dpapi` 不同大版本的导出形状（diff C18）：
+ * - 新版：`{ protectData(data, scope), unprotectData(data) }`
+ * - 旧版：`{ Dpapi: { protectData(data, entropy, scope), unprotectData(data, entropy) } }`
+ *
+ * 只假设一种形状的话，另一种版本上会拿到 `undefined` 方法并**静默降级**到 AES
+ * （数据不丢，但同一台机器上两套密钥混用）。这里两者都认。
+ */
+interface DpapiFlat {
   protectData(data: Buffer, scope: string): Buffer | string
   unprotectData(data: Buffer | string): Buffer | string
+}
+
+interface DpapiModule extends Partial<DpapiFlat> {
+  Dpapi?: {
+    protectData(data: Buffer, entropy: null, scope: string): Buffer | string
+    unprotectData(data: Buffer | string, entropy: null, scope: string): Buffer | string
+  }
+}
+
+/** 把两种形状归一成同一对函数。 */
+function dpapiApi(module: DpapiModule): DpapiFlat | null {
+  if (typeof module.protectData === 'function' && typeof module.unprotectData === 'function') {
+    return { protectData: module.protectData.bind(module), unprotectData: module.unprotectData.bind(module) }
+  }
+  const nested = module.Dpapi
+  if (nested !== undefined && typeof nested.protectData === 'function' && typeof nested.unprotectData === 'function') {
+    return {
+      protectData: (data: Buffer, scope: string) => nested.protectData(data, null, scope),
+      // 旧版的 unprotectData 也是**三参**（data, entropy, scope）。真机实测只传 data 会报
+      // "3 arguments are required" → 解密永远失败、密文原样返回（看起来像"密钥丢了"）
+      unprotectData: (data: Buffer | string) => nested.unprotectData(data, null, 'CurrentUser'),
+    }
+  }
+  return null
 }
 
 function defaultKeyPath(): string {
@@ -75,7 +107,9 @@ export async function createFieldCrypto(options: FieldCryptoOptions = {}): Promi
   const masterKeyPath = options.masterKeyPath ?? defaultKeyPath()
   const storageDir = options.storageDir ?? dirname(masterKeyPath)
   const strictEncrypt = options.strictEncrypt ?? false
-  const dpapi = loadDpapi()
+  // 归一成同一对函数（新/旧两种模块形状都认，见 dpapiApi）
+  const dpapiModule = loadDpapi()
+  const dpapi = dpapiModule === null ? null : dpapiApi(dpapiModule)
   let cachedKey: Buffer | null = null
 
   function tryReadMasterKey(): Buffer | null {

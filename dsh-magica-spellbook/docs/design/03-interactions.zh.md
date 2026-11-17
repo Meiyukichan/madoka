@@ -202,7 +202,7 @@ function createInteractionHandler(ownerCtx: InteractionHostFace, options?): (req
 
 **409 不是 404**：会话已不在接管表里是**状态冲突**（同一 id 重试永远不会成功）。
 
-`allowSession` 失败 → 403 `forbidden` + `this interaction surface only serves sessions created through magica`。它防的是"手搓的 POST"（同一 web 进程里任何页面都能发请求；围栏只管跨站）。
+`allowSession` 失败 → 403 `forbidden` + `this interaction surface only serves sessions created through 旧实现`。它防的是"手搓的 POST"（同一 web 进程里任何页面都能发请求；围栏只管跨站）。
 
 `strictMutations`（默认 `false`）：变更端点是否额外要求**严格同源**。默认信任 `browser` 档（拒自报跨站、带 Origin 必须同源、**放行不带 Origin 的请求** —— curl / 脚本 / 测试）。代价：本机任意脚本不带凭证就能批掉一次越权工具调用。浏览器的 POST 一定带 `Origin`，所以打开这个开关不破坏页面。
 
@@ -431,7 +431,7 @@ function interactionRuntime(): InteractionRuntime | undefined
 |---|---|---|---|---|
 | 1 | 进程重启后点旧卡片 | 409 | 内存表空了 → `session-gone` | 消费方需**启动对账**把这些执行标失败 |
 | 2 | 会话销毁但浏览器仍显示 | 409 | 注销时删 bridge | 最长 5 s 才发现 |
-| 3 | 台账损坏 / 版本过新 | 该会话判"非 magica"，列表不出现，应答 403 | `parseOne` 记 `loadErrors` 返回 `null` | 判负进缓存 |
+| 3 | 台账损坏 / 版本过新 | 该会话判"非 旧实现"，列表不出现，应答 403 | `parseOne` 记 `loadErrors` 返回 `null` | 判负进缓存 |
 | 4 | 台账目录不可用 | **所有**会话判负 | `getSessionStore()` 返回 `null` | 本设计加进程内白名单兜底 |
 | 5 | 同 id 双击 | 第二次 404 | `settle` 先出表 | 无（幂等失败） |
 | 6 | 待决项从未被应答 | 永久挂着 | 默认无 timeout | 兜底只有 agent 生命周期；想加看门狗在门面传 `timeoutMs` |

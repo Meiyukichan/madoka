@@ -1,57 +1,24 @@
 /**
- * `@deepseek-ai/dsh-client-ui-primitives` 的最小类型面。
+ * 这里**没有**任何类型声明了（保留文件名只是为了不改动 `tsconfig` 的 include 与历史引用）。
  *
- * 该包由 shell 模块表注入（构建期 external），本包不依赖它的 npm 包，
- * 所以只在此声明我们用到的几个组件签名（与 0.2 的组件目录一致）。
+ * 为什么：
+ * - `@deepseek-ai/dsh-client-ui-primitives` 从 `0.2.0-rc.2` 起就在 `devDependencies` /
+ *   `peerDependencies` 里（运行期由 dsh shell 的**模块表**注入，构建时依旧当 external），
+ *   所以 `Button` / `Modal` / `MarkdownText` 的签名直接来自真实包的
+ *   `lib/types/*.d.ts`，不需要、也不允许在这里再手写一份"最小类型面"。
+ * - 早前本文件用 `declare module '@deepseek-ai/dsh-client-ui-primitives'` 手写了三个组件
+ *   与一串 `Icon*` 形状；那是按 0.1.6 命名猜出来的（`IconCheckOutline14` 之类根本不存在），
+ *   而且和真实签名会静默漂移。全部删除。
+ *
+ * 消费方式（不变）：
+ * ```ts
+ * import { Button, MarkdownText, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+ * ```
+ *
+ * 图标见 `client/panel/icons.tsx` 头部注释（上游 d.ts 漏发布 `icons/index.d.ts`，
+ * 那是那一个文件里的局部说明，不是这里的模块声明）。
  *
  * @module dsh-magica-spellbook/client/primitives
  */
 
-declare module '@deepseek-ai/dsh-client-ui-primitives' {
-  import type { ComponentType, ReactElement, ReactNode } from 'react'
-
-  /** 按钮（0.2 的 variant 多了 `toolbar`）。 */
-  export const Button: ComponentType<{
-    variant?: 'primary' | 'ghost' | 'outline' | 'toolbar'
-    onClick?: () => void
-    disabled?: boolean
-    className?: string
-    icon?: ReactNode
-    children?: ReactNode
-    type?: 'button' | 'submit'
-    title?: string
-  }>
-
-  /** 对话框（`headless` 时自绘 chrome）。 */
-  export const Modal: ComponentType<{
-    open: boolean
-    onClose?: () => void
-    title?: string
-    className?: string
-    headless?: boolean
-    children?: ReactNode
-  }>
-
-  /** GitHub 风格 Markdown 渲染（0.2 的 `labels` 必填）。 */
-  export const MarkdownText: ComponentType<{
-    text: string
-    labels: { code: { copyLabel: string; copiedLabel: string }; footnotes: string }
-    variant?: 'body' | 'compact'
-    className?: string
-  }>
-
-  /** 图标（按需取用）。 */
-  export const IconCheckOutline14: ComponentType<{ size?: number; className?: string }>
-  export const IconCheckOutline16: ComponentType<{ size?: number; className?: string }>
-  export const IconChevronLeftOutline14: ComponentType<{ size?: number; className?: string }>
-  export const IconChevronRightOutline14: ComponentType<{ size?: number; className?: string }>
-  export const IconChevronUpOutline14: ComponentType<{ size?: number; className?: string }>
-  export const IconChevronDownOutline14: ComponentType<{ size?: number; className?: string }>
-  export const IconCloseOutline16: ComponentType<{ size?: number; className?: string }>
-  export const IconEditOutline16: ComponentType<{ size?: number; className?: string }>
-  export const IconFolderOpen16: ComponentType<{ size?: number; className?: string }>
-  export const IconFolderClose16: ComponentType<{ size?: number; className?: string }>
-  export const IconPlusOutline16: ComponentType<{ size?: number; className?: string }>
-
-  export type { ReactElement }
-}
+export {}

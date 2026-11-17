@@ -431,7 +431,7 @@ $ 最后一行                                           → <!--PART2-->
 | M-097 | 日志缺失 → `SESSION_LOG_MISSING` | ❌ | — |
 | M-098 | ephemeral 台账写 `kind/agentPresetId/reasoningEffort/cwd/permission` | ⚠️ | `facade.test.ts:60-69` 断言 `kind/cwd/permission/version`；`agentPresetId` 与 `reasoningEffort` 未断言 |
 | M-099 | ephemeral 续跑自动 mount 台账 preset | ❌ | — |
-| M-100 | ephemeral 未知 id → 新建（前缀 `magica-`） | ⚠️ | `facade.test.ts:107-124` 未断言前缀 |
+| M-100 | ephemeral 未知 id → 新建（前缀 `旧实现-`） | ⚠️ | `facade.test.ts:107-124` 未断言前缀 |
 | M-101 | ephemeral 活着续跑 → `SESSION_LIVE` | ❌ | 实现改为 `SESSION_ALREADY_ACTIVE`（G-9），无测试 |
 | M-102 | workspace 不传 preset → 挂默认 + 写 meta/台账 | ❌ | — |
 | M-103 | `agentPresetId=false` → 不挂不写 | ❌ | — |

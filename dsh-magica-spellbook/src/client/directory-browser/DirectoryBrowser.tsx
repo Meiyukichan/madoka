@@ -15,15 +15,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { filterEntries, prefixWithin } from './filter.ts'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-// 0.2 的 primitives 不再导出 Icon*，图标自带（见 ../panel/icons.tsx 头注释）
+// 图标全部来自 primitives 的真实组件；本目录自包含（发布时只带 src/client/directory-browser）
 import {
-  IconCheckOutline16,
-  IconChevronRightOutline14,
-  IconEditOutline16,
-  IconFolderClose16,
-  IconFolderOpen16,
-  IconPlusOutline16,
-} from '../panel/icons.tsx'
+  IconCheckOutlineRegular,
+  IconChevronRightOutlineRegular,
+  IconEditOutlineRegular,
+  IconFolderCloseRegular,
+  IconFolderOpenRegular,
+  IconPlusOutlineRegular,
+} from './icons.ts'
 import css from './DirectoryBrowser.module.css'
 
 /** 一行目录 / 一个面包屑。 */
@@ -108,6 +108,18 @@ function defaultTopLevel(): string | undefined {
   return topLevelCache.value ?? undefined
 }
 
+/**
+ * 错误文案（D8）：优先取 Host 的**业务错误**（{ rpcError: { message } }），
+ * 这才是用户能看懂的那句；裸 Error.message 常常是 HTTP 500 之类。
+ */
+function failureText(cause: unknown): string {
+  if (typeof cause === 'object' && cause !== null) {
+    const rpc = (cause as { rpcError?: { message?: unknown } }).rpcError
+    if (typeof rpc?.message === 'string' && rpc.message !== '') return rpc.message
+  }
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
 function parentPathOf(path: string): string | null {
   const normalized = path.replace(/[\\/]+$/, '')
   if (normalized === '') return null
@@ -144,6 +156,10 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
   const [drives, setDrives] = useState<string[]>([])
 
   const requestSeq = useRef(0)
+  /** 打开代际：关闭后异步回包不许再 setState（D7，旧实现 openGeneration）。 */
+  const openGeneration = useRef(0)
+  /** onCommit 进行中：冻结视图（D10，旧实现 committing）。 */
+  const [committing, setCommitting] = useState(false)
   /** 内容区（焦点恢复时按 ria-current 找行，A-084/A-215）。 */
   const contentRef = useRef<HTMLDivElement | null>(null)
   /** 路径输入框（首屏焦点）。 */
@@ -237,7 +253,7 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
           if (requestSeq.current !== seq) return
           setLoading(false)
           setShowSlowHint(false)
-          setError(cause instanceof Error ? cause.message : String(cause))
+          setError(failureText(cause))
         })
     },
     // 依赖固定为空：外部输入全走 propsRef。早前用 `[props]`，消费方每次重渲染都会换掉
@@ -323,8 +339,15 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
     showHidden,
     selected?.path,
   )
-  const targetPath = draft !== null ? draft : (selected?.path ?? listing?.path ?? null)
+  // 落点优先级：**选中项优先**（diff C14 / 旧实现 `:506`）。早前草稿优先——
+  // 没按过 Enter 的路径也能被「打开」提交，等于跳过宿主的目录校验。
+  // 想提交手输路径仍可以：先 Enter（会 navigate 过去），再打开。
+  const targetPath = selected?.path ?? listing?.path ?? draft ?? null
   const emptyHint = !loading && error === null && listing === null
+  // 盘符栏的 aria-label：翻译不到时不挂（防读屏念 key 原文，D10）
+  const drivesLabel = t('browser.drives')
+  const driveBarLabel = drivesLabel === 'browser.drives' ? null : drivesLabel
+  const windowsHost = /^[A-Za-z]:[\\\\/]/.test(listing?.home ?? hostHomeCache.value ?? '')
 
   async function pick(): Promise<void> {
     if (targetPath === null) return
@@ -332,7 +355,7 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
       try {
         await props.onCommit(targetPath)
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(failureText(cause))
         return
       }
     }
@@ -350,7 +373,7 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
       setFolderDraft(null)
       navigate(created)
     } catch (cause) {
-      setCreateError(cause instanceof Error ? cause.message : String(cause))
+      setCreateError(failureText(cause))
     } finally {
       setCreating(false)
     }
@@ -358,7 +381,7 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
 
   /** 忙碌 / 有草稿时拒绝关闭：点遮罩或按 Esc 不该丢掉正在做的事（A-253 / B-006）。 */
   const requestClose = (): void => {
-    if (props.busy || creating || draft !== null || folderDraft !== null) return
+    if (props.busy || creating || committing || draft !== null || folderDraft !== null) return
     props.onClose()
   }
 
@@ -372,7 +395,7 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
           title={t('browser.editPath')}
           onClick={() => setDraft(listing?.path ?? '')}
         >
-          <IconEditOutline16 size={14} />
+          <IconEditOutlineRegular size={14} />
         </button>
       </div>
 
@@ -380,7 +403,7 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
         {draft === null ? (
           (listing?.crumbs ?? []).map((crumb, index) => (
             <span key={crumb.path} className={css.crumbSeat}>
-              {index > 0 ? <IconChevronRightOutline14 size={12} className={css.crumbChevron} /> : null}
+              {index > 0 ? <IconChevronRightOutlineRegular size={12} className={css.crumbChevron} /> : null}
               <button type="button" className={css.crumb} onClick={() => navigate(crumb.path)}>
                 {crumb.name}
               </button>
@@ -404,20 +427,20 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
         )}
       </div>
 
-      {drives.length === 0 ? null : (
-        <div className={css.driveBar}>
-          {drives.map((drive) => (
-            <button
-              key={drive}
-              type="button"
-              className={listing?.path.startsWith(drive) === true ? `${css.driveBtn} ${css.driveBtnActive}` : css.driveBtn}
-              onClick={() => navigate(drive)}
-            >
-              {drive}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* 盘符栏（D10）：没有盘符且不是 Windows 时给 POSIX `/` 兜底入口；
+          aria-label 只在真的翻译到时才挂（否则读屏会念 key 原文） */}
+      <div className={css.driveBar} {...(driveBarLabel === null ? {} : { 'aria-label': driveBarLabel })}>
+        {(drives.length === 0 && !windowsHost ? ['/'] : drives).map((drive) => (
+          <button
+            key={drive}
+            type="button"
+            className={listing?.path.startsWith(drive) === true ? `${css.driveBtn} ${css.driveBtnActive}` : css.driveBtn}
+            onClick={() => navigate(drive)}
+          >
+            {drive}
+          </button>
+        ))}
+      </div>
 
       <div className={css.content} ref={contentRef}>
         {listing?.truncated === true ? (
@@ -445,12 +468,12 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
                     }}
                   >
                     {entry.path === listing?.path ? (
-                      <IconFolderOpen16 size={16} className={css.rowIconSelected} />
+                      <IconFolderOpenRegular size={16} className={css.rowIconSelected} />
                     ) : (
-                      <IconFolderClose16 size={16} className={css.rowIcon} />
+                      <IconFolderCloseRegular size={16} className={css.rowIcon} />
                     )}
                     <span className={css.rowName}>{entry.name}</span>
-                    <IconChevronRightOutline14 size={12} className={css.rowChevron} />
+                    <IconChevronRightOutlineRegular size={12} className={css.rowChevron} />
                   </button>
                 ))}
             </div>
@@ -465,13 +488,14 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
               role="listitem"
               aria-current={selected?.path === entry.path ? 'true' : undefined}
               className={selected?.path === entry.path ? `${css.row} ${css.rowSelected}` : css.row}
+              disabled={committing}
               onClick={() => setSelected(entry)}
               onDoubleClick={() => navigate(entry.path)}
             >
               {selected?.path === entry.path ? (
-                <IconFolderOpen16 size={16} className={css.rowIconSelected} />
+                <IconFolderOpenRegular size={16} className={css.rowIconSelected} />
               ) : (
-                <IconFolderClose16 size={16} className={css.rowIcon} />
+                <IconFolderCloseRegular size={16} className={css.rowIcon} />
               )}
               <span className={css.rowName}>{entry.name}</span>
             </button>
@@ -486,11 +510,11 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
           className={showHidden ? `${css.showHiddenToggle} ${css.showHiddenToggleActive}` : css.showHiddenToggle}
           onClick={() => setShowHidden((value) => !value)}
         >
-          <IconCheckOutline16 size={14} /> {t('browser.showHidden')}
+          <IconCheckOutlineRegular size={14} /> {t('browser.showHidden')}
         </button>
         <Button
           variant="outline"
-          icon={<IconPlusOutline16 size={14} />}
+          icon={<IconPlusOutlineRegular size={14} />}
           disabled={listing === null || loading || busy}
           onClick={() => setFolderDraft('')}
         >
@@ -510,7 +534,7 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
           {t('browser.open')}
         </Button>
       </div>
-      {error === null ? null : <div className={css.error}>{error}</div>}
+      {error === null ? null : <div className={css.error} role="alert">{error}</div>}
 
       <Modal
         open={folderDraft !== null}
@@ -533,7 +557,7 @@ export function DirectoryBrowser(props: DirectoryBrowserProps): React.ReactEleme
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) void confirmCreate()
             }}
           />
-          {createError === null ? null : <div className={css.error}>{createError}</div>}
+          {createError === null ? null : <div className={css.error} role="alert">{createError}</div>}
           <div className={css.createActions}>
             <Button variant="outline" disabled={creating} onClick={() => setFolderDraft(null)}>
               {t('browser.cancel')}

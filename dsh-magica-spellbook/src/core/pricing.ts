@@ -102,7 +102,16 @@ function fallbackOf(table: PriceTable): PriceEntry | undefined {
   return table[0]
 }
 
-/** 一步账单（元）= (input×cacheMiss + cacheRead×cacheHit + output×output) / 1e6。 */
+/**
+ * 一步账单（元）= (未缓存输入×cacheMiss + 缓存读×cacheHit + 输出×output) / 1e6。
+ *
+ * **口径（dsh `TokenUsage` 的契约，diff C16）**：dsh 的计数字段是**互斥**的 ——
+ * `inputTokens` 只是**未缓存输入**，缓存段单独走 `cacheReadTokens` / `cacheWriteTokens`
+ * （源码注释：`Counts are DISJOINT: inputTokens is uncached input only`）。
+ * 所以这里直接相加，**不能**再减 `cacheReadTokens`：那样会把缓存读算两遍——
+ * 首次是"少算"，缓存占比高时账单会明显偏低（早期版本就是这个错误）。
+ * 若调用方手里是 provider 的 `prompt_tokens` 总数（含缓存），请先减去缓存段再传入。
+ */
 export function stepBill(
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } | undefined,
   routeModel: string | undefined,
@@ -112,8 +121,7 @@ export function stepBill(
   const entry = priceForModel(routeModel, table)
   if (entry === undefined) return 0
   const cacheRead = usage.cacheReadTokens ?? 0
-  const missInput = Math.max(0, usage.inputTokens - cacheRead)
-  const total = missInput * entry.cacheMiss + cacheRead * entry.cacheHit + usage.outputTokens * entry.output
+  const total = usage.inputTokens * entry.cacheMiss + cacheRead * entry.cacheHit + usage.outputTokens * entry.output
   return total / 1_000_000
 }
 

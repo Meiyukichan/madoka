@@ -244,7 +244,7 @@ describe('表级闸门', () => {
     )
     assert.equal(crossSite.status, 403)
 
-    const notFound = await call(fakeRequest({ method: 'GET', url: '/magica/nope', headers: { host: '127.0.0.1:3081' } }))
+    const notFound = await call(fakeRequest({ method: 'GET', url: '/旧实现/nope', headers: { host: '127.0.0.1:3081' } }))
     assert.equal(notFound.status, 404)
     assert.equal(notFound.body.error.code, 'not_found')
     assert.match(notFound.body.error.message, /no such interaction endpoint/)

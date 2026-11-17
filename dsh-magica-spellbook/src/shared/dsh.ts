@@ -1,213 +1,264 @@
 /**
- * dsh 0.2.0-rc.2 契约的**结构面**。
+ * dsh 类型面：**全部直接引用 dsh 包的类型**，这里不手写任何结构镜像。
  *
- * 为什么不用 `import type { ... } from '@deepseek-ai/dsh-*'`：
- * spellbook 是库不是插件，构建产物必须零运行时 `@deepseek-ai/*` 导入；类型若也来自那些包，
- * 消费方就被迫在 devDependencies 里装一整套 dsh（而它们只用于类型）。这里改成"按源码逐项抄下来的
- * 结构面"，每一处都标了 dsh 源码坐标，源码变动时靠 `docs/design/00-overview.zh.md` §5 的适配矩阵复核。
+ * 为什么可以"零运行时依赖"却仍直接引用类型：`import type` 在构建时被完全擦除，
+ * 产物里不会出现 `@deepseek-ai/*`（`scripts/verify.mjs` 会断言这一点）；
+ * 而类型来自真实包，dsh 升级时 `pnpm typecheck` 直接报错，不会静默漂移。
+ *
+ * 依赖声明见 package.json：这些包**同时**写在 `devDependencies`（`tsc` 解析用）
+ * 与 `peerDependencies`（消费方运行时由宿主提供，语义同 `dsh-magica-lattice`/`rune`）。
+ *
+ * 唯一"我们产生"的类型是 brand 铸造器（`asSessionId` / `asMessageId` / `asReasoningEffortId` /
+ * `asWorkspaceId`）与 {@link MessageSourceMap} 的生产者声明：
+ * dsh 的 brand 函数是**值**（`SessionId()` 等），本包运行时零 dsh 导入，所以只能在**一个**
+ * 地方把它们摊平（品牌在运行时是 no-op，等价于 dsh 自己的铸造函数）；
+ * 而 `MessageSourceMap` 本来就是 dsh 官方文档要求生产者用声明合并登记的扩展点。
  *
  * @module dsh-magica-spellbook/shared/dsh
  */
 
-/** 会话 id（dsh 侧是 `Branded<'SessionId'>`，这里退化成 string，只在类型层使用）。 */
-export type SessionIdLike = string
+import type { Context, EventOptions, LoggerService } from '@deepseek-ai/cordis'
+import type {
+  Agent,
+  AgentCancelCause,
+  AgentHandle,
+  AgentOptions,
+  AgentRegistry,
+  AgentSetup,
+  AgentSetupCommit,
+  CancelOptions,
+  CreateAgentOptions,
+  PreStepDecision,
+  ResumeAgentOptions,
+} from '@deepseek-ai/dsh-agent'
+import type { AgentPresetRegistry } from '@deepseek-ai/dsh-agent-preset-registry'
+import type { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import type { ContextSnapshotSection, MessageId } from '@deepseek-ai/dsh-llm'
+import type { PermissionPresetService, PresetSpec } from '@deepseek-ai/dsh-permission-presets'
+import type {
+  Session,
+  SessionEvent,
+  SessionEventMap,
+  SessionId,
+  TurnEndReason,
+  UserMessage,
+} from '@deepseek-ai/dsh-session'
+import type { SessionTitleService } from '@deepseek-ai/dsh-session-title'
+import type { Workspace, WorkspaceId, WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
+// 以下都是**只为声明合并**而 import 的类型空导入：
+// 少了它们，`SessionEventMap` / cordis `Events` 里就没有对应分支，`tsc` 会直接在
+// `session/event` 的 switch 与 `ctx.on('sandbox/mode', ...)` 上报错。
+import type {} from '@deepseek-ai/dsh-agent' // cordis Events：agent/created、agent/disposed …
+import type {} from '@deepseek-ai/dsh-plan-mode' // SessionEventMap：plan/mode
+import type {} from '@deepseek-ai/dsh-sandbox-policy' // SessionEventMap：sandbox/mode
+import type {} from '@deepseek-ai/dsh-session' // cordis Events：session/event …
+import type {} from '@deepseek-ai/dsh-user-approval' // cordis Events：approval/request；SessionEventMap：approval/*
+import type {} from '@deepseek-ai/dsh-user-questions' // cordis Events：user-questions/request
 
-/** cordis `LoggerService` 的最小面（`vendor/cordis/src/logger.ts`）。 */
-export interface DshLoggerLike {
-  warn?(message: string): void
-  error?(message: string): void
-}
-
-/** `Session`（`packages/core/session/src/index.ts`）的最小面。 */
-export interface DshSessionLike {
-  readonly id: SessionIdLike
-  append(type: string, data?: unknown): unknown
-}
-
-/** `Agent`（`packages/core/agent/src/runtime-types.ts:150-242`）的最小面。 */
-export interface DshAgentLike {
-  readonly id: SessionIdLike
-  readonly session: DshSessionLike
-  followup(message: DshUserMessageLike): void
-  steer(message: DshUserMessageLike): void
-  inject(message: DshUserMessageLike): void
-  cancel(cause: DshCancelCause, options?: { keepInbox?: boolean }): void
-  whenIdle(): Promise<void>
-}
-
-/** `AgentHandle`（`packages/core/agent/src/index.ts:160-163`）。 */
-export interface DshAgentHandleLike {
-  readonly agent: DshAgentLike
-  dispose(): Promise<void>
-}
-
-/** `AgentCancelCause`（`packages/core/session/src/types.ts:189-193`）。 */
-export type DshCancelCause =
-  | { readonly kind: 'user' }
-  | { readonly kind: 'parent' }
-  | { readonly kind: 'hook'; readonly reason: string }
-  | { readonly kind: 'disposed' }
-
-/** `TurnEndCancelCause`（`packages/core/session/src/types.ts:196`）。 */
-export type DshTurnEndCancelCause = DshCancelCause | { readonly kind: 'legacy' }
-
-/**
- * `TurnEndReason`（`packages/core/session/src/types.ts:201-232`）。
- * ⚠️ 0.2 比 0.1.6 多了 `forked` 一档，`TURN_END_KINDS` 必须同步。
- */
-export type DshTurnEndReason =
-  | { readonly kind: 'completed' }
-  | { readonly kind: 'aborted'; readonly reason: DshTurnEndCancelCause }
-  | { readonly kind: 'blocked' }
-  | { readonly kind: 'error'; readonly error: { readonly message?: string } }
-  | { readonly kind: 'max-tokens' }
-  | { readonly kind: 'interrupted' }
-  | { readonly kind: 'forked' }
-
-/** `SessionEvent`（`packages/core/session/src/types.ts:434`）；只用到 type/data。 */
-export interface DshSessionEvent {
-  readonly type: string
-  readonly data?: unknown
-  readonly time?: number
-}
-
-/** `UserMessage`（`packages/llm/llm/src/message.ts:143-145`）。 */
-export interface DshUserMessageLike {
-  id: string
-  role: 'user'
-  content: Array<{ type: 'text'; text: string }>
-  source: Record<string, unknown>
-}
-
-/** `AgentSetupCommit`（`packages/core/agent/src/index.ts:36-43`）。 */
-export interface DshAgentSetupCommit {
-  commit(): void
-}
-
-/** `AgentSetup`（`packages/core/agent/src/index.ts:51-54`，0.2 起是两参）。 */
-export type DshAgentSetup = (
-  agentCtx: unknown,
-  agent?: unknown,
-) => DshAgentSetupCommit | Promise<DshAgentSetupCommit | void> | void
-
-/** `CreateAgentOptions` 的最小子集（`packages/core/agent/src/index.ts:63-119`）。 */
-export interface DshCreateAgentOptions {
-  readonly sessionId: SessionIdLike
-  readonly meta?: {
-    readonly cwd?: string
-    readonly agentPreset?: string
-    readonly parentSession?: SessionIdLike
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * spellbook 注入的插件上下文（`agent.inject()` / 会话上下文投递）。
+     *
+     * dsh 的 `MessageSourceMap` 按**生产者**合并，而我们的生产者是"任意具名 section"：
+     * 具体 `kind` 由调用方给的 section 名决定（无名时是 `spellbook-context`），
+     * 所以这里只能声明成 `string` —— 这也是运行时事实（dsh 不枚举 user 消息的 `kind`，
+     * session format v4 只拒绝已退役的字面量 `plugin`）。段落名同时出现在 `sections` 里，
+     * 消费方需要精确定位时读 `sections[].name`。
+     */
+    'spellbook-context': {
+      /** 生产者自有 kind：调用方给的 section 名，无名时是 `spellbook-context`。 */
+      kind: string
+      /** 注入方包名（表达"谁注入的"）。 */
+      plugin: string
+      /** 快照形态：一次注入的具名段落。 */
+      form: 'snapshot'
+      /** 本次注入的具名段落（`name` 与 `kind` 同值）。 */
+      sections: readonly ContextSnapshotSection[]
+    }
   }
-  readonly agentOptions?: DshAgentOptions
-  readonly signal?: AbortSignal
-  readonly setup?: DshAgentSetup
 }
 
-/** `ResumeAgentOptions`（`packages/core/agent/src/index.ts:125-144`）。 */
-export interface DshResumeAgentOptions {
-  readonly resumeSessionId: SessionIdLike
-  readonly agentOptions?: DshAgentOptions
-  readonly signal?: AbortSignal
-  readonly setup?: DshAgentSetup
-}
+// ── brand 铸造器（运行时 no-op，集中一处）────────────────────────
+//
+// dsh 的 brand 是纯类型标记，铸造函数（`SessionId()` / `MessageId()`）是**值导出**；
+// 本包运行时零 `@deepseek-ai/*` 导入，所以在"JSON/调用方字符串 → dsh brand"这一个
+// 边界上摊平，等价于 dsh 自己的铸造实现。
 
-/** `AgentOptions`（`packages/core/agent/src/runtime-types.ts:26-35`）。 */
-export interface DshAgentOptions {
-  provider?: string
-  model?: string
-  reasoningEffort?: string
-  maxTokens?: number
-}
-
-/** `AgentRegistry`（`packages/core/agent/src/index.ts:249+`）的最小面。 */
-export interface DshAgentRegistryLike {
-  create(options: DshCreateAgentOptions): Promise<DshAgentHandleLike>
-  resume(options: DshResumeAgentOptions): Promise<DshAgentHandleLike>
-  get(id: SessionIdLike): DshAgentLike | undefined
-}
-
-/** `PermissionPresetService`（`packages/interaction/permission-presets/src/index.ts:162+`）。 */
-export interface DshPermissionPresetsLike {
-  readonly defaultPreset?: string
-  set?(session: DshSessionLike, name: string): void
-}
-
-/** `agentPresets` 服务（`packages/preset/agent-presets/src/index.ts:164+`）的最小面。 */
-export interface DshAgentPresetsLike {
-  readonly defaultId?: string
-  mount?(agentCtx: unknown, id?: string): Promise<unknown>
-  resolve?(id?: string): Promise<unknown>
-}
-
-/** `SessionTitleService`（`packages/session/session-title/src/index.ts:295+`）。 */
-export interface DshSessionTitleLike {
-  rename?(session: DshSessionLike, title: string): unknown
-}
-
-/** `Workspace`（`packages/workspace/workspace/src/entity.ts:69+`）。 */
-export interface DshWorkspaceLike {
-  readonly id: string
-  readonly path?: string
-  attachSession?(sessionId: string): Promise<void>
-}
-
-/** `WorkspaceRegistry`（`packages/workspace/workspace/src/index.ts:92+`）。 */
-export interface DshWorkspaceRegistryLike {
-  create(path: string, title?: string): Promise<DshWorkspaceLike>
-  resolveByPath(path: string): Promise<DshWorkspaceLike | undefined>
-  get(id: string): DshWorkspaceLike | undefined
-  list?(): DshWorkspaceLike[]
-}
-
-/** 事件监听选项（cordis `EventOptions`）。 */
-export interface DshEventOptions {
-  prepend?: boolean
-  global?: boolean
+/**
+ * 把普通字符串认作 dsh 的 `SessionId`。
+ * @param id - 会话 id 原文。
+ * @returns 同一个字符串，带上 brand。
+ */
+export function asSessionId(id: string): SessionId {
+  return id as SessionId
 }
 
 /**
- * 宿主 context 的最小面。库不 `inject`，因此只需要 `get` / `on` / `effect`。
- * `get` 在 0.2 只查 service store（`vendor/cordis/src/reflect.ts`），所以 `logger` 用它取不到。
+ * 把普通字符串认作 dsh 的 `MessageId`。
+ * @param id - 消息 id 原文。
+ * @returns 同一个字符串，带上 brand。
  */
-export interface DshContextLike {
-  get(name: string): unknown
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 事件参数由各事件自己声明，库内只做结构性读取
-  on(event: string, listener: (...args: any[]) => unknown, options?: DshEventOptions): () => void
-  effect(callback: () => unknown, label?: string): () => void
-  logger?: DshLoggerLike
+export function asMessageId(id: string): MessageId {
+  return id as MessageId
 }
 
-/** `dshHomePath`（`packages/util/home-paths/src/index.ts:98-100`，由 app-boot provide）。 */
-export type DshHomePath = (...segments: string[]) => string
+/** dsh 的 `ReasoningEffortId`（`AgentOptions` 上那个 brand）。 */
+export type DshReasoningEffortId = NonNullable<AgentOptions['reasoningEffort']>
 
-/** 从任意 ctx 面里按名字取服务，永不抛错。 */
+/**
+ * 把普通字符串认作 dsh 的 `ReasoningEffortId`。
+ * @param effort - 路由登记里读到的字符串。
+ * @returns 同一个字符串，带上 brand。
+ */
+export function asReasoningEffortId(effort: string): DshReasoningEffortId {
+  return effort as DshReasoningEffortId
+}
+
+/** dsh 的 `WorkspaceId`。 */
+export type DshWorkspaceId = WorkspaceId
+
+/**
+ * 把普通字符串认作 dsh 的 `WorkspaceId`。
+ * @param id - 调用方给的 workspace id。
+ * @returns 同一个字符串，带上 brand。
+ */
+export function asWorkspaceId(id: string): DshWorkspaceId {
+  return id as WorkspaceId
+}
+
+// ── 公开类型别名（名字沿用，形状全部来自 dsh）──────────────────────
+
+/** 会话 id（dsh 的 branded 类型）。 */
+export type SessionIdLike = SessionId
+
+/** 日志服务（cordis 的 `ctx.logger`，`warn` 等分级方法齐全）。 */
+export type DshLoggerLike = LoggerService
+
+/** dsh 会话。 */
+export type DshSessionLike = Session
+
+/** dsh agent 实例。 */
+export type DshAgentLike = Agent
+
+/** `agents.create()` / `resume()` 返回的句柄（含 disposer）。 */
+export type DshAgentHandleLike = AgentHandle
+
+/** 取消原因（`{ kind: 'user' } | { kind: 'parent' } | { kind: 'hook', reason } | { kind: 'disposed' }`）。 */
+export type DshCancelCause = AgentCancelCause
+
+/** `cancel()` 的第二参。 */
+export type DshCancelOptions = CancelOptions
+
+/** 本轮结束原因（`turn/end` 的 `reason`，7 种 `kind`）。 */
+export type DshTurnEndReason = TurnEndReason
+
+/** 会话事件（dsh 的可合并判别联合）。 */
+export type DshSessionEvent = SessionEvent
+
+/** 会话事件表（插件可合并扩展）。 */
+export type DshSessionEventMap = SessionEventMap
+
+/** 投给 agent 的用户消息。 */
+export type DshUserMessageLike = UserMessage
+
+/** `agent/pre-step` 瀑布的返回值。 */
+export type DshPreStepDecision = PreStepDecision
+
+/** setup 的提交回包。 */
+export type DshAgentSetupCommit = AgentSetupCommit
+
+/**
+ * 创建期的装配回调。
+ *
+ * 与 dsh 的 {@link AgentSetup} 同源，但本 SDK 在 `composeAgentScope()` 里只转发 `agentCtx`
+ * （`agent` 由 dsh 的创建事务自己消费），所以第二参被投影掉——这不是新形状，
+ * 只是把真实类型收窄成我们实际提供的调用面。
+ */
+export type DshAgentSetup = (agentCtx: Parameters<AgentSetup>[0]) => ReturnType<AgentSetup>
+
+/** `agents.create()` 入参。 */
+export type DshCreateAgentOptions = CreateAgentOptions
+
+/** `agents.resume()` 入参。 */
+export type DshResumeAgentOptions = ResumeAgentOptions
+
+/** 单 agent 选项（model 等）。 */
+export type DshAgentOptions = AgentOptions
+
+/** agent 注册表服务（`ctx.agents`）。 */
+export type DshAgentRegistryLike = AgentRegistry
+
+/** 权限档位服务（`ctx.permissionPresets`）。 */
+export type DshPermissionPresetsLike = PermissionPresetService
+
+/** 沙箱模式（dsh 的 `SandboxMode`，经 `PresetSpec` 转出，避免多引一个包）。 */
+export type DshSandboxMode = PresetSpec['sandbox']
+
+/** 审批策略（dsh 的 `ApprovalPolicy`）。 */
+export type DshApprovalPolicy = PresetSpec['approval']
+
+/** preset 解析服务（`ctx.agentPresets`）。 */
+export type DshAgentPresetsLike = AgentPresetRegistry
+
+/** 标题服务（`ctx.sessionTitle`）。 */
+export type DshSessionTitleLike = SessionTitleService
+
+/** 工作区（`ctx.workspaceRegistry.get()` 的返回值）。 */
+export type DshWorkspaceLike = Workspace
+
+/** 工作区注册表（`ctx.workspaceRegistry`）。 */
+export type DshWorkspaceRegistryLike = WorkspaceRegistry
+
+/** `ctx.on` 的选项（waterfall 抢占用 `{ prepend: true, global: true }`）。 */
+export type DshEventOptions = EventOptions
+
+/** 宿主 context（cordis）。 */
+export type DshContextLike = Context
+
+/** `$DSH_HOME` 路径解析服务（`@deepseek-ai/dsh-home-paths` 的 `dshHomePath`）。 */
+export type DshHomePath = typeof dshHomePath
+
+// ── 运行时辅助（这两条是逻辑，不是类型镜像）──────────────────────
+
+/**
+ * 取服务：先 `ctx.get(name)`，再退回属性访问；两条路径都吞异常。
+ * @param ctx - cordis context（或它的最小结构面）。
+ * @param name - 服务名。
+ * @returns 服务或 `undefined`。
+ */
 export function serviceOf<T>(ctx: unknown, name: string): T | undefined {
-  if (ctx === null || typeof ctx !== 'object') return undefined
-  const candidate = ctx as { get?: (key: string) => unknown }
-  if (typeof candidate.get === 'function') {
+  const scope = ctx as { get?: (key: string) => unknown; [key: string]: unknown }
+  if (typeof scope.get === 'function') {
     try {
-      const value = candidate.get(name)
+      const value = scope.get(name)
       if (value !== undefined && value !== null) return value as T
     } catch {
-      // 服务已 dispose 或未注册：退回到属性访问
+      // 未注册：退回属性访问
     }
   }
-  const direct = (ctx as Record<string, unknown>)[name]
-  return direct === null ? undefined : (direct as T | undefined)
+  try {
+    const value = scope[name]
+    return value === undefined || value === null ? undefined : (value as T)
+  } catch {
+    return undefined
+  }
 }
 
-/** `effect` 的最小调用面（缺失时退化为立即执行并返回 noop）。 */
+/**
+ * 把副作用登记到 fiber（宿主卸载时自动回收）。
+ * @param ctx - cordis context。
+ * @param callback - 返回 disposer 的回调。
+ * @param label - 诊断标签。
+ * @returns 手动解绑函数。
+ */
 export function effectOf(ctx: unknown, callback: () => unknown, label: string): () => void {
-  const candidate = ctx as { effect?: (fn: () => unknown, label?: string) => unknown } | undefined
-  if (candidate !== undefined && typeof candidate.effect === 'function') {
-    try {
-      const disposer = candidate.effect(callback, label)
-      if (typeof disposer === 'function') return disposer as () => void
-      return () => {}
-    } catch {
-      // fiber 已 inactive：不登记，直接拿到回调自身的 disposer
-    }
+  const scope = ctx as { effect?: (cb: () => unknown, label?: string) => unknown }
+  if (typeof scope.effect !== 'function') return () => {}
+  try {
+    const dispose = scope.effect(callback, label)
+    return typeof dispose === 'function' ? (dispose as () => void) : () => {}
+  } catch {
+    return () => {}
   }
-  const inner = callback()
-  return typeof inner === 'function' ? (inner as () => void) : () => {}
 }

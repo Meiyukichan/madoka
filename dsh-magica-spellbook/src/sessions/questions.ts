@@ -11,8 +11,13 @@ import { randomUUID } from 'node:crypto'
 import { createEventLogger, type EventLogger } from '../core/logger.ts'
 import { manageWaterfallListener } from './core.ts'
 import { serviceOf } from '../shared/dsh.ts'
-import { WATERFALL_TAKEOVER, type InteractionAnswerItem, type InteractionQuestion } from '../shared/wire.ts'
-import type { DshAgentLike, DshContextLike } from '../shared/dsh.ts'
+import {
+  WATERFALL_TAKEOVER,
+  type InteractionAnswerItem,
+  type InteractionQuestion,
+} from '../shared/interaction.ts'
+import type { AskUserQuestionAnswer, AskUserQuestionRequestEvent } from '@deepseek-ai/dsh-user-questions/types'
+import type { DshContextLike } from '../shared/dsh.ts'
 
 /** 待决提问。 */
 export interface PendingQuestion {
@@ -36,7 +41,7 @@ interface PendingEntry {
   readonly id: string
   readonly questions: InteractionQuestion[]
   readonly since: number
-  settleAnswer: (answer: { answers: InteractionAnswerItem[] }) => void
+  settleAnswer: (answer: AskUserQuestionAnswer) => void
   settleCancel: () => void
   settleAbort: () => void
 }
@@ -122,53 +127,20 @@ function questionError(message: string, code: QuestionErrorCode): Error {
   return error
 }
 
-/** 请求载荷里我们关心的字段。 */
-interface QuestionRequestLike {
-  readonly questions?: Array<{
-    id?: unknown
-    question?: unknown
-    detail?: unknown
-    header?: unknown
-    options?: Array<{ label?: unknown; description?: unknown }>
-    multiSelect?: unknown
-    intent?: { kind?: unknown; approve?: unknown; callId?: unknown }
-  }>
-  readonly agent?: DshAgentLike
-  readonly signal?: AbortSignal
-  readonly wait?: { callId?: unknown; timed?: unknown }
-}
+/** 请求载荷里我们关心的字段就是 dsh 的 `AskUserQuestionRequestEvent` 全部字段。 */
 
-interface AnswerLike {
-  readonly answers?: unknown
-}
-
-function normalizeQuestions(request: QuestionRequestLike): InteractionQuestion[] {
+/**
+ * 把 dsh 的请求摊成列表下发的形状：逐题加上 `wait*` 派生字段。
+ * @param request - dsh 的 `user-questions/request` 载荷。
+ * @returns 每题一份（非法 id / 题干直接跳过）。
+ */
+function normalizeQuestions(request: AskUserQuestionRequestEvent): InteractionQuestion[] {
   const waitCallId = request.wait?.callId === undefined ? undefined : String(request.wait.callId)
   const waitTimed = request.wait?.timed === true ? true : undefined
   const out: InteractionQuestion[] = []
-  for (const item of request.questions ?? []) {
-    const id = item.id === undefined ? '' : String(item.id)
-    const question = typeof item.question === 'string' ? item.question : ''
-    if (id === '' || question === '') continue
-    const normalized: InteractionQuestion = { id, question }
-    if (typeof item.detail === 'string') normalized.detail = item.detail
-    if (typeof item.header === 'string') normalized.header = item.header
-    if (Array.isArray(item.options)) {
-      const options = item.options
-        .filter((option): option is { label: string; description?: string } => typeof option.label === 'string')
-        .map((option) => {
-          const entry: { label: string; description?: string } = { label: option.label }
-          if (typeof option.description === 'string') entry.description = option.description
-          return entry
-        })
-      if (options.length > 0) normalized.options = options
-    }
-    // 三个取值都要保留：alse 丢掉会让挂住的请求与原文不再深等（m.md:193/215）
-    if (typeof item.multiSelect === 'boolean') normalized.multiSelect = item.multiSelect
-    if (item.intent !== undefined && typeof item.intent.kind === 'string' && typeof item.intent.approve === 'string') {
-      normalized.intent = { kind: item.intent.kind, approve: item.intent.approve }
-      if (item.intent.callId !== undefined) normalized.intent.callId = String(item.intent.callId)
-    }
+  for (const item of request.questions) {
+    if (item.id === '' || item.question === '') continue
+    const normalized: InteractionQuestion = { ...item }
     if (waitCallId !== undefined) normalized.waitCallId = waitCallId
     if (waitTimed === true) normalized.waitTimed = true
     out.push(normalized)
@@ -211,7 +183,7 @@ export function installQuestionAnswerer(
   ensureLogger(ctx)
   retainLogger()
 
-  const hold = (request: QuestionRequestLike): Promise<{ answers: InteractionAnswerItem[] }> => {
+  const hold = (request: AskUserQuestionRequestEvent): Promise<AskUserQuestionAnswer> => {
     const questions = normalizeQuestions(request)
     const signal = request.signal
     const id = randomUUID()
@@ -233,7 +205,7 @@ export function installQuestionAnswerer(
       return Promise.reject(questionError('ask_user_question was aborted before the user answered', 'ASK_ABORTED'))
     }
 
-    return new Promise<{ answers: InteractionAnswerItem[] }>((resolve, reject) => {
+    return new Promise<AskUserQuestionAnswer>((resolve, reject) => {
       let done = false
       let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -293,7 +265,7 @@ export function installQuestionAnswerer(
       () =>
         (ctx as DshContextLike).on(
           'user-questions/request',
-          (request: QuestionRequestLike, next: () => Promise<{ answers: InteractionAnswerItem[] }>) => {
+          (request: AskUserQuestionRequestEvent, next: () => Promise<AskUserQuestionAnswer>) => {
             if (uninstalled) return next()
             const owner = request.agent?.session?.id
             if (owner === undefined || String(owner) !== key) return next()
@@ -328,7 +300,7 @@ export function installFailFastQuestionAnswerer(ctx: unknown, sessionId: string)
       () =>
         (ctx as DshContextLike).on(
           'user-questions/request',
-          (request: QuestionRequestLike, next: () => Promise<{ answers: InteractionAnswerItem[] }>) => {
+          (request: AskUserQuestionRequestEvent, next: () => Promise<AskUserQuestionAnswer>) => {
             if (uninstalled) return next()
             const owner = request.agent?.session?.id
             if (owner === undefined || String(owner) !== key) return next()
@@ -402,14 +374,14 @@ function validateAnswers(
 export function answerQuestion(
   sessionId: string,
   questionId: string,
-  answer: { answers: InteractionAnswerItem[] },
+  answer: AskUserQuestionAnswer,
 ): QuestionAnswerResult {
   const bridge = bridges.get(String(sessionId))
   if (bridge === undefined) return 'session-gone'
   const entry = bridge.pending.get(questionId)
   if (entry === undefined) return 'not-found'
   if (validateAnswers(entry.questions, answer) !== null) return 'invalid-answer'
-  entry.settleAnswer(answer as { answers: InteractionAnswerItem[] })
+  entry.settleAnswer(answer)
   return 'answered'
 }
 
@@ -449,5 +421,3 @@ export function resetQuestions(): void {
   activeAnswerers = 0
   disposeInteractionLogger()
 }
-
-export type { AnswerLike }
