@@ -38,6 +38,23 @@ after(async () => {
 const stateOf = async (zoneIndex, name) =>
   pill(page, zoneIndex, name).getAttribute('data-state')
 
+/**
+ * 等药丸的 `data-state` 变成期望值。
+ *
+ * 不能点完立刻断言：patch 落盘与 DOM 重渲染是两条路径，0.2.1 上写入会触发插件重挂，
+ * 重挂后要等新实例 render 完才轮询得到（实测 0.4s 内收敛）。直接断言会偶发假失败。
+ */
+async function waitState(zoneIndex, name, expected, label, timeout = 8_000) {
+  const deadline = Date.now() + timeout
+  let last = '未读到'
+  while (Date.now() < deadline) {
+    last = await stateOf(zoneIndex, name).catch(() => 'MISSING')
+    if (last === expected) return
+    await new Promise(resolve => setTimeout(resolve, 150))
+  }
+  throw new Error(`${label}：期望 state=${expected}，实际 ${last}`)
+}
+
 /** 点一下并处理可能出现的二次确认。 */
 async function toggleWithConfirm(zoneIndex, name) {
   await pill(page, zoneIndex, name).click()
@@ -63,19 +80,19 @@ describe('全工具矩阵：全局 / 工作区 × 禁用 / 启用', () => {
       // —— 全局：禁用 ——
       await toggleWithConfirm(0, name)
       await waitGlobalDisabled(set => set.has(name), `${name} 全局禁用`)
-      assert.equal(await stateOf(0, name), 'disabled', `${name}：全局 zone 应显示 disabled`)
-      assert.equal(await stateOf(1, name), 'disabled', `${name}：工作区 zone 应继承 disabled`)
+      await waitState(0, name, 'disabled', `${name}：全局 zone 应显示 disabled`)
+      await waitState(1, name, 'disabled', `${name}：工作区 zone 应继承 disabled`)
 
       // —— 全局：启用 ——
       await toggleWithConfirm(0, name)
       await waitGlobalDisabled(set => !set.has(name), `${name} 全局启用`)
-      assert.equal(await stateOf(0, name), 'enabled', `${name}：全局 zone 应回到 enabled`)
+      await waitState(0, name, 'enabled', `${name}：全局 zone 应回到 enabled`)
 
       // —— 工作区：禁用（不能影响全局） ——
       await toggleWithConfirm(1, name)
       await waitWorkspaceDisabled(set => set.has(name), `${name} 工作区禁用`)
-      assert.equal(await stateOf(1, name), 'disabled', `${name}：工作区 zone 应显示 disabled`)
-      assert.equal(await stateOf(0, name), 'enabled', `${name}：工作区禁用不得影响全局 zone`)
+      await waitState(1, name, 'disabled', `${name}：工作区 zone 应显示 disabled`)
+      await waitState(0, name, 'enabled', `${name}：工作区禁用不得影响全局 zone`)
       assert.equal(
         readGlobalDisabled().includes(name), false,
         `${name}：工作区禁用不得写进 global.disabled`,
@@ -84,7 +101,7 @@ describe('全工具矩阵：全局 / 工作区 × 禁用 / 启用', () => {
       // —— 工作区：启用 ——
       await toggleWithConfirm(1, name)
       await waitWorkspaceDisabled(set => !set.has(name), `${name} 工作区启用`)
-      assert.equal(await stateOf(1, name), 'enabled', `${name}：工作区 zone 应回到 enabled`)
+      await waitState(1, name, 'enabled', `${name}：工作区 zone 应回到 enabled`)
 
       passed.push(name)
     }

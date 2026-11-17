@@ -82,7 +82,10 @@ export async function startServer() {
   if (process.env.DSH_E2E_URL !== undefined) {
     return { url: process.env.DSH_E2E_URL, port: new URL(process.env.DSH_E2E_URL).port, stop: async () => {} }
   }
-  const port = await pickFreePort()
+  // 端口可用 `DSH_E2E_PORT` 固定：dev profile 的存储租约是「单写者」，同 profile 的
+  // 第二个实例会变只读（`/diagnostics` writable:false、写盘 403），这时换端口没用，
+  // 但固定端口便于人工核对是哪个进程在跑。
+  const port = process.env.DSH_E2E_PORT ?? await pickFreePort()
   const child = spawn('dsh', ['--profile', PROFILE, '--port', port, '--no-open'], {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],

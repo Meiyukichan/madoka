@@ -177,9 +177,14 @@ export class AbilityController {
   private async persist(value: AbilitySettingsValue, revision: number | undefined): Promise<boolean> {
     this.writes += 1
     try {
-      const result = revision === undefined
-        ? await this.ctx.remote.settings.replace(ABILITY_NS, value as unknown as Record<string, unknown>)
-        : await this.ctx.remote.settings.replace(ABILITY_NS, value as unknown as Record<string, unknown>, revision)
+      // 必须**始终传 3 个参数**：0.2.1 的 client api 会校验实参个数，
+      // 少传一个直接抛 `settings/replace expected 3 argument(s), got 2`。
+      // 不做乐观锁时显式传 `undefined`。
+      const result = await this.ctx.remote.settings.replace(
+        ABILITY_NS,
+        value as unknown as Record<string, unknown>,
+        revision,
+      )
       if (!result.ok) {
         // 结构化拒绝（冲突/覆盖层只读/字段不可写）：定位问题必须有据可查
         console.warn('[rune] settings write rejected: ' + result.error.message)
