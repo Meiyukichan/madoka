@@ -1,7 +1,7 @@
-# dsh-magica-spellbook 设计总纲（DSH 0.2.0-rc.2）
+# dsh-magica-spellbook 设计总纲（DSH 0.2.1-rc.5）
 
 > 状态：**设计定稿，可进入实现**。
-> 目标运行时：`@deepseek-ai/dsh` **0.2.0-rc.2**（源码 `D:\project-code\llm\deepseek-harness`，tag `dsh-v0.2.0-rc.2`）。
+> 目标运行时：`@deepseek-ai/dsh` **0.2.1-rc.5**（源码 `D:\project-code\test\deepseek-harness`，tag `dsh-v0.2.1-rc.5`）。
 > 素材基线：`docs/raw/a.md`–`o.md`（15 篇 / 10 759 行，剖析对象 `@amazing-tools/dsh-magica` **0.1.6-rc.26**）。
 > 本文只写"设计"；0.1.6 的逐函数实现细节在 `docs/raw/`，不复述。
 
@@ -419,9 +419,9 @@ pnpm build
 
 ---
 
-## 5. 0.2.0-rc.2 适配矩阵（★ 全仓库最重要的一张表）
+## 5. 0.2.1-rc.5 适配矩阵（★ 全仓库最重要的一张表）
 
-> 左侧是 `docs/raw/` 记录的 0.1.6 事实，右侧是本机 0.2.0-rc.2 的真实情况。**标 ❗ 的项如果照抄，运行时不会报错，但功能静默失效。**
+> 左侧是 `docs/raw/` 记录的 0.1.6 事实，右侧是本机 0.2.1-rc.5 的真实情况。**标 ❗ 的项如果照抄，运行时不会报错，但功能静默失效。**
 
 | # | 0.1.6 的写法 / 假设 | 0.2.0-rc.2 事实 | 处置 |
 |---|---|---|---|

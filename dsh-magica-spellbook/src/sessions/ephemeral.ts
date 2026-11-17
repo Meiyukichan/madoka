@@ -124,6 +124,8 @@ export interface EphemeralSessionState {
 }
 
 /** 对外句柄。 */
+export type PushMode = 'followup' | 'steer' | 'inject' | 'skipped'
+
 export interface EphemeralSessionHandle {
   id: string
   resumed: boolean
@@ -131,6 +133,10 @@ export interface EphemeralSessionHandle {
   getState(): EphemeralSessionState
   followup(message: string | string[]): Promise<TurnSettlement>
   injectContext(entries: PluginContextEntry | readonly PluginContextEntry[]): boolean
+  /** 三档投递：idle→followup / running→steer / 其余 inject（S2）。 */
+  pushNamedContext(entries: PluginContextEntry | readonly PluginContextEntry[], options?: { wake?: 'idle' | 'always' }): PushMode
+  /** 直接插话（不等下一轮，S1）。 */
+  steer(message: string | string[]): boolean
   cancel(cause?: DshCancelCause): void
   dispose(): Promise<void>
   wake(): Promise<void>
@@ -158,6 +164,8 @@ function lastSettlement(state: SessionRunState): TurnSettlement {
 /** 时长文案（定义在 core，两个门面共用）。 */
 /** 时长文案：小于 1 分钟说毫秒/秒，避免 `Math.round(120/60000)=0` 写成「0 分钟」。 */
 
+
+
 export function runEphemeralSession(ctx: unknown, options: RunEphemeralSessionOptions): EphemeralSessionHandle {
   const store: SessionRecordStore | null = getSessionStore(ctx, options.storeDir)
   const target = resolveResumeTarget(store, options.sessionId, 'magica', 'ephemeral', options.newSessionId)
@@ -178,6 +186,44 @@ export function runEphemeralSession(ctx: unknown, options: RunEphemeralSessionOp
   ]
 
   let handle: DshAgentHandleLike | null = null
+
+/** 一条具名上下文 → 投递档位。 */
+
+/**
+ * 三档投递（把复核报告 §7-S2 收敛进 SDK）。
+ *
+ * - 会话空闲 → `followup`（起一轮）；
+ * - 正在跑 → `steer`（插进最近的 step，不排队等下一轮）；
+ * - 状态取不到/已结束 → `inject`（挂进收件箱，等下一次唤醒）。
+ */
+function pushNamedContextImpl(
+  entries: PluginContextEntry | readonly PluginContextEntry[],
+  options?: { wake?: 'idle' | 'always' },
+): PushMode {
+  const messages = toMessages(contextPlugin, entries)
+  if (messages.length === 0 || handle === null || disposed) return 'skipped'
+  const agent = handle.agent
+  const status = agent.status
+  if ((options?.wake ?? 'idle') === 'always' || status === 'running') {
+    for (const message of messages) agent.steer(message)
+    return 'steer'
+  }
+  if (status === 'idle') {
+    for (const message of messages) agent.followup(message)
+    return 'followup'
+  }
+  for (const message of messages) agent.inject(message)
+  return 'inject'
+}
+
+/** 直接插话（不排队）。 */
+function steerImpl(message: string | string[]): boolean {
+  if (disposed || handle === null) return false
+  const blocks = Array.isArray(message) ? message : [message]
+  for (const block of blocks) handle.agent.steer(buildUserMessage(block))
+  return true
+}
+
   let unsubscribe: (() => void) | null = null
   let delivery: ContextDeliveryHandle | null = null
   let mountedPresetId: string | undefined
@@ -522,6 +568,12 @@ export function runEphemeralSession(ctx: unknown, options: RunEphemeralSessionOp
       if (delivery === null || messages.length === 0) return false
       delivery.push(messages)
       return true
+    },
+    pushNamedContext(entries, options) {
+      return pushNamedContextImpl(entries, options)
+    },
+    steer(message) {
+      return steerImpl(message)
     },
     cancel(cause: DshCancelCause = { kind: 'hook', reason: 'magica:cancel' }) {
       if (disposed || handle === null) return

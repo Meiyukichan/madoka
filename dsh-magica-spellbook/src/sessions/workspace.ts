@@ -109,6 +109,8 @@ export interface WorkspaceSessionState {
 }
 
 /** 对外句柄。 */
+export type PushMode = 'followup' | 'steer' | 'inject' | 'skipped'
+
 export interface WorkspaceSessionHandle {
   id: string
   resumed: boolean
@@ -116,6 +118,10 @@ export interface WorkspaceSessionHandle {
   getState(): WorkspaceSessionState
   followup(message: string | string[]): Promise<TurnSettlement>
   injectContext(entries: PluginContextEntry | readonly PluginContextEntry[]): boolean
+  /** 三档投递：idle→followup / running→steer / 其余 inject（S2）。 */
+  pushNamedContext(entries: PluginContextEntry | readonly PluginContextEntry[], options?: { wake?: 'idle' | 'always' }): PushMode
+  /** 直接插话（不等下一轮，S1）。 */
+  steer(message: string | string[]): boolean
   cancel(cause?: DshCancelCause): void
   dispose(): Promise<void>
   wake(): Promise<void>
@@ -143,6 +149,8 @@ function lastSettlement(state: SessionRunState): TurnSettlement {
  * @param ctx - 宿主 context。
  * @param options - 见类型。
  */
+
+
 export function runWorkspaceSession(
   ctx: unknown,
   options: RunWorkspaceSessionOptions,
@@ -162,6 +170,44 @@ export function runWorkspaceSession(
   const contexts = toMessages(contextPlugin, options.context)
 
   let handle: DshAgentHandleLike | null = null
+
+/** 一条具名上下文 → 投递档位。 */
+
+/**
+ * 三档投递（把复核报告 §7-S2 收敛进 SDK）。
+ *
+ * - 会话空闲 → `followup`（起一轮）；
+ * - 正在跑 → `steer`（插进最近的 step，不排队等下一轮）；
+ * - 状态取不到/已结束 → `inject`（挂进收件箱，等下一次唤醒）。
+ */
+function pushNamedContextImpl(
+  entries: PluginContextEntry | readonly PluginContextEntry[],
+  options?: { wake?: 'idle' | 'always' },
+): PushMode {
+  const messages = toMessages(contextPlugin, entries)
+  if (messages.length === 0 || handle === null || disposed) return 'skipped'
+  const agent = handle.agent
+  const status = agent.status
+  if ((options?.wake ?? 'idle') === 'always' || status === 'running') {
+    for (const message of messages) agent.steer(message)
+    return 'steer'
+  }
+  if (status === 'idle') {
+    for (const message of messages) agent.followup(message)
+    return 'followup'
+  }
+  for (const message of messages) agent.inject(message)
+  return 'inject'
+}
+
+/** 直接插话（不排队）。 */
+function steerImpl(message: string | string[]): boolean {
+  if (disposed || handle === null) return false
+  const blocks = Array.isArray(message) ? message : [message]
+  for (const block of blocks) handle.agent.steer(buildUserMessage(block))
+  return true
+}
+
   let unsubscribe: (() => void) | null = null
   let delivery: ContextDeliveryHandle | null = null
   const uninstall: Array<() => void> = []
@@ -588,6 +634,12 @@ export function runWorkspaceSession(
       if (delivery === null || messages.length === 0) return false
       delivery.push(messages)
       return true
+    },
+    pushNamedContext(entries, options) {
+      return pushNamedContextImpl(entries, options)
+    },
+    steer(message) {
+      return steerImpl(message)
     },
     cancel(cause: DshCancelCause = { kind: 'hook', reason: 'magica:cancel' }) {
       if (disposed || handle === null) return
