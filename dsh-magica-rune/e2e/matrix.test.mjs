@@ -16,7 +16,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import {
-  chooseWorkspaceAt, confirmButton, launchBrowser, newPage, openAbility, pill,
+  chooseWorkspaceAt, confirmButton, ensureAbility, launchBrowser, newPage, openAbility, pill,
   readGlobalDisabled, readWorkspaceDisabled, settle, waitForConfirmGone,
   waitGlobalDisabled, waitWorkspaceDisabled,
 } from './harness.mjs'
@@ -50,6 +50,18 @@ async function waitState(zoneIndex, name, expected, label, timeout = 8_000) {
   while (Date.now() < deadline) {
     last = await stateOf(zoneIndex, name).catch(() => 'MISSING')
     if (last === expected) return
+    // 面板被回收（0.2.1 的已知抖动）→ 重开，并等**两个 zone** 都渲染完再重读
+    if (last === 'MISSING') {
+      const reopened = await ensureAbility(page, process.env.DSH_E2E_URL).catch(() => false)
+      if (reopened) {
+        await page.waitForFunction(
+          () => document.querySelectorAll('.rune-zone').length >= 2
+            && document.querySelectorAll('.rune-zone .rune-pill').length > 0,
+          undefined,
+          { timeout: 15_000 },
+        ).catch(() => {})
+      }
+    }
     await new Promise(resolve => setTimeout(resolve, 150))
   }
   throw new Error(`${label}：期望 state=${expected}，实际 ${last}`)

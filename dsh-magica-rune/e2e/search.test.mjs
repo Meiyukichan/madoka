@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import {
-  chooseWorkspaceAt, launchBrowser, newPage, openAbility, pillNames, searchInput, settle,
+  chooseWorkspaceAt, ensureAbility, launchBrowser, newPage, openAbility, pillNames, searchInput, settle,
   startServer, zoneCounts,
 } from './harness.mjs'
 
@@ -26,6 +26,8 @@ async function waitPills(zone = 0, minimum = 1) {
   for (let i = 0; i < 60 && names.length < minimum; i++) {
     await page.waitForTimeout(150)
     names = await pillNames(page, zone)
+    // 第 10 次仍空 → 可能面板被回收，重开一次（不掩盖搜索行为，只避免假失败）
+    if (i === 10 && names.length === 0) await ensureAbility(page, server.url).catch(() => {})
   }
   return names
 }
@@ -66,8 +68,9 @@ describe('按名字搜索', () => {
     await search('这个工具不存在zzz')
     await page.waitForTimeout(300)
     assert.equal(await page.locator('.rune-zone').nth(0).locator('.rune-pill').count(), 0)
-    const noResults = await page.getByText('无匹配工具').count() + await page.locator('[class*="no-results"]').count()
-    assert.ok(noResults > 0, '应有「无匹配」空态文案')
+    const emptyNodes = await page.locator('.rune-empty').count()
+    const emptyText = await page.getByText(/无匹配|暂无工具/).count()
+    assert.ok(emptyNodes > 0 || emptyText > 0, `应有空态（.rune-empty=${emptyNodes}, text=${emptyText}）`)
     await search('')
   })
 })

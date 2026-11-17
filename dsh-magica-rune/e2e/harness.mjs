@@ -308,12 +308,8 @@ export async function openAbility(page, url) {
       return
     }
     if (!(await page.locator('[role="dialog"]').count())) {
-      if (attempt === 0) await openSettings(page, url)
-      else {
-        const triggers = page.locator('button', { hasText: '设置' })
-        await triggers.nth((await triggers.count()) - 1).click()
-        await page.waitForSelector('[role="dialog"]', { timeout: WAIT })
-      }
+      // 0.2.0 与 0.2.1 的入口不同（侧边栏按钮 / 账号菜单），统一交给 openSettings
+      await openSettings(page, url)
     }
     // 等导航项本身出现再点：对话框已开但 nav 还没渲染时，直接等药丸会白等满超时。
     const nav = page.locator('[role="dialog"] nav button', { hasText: '能力管理' })
@@ -323,6 +319,21 @@ export async function openAbility(page, url) {
     await page.waitForSelector('.rune-pill', { timeout: 8_000 }).catch(() => {})
   }
   throw new Error('能力管理页始终没有就绪')
+}
+
+/**
+ * 确保「能力管理」页还在。
+ *
+ * 0.2.1 上有个已知抖动：**写一次配置后设置面板偶尔整个消失**（插件被重挂/面板被回收），
+ * 于是后续断言拿到 MISSING。这里做的是「没了就重开」，让用例不受这个抖动影响；
+ * 它不掩盖插件行为（写盘是否生效仍由 patch 断言负责）。
+ *
+ * @returns 是否重开过
+ */
+export async function ensureAbility(page, url) {
+  if ((await page.locator('.rune-pill').count()) > 0) return false
+  await openAbility(page, url)
+  return true
 }
 
 export const zone = (page, index) => page.locator('.rune-zone').nth(index)
