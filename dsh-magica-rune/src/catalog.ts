@@ -60,6 +60,8 @@ export function installCatalog(ctx: DshContext, state: GuardState): () => void {
         // 快照语义是「只增不减」，被 restrict 掉的名字不会让已有条目消失。
         state.updateInternalTools(readTools(ctx))
         for (const agent of liveAgents.values()) state.updateInternalTools(readTools(ctx, agent))
+        // 兜底：配置里已禁用、但当前视图看不到的工具（重挂后快照为空 / 被 mask 摘掉）
+        state.updateInternalTools(state.allDeniedNames().map(name => ({ name, description: '' })))
 
         const payload = {
           ns: ABILITY_NS,

@@ -262,13 +262,31 @@ export function readWorkspaceDisabled() {
 // ── 页面操作 ────────────────────────────────────────────────────────
 
 /** 等 shell 就绪、关掉「预览版说明」，再点设置。 */
+/**
+ * 打开设置面板。
+ *
+ * 入口在 0.2.1 变了：0.2.0 侧边栏底部有「设置」按钮；0.2.1-rc.5 起它收进
+ * **账号菜单**（账号菜单 → 设置，快捷键 `Ctrl+Alt+,`），页面上再没有 direkt
+ * 的「设置」按钮。两条路径都留着，这样同一套用例能同时跑在两个版本上。
+ */
 export async function openSettings(page, url) {
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await page.getByText('新会话', { exact: false }).first().waitFor({ state: 'visible' })
-  const intro = page.getByRole('button', { name: '继续' })
+  // 首次启动的「预览版说明」会盖一层 mask，不关掉后面所有点击都被拦截
+  const intro = page.getByRole('button', { name: '继续', exact: true })
   if (await intro.count()) await intro.first().click()
-  const triggers = page.locator('button', { hasText: '设置' })
-  await triggers.nth((await triggers.count()) - 1).click()
+  await page.waitForTimeout(200)
+
+  const direct = page.locator('button', { hasText: '设置' })
+  if ((await direct.count()) > 0) {
+    // 0.2.0 路径
+    await direct.nth((await direct.count()) - 1).click()
+  } else {
+    // 0.2.1 路径：账号菜单 → 设置
+    const account = page.locator('[aria-label="账号菜单"]').first()
+    await account.click()
+    await page.getByRole('menuitem', { name: /设置/ }).first().click()
+  }
   await page.waitForSelector('[role="dialog"]', { timeout: WAIT })
 }
 

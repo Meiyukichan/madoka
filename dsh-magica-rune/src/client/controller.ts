@@ -141,6 +141,10 @@ export class AbilityController {
       if (!applyToggle(next[kind], scope, name, builtin, workspaceId)) return
       this.store.update(draft => { draft.value = next })
       if (await this.persist(next, previous.revision)) return
+      // 第二次**不带 revision**：0.2.1 的 `describe()` 每次调用都可能推进 revision
+      // （raw 里含 `entry.options.config` / `fiber.uid`），带锁重试会永远差一版。
+      // 整段 replace 本身就是 last-write-wins，去掉锁不会丢用户语义。
+      if (await this.persist(next, undefined)) return
       await this.load(true)
     }
   }
@@ -164,25 +168,42 @@ export class AbilityController {
       if (!changed) return
       this.store.update(draft => { draft.value = next })
       if (await this.persist(next, previous.revision)) return
+      if (await this.persist(next, undefined)) return
       await this.load(true)
     }
   }
 
   /** @returns 是否写入成功（失败时已由调用方决定是否重试）。 */
-  private async persist(value: AbilitySettingsValue, revision: number): Promise<boolean> {
+  private async persist(value: AbilitySettingsValue, revision: number | undefined): Promise<boolean> {
     this.writes += 1
     try {
-      const result = await this.ctx.remote.settings.replace(
-        ABILITY_NS,
-        value as unknown as Record<string, unknown>,
-        revision,
-      )
+      const result = revision === undefined
+        ? await this.ctx.remote.settings.replace(ABILITY_NS, value as unknown as Record<string, unknown>)
+        : await this.ctx.remote.settings.replace(ABILITY_NS, value as unknown as Record<string, unknown>, revision)
       if (!result.ok) {
         // 结构化拒绝（冲突/覆盖层只读/字段不可写）：定位问题必须有据可查
         console.warn('[rune] settings write rejected: ' + result.error.message)
         return false
       }
-      const nextRevision = result.value.revision
+      // 0.2.0 的 `replace` 会把新 revision 带回来；0.2.1（rc.5 起）声明为
+      // `Promise<void>`（`packages/settings/settings/src/index.ts:357`），远端结果是
+      // `undefined`。以前这里直接读 `result.value.revision` → TypeError 被 catch 吞掉，
+      // 于是**写盘成功却被当成失败**，调用方重试又撞乐观锁（日志里 revision 一路 +1）。
+      const wrote = result.value as { revision?: number } | undefined
+      let nextRevision = typeof wrote?.revision === 'number' ? wrote.revision : undefined
+      if (nextRevision === undefined) {
+        // 自己去 describe 拿新 revision：`write()` 结尾已经 describe 过一次
+        // （`:422`），所以这次读到的是写后的值，不会再触发版本推进。
+        try {
+          const again = await this.ctx.remote.settings.describe()
+          if (again.ok) {
+            const found = (again.value.namespaces ?? []).find(item => item.ns === ABILITY_NS)
+            if (typeof found?.revision === 'number') nextRevision = found.revision
+          }
+        } catch {
+          // 拿不到就交给下一次 load 对账，不影响本次写入已生效的事实
+        }
+      }
       if (typeof nextRevision === 'number') {
         // 与 load 一致：revision 只增不减
         this.store.update(draft => { draft.revision = Math.max(draft.revision ?? 0, nextRevision) })

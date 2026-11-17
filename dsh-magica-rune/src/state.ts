@@ -122,6 +122,20 @@ export class GuardState {
     return names
   }
 
+  /**
+   * 配置里**被禁用**的全部工具名（全局 ∪ 每个工作区）。
+   *
+   * 用途：目录接口的兜底。插件在 0.2.1 上会因配置写入而重挂，重挂后 `internalTools`
+   * 快照是空的，而 `tools.schemas()` 此时已经是**受限视图**——被禁用的名字看不到。
+   * 少了这层兜底，用户在 UI 上禁用某工具后它就**从列表里消失**，再也点不回来。
+   */
+  allDeniedNames(): string[] {
+    const names = new Set<string>(resolve(this.gate, undefined))
+    for (const workspaceId of this.gate.workspaces.keys()) {
+      for (const name of resolve(this.gate, workspaceId)) names.add(name)
+    }
+    return [...names]
+  }
   private workspaceOf(agentId: string | undefined): string | undefined {
     return agentId === undefined ? undefined : this.agentWorkspace.get(agentId)
   }
