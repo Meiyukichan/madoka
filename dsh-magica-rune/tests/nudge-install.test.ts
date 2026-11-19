@@ -68,13 +68,13 @@ const OPTIONS = { plugin: 'dsh-magica-rune', section: 'rune-nudge', everyToolCal
 describe('installNudge 接线', () => {
   it('在 inject([agents]) 的子上下文里注册监听', () => {
     const harness = makeHarness()
-    installNudge(harness.ctx, OPTIONS)
+    installNudge(harness.ctx, () => OPTIONS)
     assert.deepEqual(harness.injectServices, ['agents'])
   })
 
   it('running 时走 steer 插话（spellbook 的三档投递）', async () => {
     const harness = makeHarness()
-    installNudge(harness.ctx, OPTIONS)
+    installNudge(harness.ctx, () => OPTIONS)
     for (let i = 1; i <= 15; i++) harness.emit(MAIN, toolCall(i))
     await flush()
     assert.deepEqual(harness.methods, ['steer'], '正在跑的会话只走 steer，不 inject/followup')
@@ -82,7 +82,7 @@ describe('installNudge 接线', () => {
 
   it('非 running 的会话不投递（不 followup、不 inject）', async () => {
     const harness = makeHarness()
-    installNudge(harness.ctx, OPTIONS)
+    installNudge(harness.ctx, () => OPTIONS)
     harness.agentFor('main-1').status = 'idle'
     for (let i = 1; i <= 15; i++) harness.emit(MAIN, toolCall(i))
     await flush(400)
@@ -92,7 +92,7 @@ describe('installNudge 接线', () => {
 
   it('第 15 次连续工具调用时注入具名上下文', async () => {
     const harness = makeHarness()
-    installNudge(harness.ctx, OPTIONS)
+    installNudge(harness.ctx, () => OPTIONS)
     for (let i = 1; i <= 14; i++) harness.emit(MAIN, toolCall(i))
     await flush()
     assert.equal(harness.injected.length, 0, '14 次不应注入')
@@ -107,7 +107,7 @@ describe('installNudge 接线', () => {
 
   it('连续语义：只有「真的说了话」才归零，工具块/thinking 不归零', async () => {
     const harness = makeHarness()
-    installNudge(harness.ctx, OPTIONS)
+    installNudge(harness.ctx, () => OPTIONS)
 
     for (let i = 1; i <= 10; i++) harness.emit(MAIN, toolCall(i))
     // 只有工具块的 assistant/message 不算说话
@@ -119,7 +119,7 @@ describe('installNudge 接线', () => {
 
     // 嵌套结构里的真文本才算说话（data.message.content）
     const second = makeHarness()
-    installNudge(second.ctx, OPTIONS)
+    installNudge(second.ctx, () => OPTIONS)
     for (let i = 1; i <= 14; i++) second.emit(MAIN, toolCall(i))
     second.emit(MAIN, { type: 'assistant/message', seq: 15, data: { message: { content: [{ type: 'text', text: '我来汇报一下' }] } } })
     second.emit(MAIN, toolCall(16))
@@ -133,7 +133,7 @@ describe('installNudge 接线', () => {
 
   it('子代理会话不注入', async () => {
     const harness = makeHarness()
-    installNudge(harness.ctx, OPTIONS)
+    installNudge(harness.ctx, () => OPTIONS)
     for (let i = 1; i <= 20; i++) harness.emit(SUB, toolCall(i))
     await flush()
     assert.equal(harness.injected.length, 0)
@@ -141,7 +141,7 @@ describe('installNudge 接线', () => {
 
   it('文本输出会清零，之后要重新数满 15 次', async () => {
     const harness = makeHarness()
-    installNudge(harness.ctx, OPTIONS)
+    installNudge(harness.ctx, () => OPTIONS)
     for (let i = 1; i <= 14; i++) harness.emit(MAIN, toolCall(i))
     harness.emit(MAIN, text(15))
     for (let i = 16; i <= 29; i++) harness.emit(MAIN, toolCall(i))
@@ -154,7 +154,7 @@ describe('installNudge 接线', () => {
 
   it('两个会话各自计数，互不影响', async () => {
     const harness = makeHarness()
-    installNudge(harness.ctx, OPTIONS)
+    installNudge(harness.ctx, () => OPTIONS)
     const other: NudgeSession = { id: 'main-2', header: {} }
     for (let i = 1; i <= 15; i++) harness.emit(MAIN, toolCall(i))
     for (let i = 1; i <= 14; i++) harness.emit(other, toolCall(i))

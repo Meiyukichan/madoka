@@ -235,7 +235,7 @@ export function scheduleDelivery(
 }
 
 /** 注册监听；`ctx.effect` 负责卸载回收（含计数器）。 */
-export function installNudge(ctx: NudgeContext, options: NudgeOptions): void {
+export function installNudge(ctx: NudgeContext, options: () => NudgeOptions): void {
   const counters = new Map<string, NudgeCounters>()
   // 在声明过 `agents` 的子上下文里监听：否则 `ctx.get('agents')` 会抛，投递永远失败。
   ctx.inject(['agents'], (child) => {
@@ -243,21 +243,22 @@ export function installNudge(ctx: NudgeContext, options: NudgeOptions): void {
   })
 }
 
-function installListener(ctx: NudgeContext, counters: Map<string, NudgeCounters>, options: NudgeOptions): void {
+function installListener(ctx: NudgeContext, counters: Map<string, NudgeCounters>, options: () => NudgeOptions): void {
   ctx.effect(() => {
     let disposed = false
     const isDisposed = () => disposed
     const disposeEvent = ctx.on('session/event', (session, event) => {
       if (session === undefined || typeof session.id !== 'string' || session.id === '') return
-      if (options.skipSubagents && isSubagentSession(session)) return
+      if (options().skipSubagents && isSubagentSession(session)) return
+      const settings = options()
       const current = counters.get(session.id) ?? EMPTY_COUNTERS
-      const outcome = advance(current, event, options)
+      const outcome = advance(current, event, settings)
       counters.set(session.id, outcome.counters)
       if (outcome.remind !== undefined) {
         // 不能在派发过程中同步 inject：`session/event` 是在会话 append 发布期间派发的，
         // 此时 append 重入会抛 `session append cannot reenter while another append is being published`。
         // 所以延后到当前 append 结束后再投递，并做有界重试（可能撞上别的 append）。
-        scheduleDelivery(ctx, session.id, outcome.remind, options, isDisposed)
+        scheduleDelivery(ctx, session.id, outcome.remind, settings, isDisposed)
       }
     })
     const disposeGone = ctx.on('agent/disposed', ({ agent }) => {

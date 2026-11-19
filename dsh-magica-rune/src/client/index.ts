@@ -16,6 +16,8 @@ import { AbilityController } from './controller.ts'
 import { setupNavIcon } from './nav-icon.ts'
 import { installStyles } from './styles.ts'
 import { AbilitySection } from './AbilitySection.tsx'
+import { NudgeRow } from './NudgeRow.tsx'
+import { NudgeSettingController } from './nudge-setting.ts'
 import { ABILITY_NS } from '../namespace.ts'
 
 /** Cordis 服务依赖（`remote.settings` 是合法 service 名）。 */
@@ -30,6 +32,8 @@ export function apply(ctx: DshContextLike): void {
   ctx.effect(() => setupNavIcon(() => t('nav')), 'dsh-magica-rune: nav icon')
 
   const controller = new AbilityController(ctx)
+  const nudge = new NudgeSettingController(ctx)
+  void nudge.load()
 
   // 外部变更推送 + 重连刷新（`revision` 用于跳过"自己刚写完"的那次）
   ctx.effect(() => {
@@ -65,4 +69,18 @@ export function apply(ctx: DshContextLike): void {
       ) => controller.toggleBatch(kind, names, scope, workspaceId),
     }),
   }, AbilitySection))
+
+  // 通用设置里的一行：提醒阈值（数字 + 增减）
+  ctx.slots.inject('settings.general.item', () => ctx.slots.register({
+    name: 'settings.general.item',
+    id: 'rune-nudge',
+    order: 16,
+    label: () => t('nudge.title'),
+    locale: NS,
+    inject: () => ({
+      hooks: { everyToolCalls: nudge.store },
+      setEveryToolCalls: (value: number) => nudge.setEveryToolCalls(value),
+    }),
+  }, NudgeRow))
 }
+

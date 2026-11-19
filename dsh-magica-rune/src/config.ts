@@ -65,12 +65,13 @@ export const Config: z<Config> = z.object({
   builtinDisabled: nameList(DEFAULT_TOOL_BUILTIN_DISABLED),
   nonDisableable: nameList(DEFAULT_TOOL_NON_DISABLEABLE),
   skillNonDisableable: nameList(DEFAULT_SKILL_NON_DISABLEABLE),
+  // 整段标 volatile：通用设置页要能即时改 everyToolCalls（settings.update 只写 volatile 字段）。
   nudge: z.object({
     enabled: z.boolean().default(true),
     everyToolCalls: z.number().default(15),
     remindEvery: z.number().default(15),
     skipSubagents: z.boolean().default(true),
-  }).default({ enabled: true, everyToolCalls: 15, remindEvery: 15, skipSubagents: true }),
+  }).default({ enabled: true, everyToolCalls: 15, remindEvery: 15, skipSubagents: true }).volatile(),
 }) as unknown as z<Config>
 
 /** 从 live config 取一份不可变快照。 */

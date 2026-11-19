@@ -30,6 +30,7 @@ export type AbilityLocaleKey =
   | 'disable.title' | 'disable.desc' | 'disable.confirm' | 'disable.cancel'
   | 'disable.batchTitle' | 'disable.batchDesc'
   | 'loading' | 'error'
+  | 'nudge.title' | 'nudge.description' | 'nudge.increase' | 'nudge.decrease' | 'nudge.error'
   | 'cat.file' | 'cat.shell' | 'cat.image' | 'cat.agent' | 'cat.job' | 'cat.goal'
   | 'cat.ralph' | 'cat.cordis' | 'cat.mcp' | 'cat.misc' | 'cat.builtin' | 'cat.plugin-other'
   | 'cat.web' | 'cat.workflow' | 'cat.plugin'
@@ -57,6 +58,11 @@ export const zh: Record<AbilityLocaleKey, string> = {
   'disable.batchTitle': '批量禁用内置工具',
   'disable.batchDesc': '该分组含 {count} 个 DSH 内置工具，批量禁用后可能导致 DSH 对话功能无法正常使用，是否继续？',
   loading: '加载中…',
+  'nudge.title': '提醒阈值',
+  'nudge.description': '连续多少次工具调用没有文字输出时，插话提醒你给用户进展',
+  'nudge.increase': '增大阈值',
+  'nudge.decrease': '减小阈值',
+  'nudge.error': '保存失败',
   error: '加载失败',
   'cat.file': '文件操作',
   'cat.shell': 'Shell',
@@ -98,6 +104,11 @@ export const en: Record<AbilityLocaleKey, string> = {
   'disable.batchTitle': 'Disable built-in tools in bulk',
   'disable.batchDesc': 'This group contains {count} DSH built-in tools. Disabling them in bulk may break normal conversation features. Continue?',
   loading: 'Loading…',
+  'nudge.title': 'Reminder threshold',
+  'nudge.description': 'How many tool calls in a row without text before the plugin nudges you to update the user',
+  'nudge.increase': 'Increase threshold',
+  'nudge.decrease': 'Decrease threshold',
+  'nudge.error': 'Could not save',
   error: 'Load failed',
   'cat.file': 'Files',
   'cat.shell': 'Shell',

@@ -17,7 +17,7 @@ import { installRestrict } from './restrict.ts'
 import { installSkillGate } from './skill-gate.ts'
 import { installCatalog } from './catalog.ts'
 import { registerBuiltinSkill } from './builtin-skill.ts'
-import { installNudge, type NudgeContext } from './nudge.ts'
+import { installNudge, type NudgeContext, type NudgeOptions } from './nudge.ts'
 
 export { Config }
 export type { RuneConfig }
@@ -85,16 +85,20 @@ export function apply(ctx: DshContext, config: RuneConfig): void {
 
   // 5b) 「连续工具调用无文本输出」提醒：按 session 计数、子代理跳过。
   //     与门禁链路无关，装失败只 warn，不影响能力管理。
-  const nudge = readConfig(config).nudge
-  if (nudge.enabled) {
+  // 选项用 getter：通用设置页改了 everyToolCalls 之后，下一次计数就用新值，不用重启。
+  const nudgeOptions = (): NudgeOptions => {
+    const value = readConfig(config).nudge
+    return {
+      plugin: name,
+      section: 'rune-nudge',
+      everyToolCalls: value.everyToolCalls,
+      remindEvery: value.remindEvery,
+      skipSubagents: value.skipSubagents,
+    }
+  }
+  if (readConfig(config).nudge.enabled) {
     try {
-      installNudge(ctx as unknown as NudgeContext, {
-        plugin: name,
-        section: 'rune-nudge',
-        everyToolCalls: nudge.everyToolCalls,
-        remindEvery: nudge.remindEvery,
-        skipSubagents: nudge.skipSubagents,
-      })
+      installNudge(ctx as unknown as NudgeContext, nudgeOptions)
     } catch (error) {
       ctx.logger.warn(`[rune] nudge install failed: ${String(error)}`)
     }
