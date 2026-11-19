@@ -100,6 +100,17 @@ describe('hasTextOutput', () => {
     assert.equal(hasTextOutput(null), false)
   })
 
+  it('思考塞进 text 块也不算（提供方常见形态）', () => {
+    // type 是 text，但块上带 reasoning/thinking 字段 → 是思考，不是给用户的话
+    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'hmm', reasoning: 'x' }] }), false)
+    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'hmm', channel: 'thinking' }] }), false)
+    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'hmm', thought: 'x' }] }), false)
+    // 正常回答仍然算
+    assert.equal(hasTextOutput({ content: [{ type: 'text', text: '给你个进展' }] }), true)
+    // 同一条消息里既有思考又有回答 → 算说话
+    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'x', reasoning: 'y' }, { type: 'text', text: '结论' }] }), true)
+  })
+
   it('工具块与 thinking 不算文本', () => {
     assert.equal(hasTextOutput({ content: [{ type: 'thinking', text: 'hmm' }] }), false)
     assert.equal(hasTextOutput({ content: [{ type: 'tool-call', text: 'x' }] }), false)

@@ -68,18 +68,36 @@ export function isSubagentSession(session: NudgeSession | undefined): boolean {
 }
 
 /**
- * 事件里是否包含**实际文本**（不是纯空白、不是工具/思考块）。
+ * 事件里是否包含**实际文本**（给用户看的回答），思考/推理/工具块一律不算。
  *
- * `assistant/message` 的 data 里带消息体（`{ content: [{ type, text }] }` 或 `{ message: … }`），
- * 这里递归找 `type === 'text'` 的块和裸 `text` 字段，避免绑死某一层嵌套。
+ * 判定收紧过一轮：不仅看 `type`，还看块上有没有 reasoning/thinking 类标记 ——
+ * 有的提供方把「思考」也塞进 `type: 'text'` 的块里，只靠 type 会把思考当说话，
+ * 于是计数被思考清零、看起来「永远不提醒」。
  */
+const NON_ANSWER_TYPES = new Set(['thinking', 'reasoning', 'reasoning-delta', 'tool-call', 'tool_use', 'tool-result'])
+const NON_ANSWER_KEYS = ['thinking', 'reasoning', 'reasoning_content', 'reasoningContent', 'thought', 'thoughts']
+
+/** 这个块是不是「思考/推理」性质（type 或字段任一命中）。 */
+function isNonAnswerBlock(block: Record<string, unknown>): boolean {
+  const type = block.type
+  if (typeof type === 'string' && NON_ANSWER_TYPES.has(type)) return true
+  for (const key of NON_ANSWER_KEYS) {
+    if (Object.hasOwn(block, key)) return true
+  }
+  const channel = block.channel ?? block.kind
+  if (typeof channel === 'string' && /think|reason/i.test(channel)) return true
+  return false
+}
+
 export function hasTextOutput(data: unknown, depth = 0): boolean {
   if (depth > 6 || data === null || typeof data !== 'object') return false
   if (Array.isArray(data)) return data.some(item => hasTextOutput(item, depth + 1))
   const record = data as Record<string, unknown>
-  const type = record.type
-  if (type === 'text' && typeof record.text === 'string' && record.text.trim() !== '') return true
-  if (type === 'thinking' || type === 'tool-call' || type === 'tool_use' || type === 'reasoning') return false
+  // 整条消息被标成推理（有的提供方在 data 顶层标）→ 整条不算
+  if (isNonAnswerBlock(record) && record.type !== 'text') return false
+  if (record.type === 'text' && !isNonAnswerBlock(record)) {
+    return typeof record.text === 'string' && record.text.trim() !== ''
+  }
   for (const value of Object.values(record)) {
     if (hasTextOutput(value, depth + 1)) return true
   }
