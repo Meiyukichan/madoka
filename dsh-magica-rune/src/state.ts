@@ -45,6 +45,9 @@ export class GuardState {
   skillGate: EffectiveGate = emptyGate()
 
   /** agentId(string) → workspaceId。只由 workspace.ts 在 agent/created 写入。 */
+  /** 提醒阈值（内存态）：设置页点一下立刻生效，落盘异步做。 */
+  nudgeEvery = 15
+
   readonly agentWorkspace = new Map<string, string>()
   /** restrict 之前的全量工具快照；**只增不减**，这样被禁工具在 UI 仍可见。 */
   readonly internalTools = new Map<string, ToolCatalogEntry>()

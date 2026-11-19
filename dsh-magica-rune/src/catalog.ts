@@ -23,6 +23,9 @@ import type { GuardState } from './state.ts'
 import { CATALOG_PATH, ABILITY_NS } from './namespace.ts'
 import { sendJson, sendMethodNotAllowed } from './router.ts'
 
+/** 设置页即时改阈值的内存通道（不写盘；写盘由 client 侧延后合并）。 */
+const NUDGE_PATH = '/rune-ability/nudge'
+
 /** 单段 snapshot 的超时，防止 provider 挂起把请求拖死。 */
 const SNAPSHOT_TIMEOUT_MS = 2000
 
@@ -87,7 +90,33 @@ export function installCatalog(ctx: DshContext, state: GuardState): () => void {
     },
   }), 'dsh-magica-rune: catalog route')
 
-  return () => { disposeRoute(); disposeListeners() }
+  // 设置页改阈值：只改内存，立刻影响下一次计数；落盘由 client 侧延后合并。
+  const disposeNudgeRoute = ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: NUDGE_PATH,
+    async handler(req, res) {
+      if (req.method !== 'POST') {
+        sendMethodNotAllowed(res, 'POST')
+        return
+      }
+      try {
+        let raw = ''
+        for await (const chunk of req) {
+          raw += String(chunk)
+          if (raw.length > 4096) throw new Error('body too large')
+        }
+        const parsed = (raw === '' ? {} : JSON.parse(raw)) as { everyToolCalls?: unknown }
+        const parsedValue = Number(parsed.everyToolCalls)
+        if (!Number.isFinite(parsedValue)) throw new Error('everyToolCalls must be a number')
+        state.nudgeEvery = Math.min(100, Math.max(1, Math.round(parsedValue)))
+        sendJson(res, 200, { ok: true, everyToolCalls: state.nudgeEvery })
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: String(error) })
+      }
+    },
+  }), 'dsh-magica-rune: nudge route')
+
+  return () => { disposeRoute(); disposeNudgeRoute(); disposeListeners() }
 }
 
 function firstAgent(agents: Map<string, DshAgent>): DshAgent | undefined {

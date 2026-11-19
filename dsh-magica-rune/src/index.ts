@@ -57,6 +57,12 @@ function installSettingsSelfCheck(ctx: DshContext): void {
   })
 }
 
+/** 配置里的阈值收敛到 1..100（越界/非数字给 15）。 */
+function seedNudge(value: number): number {
+  if (!Number.isFinite(value)) return 15
+  return Math.min(100, Math.max(1, Math.round(value)))
+}
+
 export function apply(ctx: DshContext, config: RuneConfig): void {
   const state = new GuardState()
 
@@ -68,7 +74,9 @@ export function apply(ctx: DshContext, config: RuneConfig): void {
   const builtinSkill = registerBuiltinSkill(ctx)
 
   // 1) 种子：先让 state 有名单与 gate，否则 guard 首调读到空集
-  state.sync(readConfig(config))
+  const bootstrap = readConfig(config)
+  state.sync(bootstrap)
+  state.nudgeEvery = seedNudge(bootstrap.nudge.everyToolCalls)
 
   // 2) 工作区索引（guard 依赖 agentWorkspace）
   const workspaceIndex = installWorkspaceIndex(ctx, state)
@@ -91,8 +99,9 @@ export function apply(ctx: DshContext, config: RuneConfig): void {
     return {
       plugin: name,
       section: 'rune-nudge',
-      everyToolCalls: value.everyToolCalls,
-      remindEvery: value.remindEvery,
+      // 阈值读**内存值**：设置页点一下就能立刻改变下一次计数，不用等配置落盘。
+      everyToolCalls: state.nudgeEvery,
+      remindEvery: Math.max(1, state.nudgeEvery),
       skipSubagents: value.skipSubagents,
     }
   }

@@ -37,6 +37,8 @@ export class NudgeSettingController {
   private timer: ReturnType<typeof setTimeout> | undefined
   /** 是否已有写盘在飞：在飞期间的点击排队，不并发。 */
   private inFlight = false
+  /** 落盘去抖（比内存推送长得多：先把效果做出来，再慢慢写盘）。 */
+  private saveTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(ctx: DshContextLike) {
     this.ctx = ctx
@@ -70,12 +72,19 @@ export class NudgeSettingController {
       draft.everyToolCalls = value
       draft.busy = true
     })
+    // 1) 内存即时生效：POST 一个轻量路由，宿主只改 state.nudgeEvery，不碰磁盘。
+    void this.pushRuntime(value)
+    // 2) 落盘延后：连点期间不写盘，停手 1s 后合并成一次 settings.replace。
     this.pending = value
-    if (this.inFlight || this.timer !== undefined) return
-    this.timer = setTimeout(() => {
-      this.timer = undefined
-      void this.flush()
-    }, 250)
+    if (this.saveTimer !== undefined) clearTimeout(this.saveTimer)
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined
+      if (this.inFlight || this.timer !== undefined) return
+      this.timer = setTimeout(() => {
+        this.timer = undefined
+        void this.flush()
+      }, 0)
+    }, 1000)
   }
 
   /**
@@ -85,6 +94,19 @@ export class NudgeSettingController {
    * 屏幕上的新值拉回旧值（看到 7→5 又跳回 6）。所以同一时刻只允许一个 write，
    * 期间的新点击只更新 pending，写完后再接着写最后一个。
    */
+  /** 把阈值推给宿主的**内存**通道（即时生效，不写盘）。失败无所谓：落盘那条路兜底。 */
+  private async pushRuntime(value: number): Promise<void> {
+    try {
+      await fetch('/rune-ability/nudge', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ everyToolCalls: value }),
+      })
+    } catch {
+      // 离线/宿主未挂载：忽略，等落盘后的 volatile 更新生效
+    }
+  }
   private async flush(): Promise<void> {
     if (this.inFlight) return
     this.inFlight = true
