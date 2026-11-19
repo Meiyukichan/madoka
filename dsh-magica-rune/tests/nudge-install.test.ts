@@ -61,7 +61,7 @@ const flush = (ms = 80) => new Promise(resolve => setTimeout(resolve, ms))
 const MAIN: NudgeSession = { id: 'main-1', header: {} }
 const SUB: NudgeSession = { id: 'sub-1', header: { origin: 'subagent', parentSession: 'main-1' } }
 const toolCall = (seq: number): NudgeEvent => ({ type: 'tool/call', seq, data: {} })
-const text = (seq: number): NudgeEvent => ({ type: 'assistant/message', seq, data: { content: [{ type: 'text', text: 'hi' }] } })
+const text = (seq: number): NudgeEvent => ({ type: 'assistant/message', seq, data: { message: { content: [{ type: 'text', text: 'hi' }] } } })
 
 const OPTIONS = { plugin: 'dsh-magica-rune', section: 'rune-nudge', everyToolCalls: 15, remindEvery: 15, skipSubagents: true }
 

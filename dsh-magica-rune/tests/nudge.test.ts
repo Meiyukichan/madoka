@@ -14,7 +14,7 @@ import {
 const TIMING = { everyToolCalls: 7, remindEvery: 7 }
 
 const tool = (seq: number) => ({ type: 'tool/call', seq, data: { name: 'x' } })
-const text = (seq: number) => ({ type: 'assistant/message', seq, data: { content: [{ type: 'text', text: 'done' }] } })
+const text = (seq: number) => ({ type: 'assistant/message', seq, data: { message: { content: [{ type: 'text', text: 'done' }] } } })
 
 /** 依次喂事件，返回每一步的 `remind`（undefined 表示没触发）。 */
 function run(events: Array<{ type: string; seq?: number; data?: unknown }>, timing = TIMING) {
@@ -45,7 +45,7 @@ describe('advance：计数与触发', () => {
   it('有文本输出后清零，重新数到 7 才再提醒', () => {
     const { counters, reminders } = run([
       ...[1, 2, 3, 4, 5, 6, 7].map(tool),
-      { type: 'assistant/message', seq: 8, data: { content: [{ type: 'text', text: 'here you go' }] } },
+      { type: 'assistant/message', seq: 8, data: { message: { content: [{ type: 'text', text: 'here you go' }] } } },
       ...[9, 10, 11, 12, 13, 14, 15].map(tool),
     ])
     assert.equal(reminders.filter(Boolean).length, 2)
@@ -56,7 +56,7 @@ describe('advance：计数与触发', () => {
     const { counters } = run([
       ...Array.from({ length: 7 }, (_, i) => tool(i + 1)),
       { type: 'assistant/message', seq: 8, data: { content: [{ type: 'text', text: '   \n ' }] } },
-      { type: 'assistant/message', seq: 9, data: { content: [{ type: 'thinking', text: 'hmm' }] } },
+      { type: 'assistant/message', seq: 9, data: { message: { content: [{ type: 'thinking', text: 'hmm' }] } } },
     ])
     assert.equal(counters.toolCalls, 7, '空白/思考不应清零')
   })
@@ -86,34 +86,30 @@ describe('advance：计数与触发', () => {
 })
 
 describe('hasTextOutput', () => {
+  const wrap = (content: unknown[]) => ({ message: { content } })
+
   it('识别 content 里的 text 块', () => {
-    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'hi' }] }), true)
+    assert.equal(hasTextOutput(wrap([{ type: 'text', text: 'hi' }])), true)
   })
 
-  it('递归识别嵌套 message 结构', () => {
-    assert.equal(hasTextOutput({ message: { content: [{ type: 'text', text: 'hi' }] } }), true)
+  it('思考块（type 不是 text）不算', () => {
+    assert.equal(hasTextOutput(wrap([{ type: 'thinking', text: 'hmm' }])), false)
+    assert.equal(hasTextOutput(wrap([{ type: 'reasoning', text: 'hmm' }])), false)
   })
 
   it('纯空白与空数组不算', () => {
-    assert.equal(hasTextOutput({ content: [{ type: 'text', text: '  ' }] }), false)
-    assert.equal(hasTextOutput({ content: [] }), false)
-    assert.equal(hasTextOutput(null), false)
+    assert.equal(hasTextOutput(wrap([{ type: 'text', text: '   \n ' }])), false)
+    assert.equal(hasTextOutput(wrap([])), false)
+    assert.equal(hasTextOutput(undefined), false)
+    assert.equal(hasTextOutput({}), false)
   })
 
-  it('思考塞进 text 块也不算（提供方常见形态）', () => {
-    // type 是 text，但块上带 reasoning/thinking 字段 → 是思考，不是给用户的话
-    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'hmm', reasoning: 'x' }] }), false)
-    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'hmm', channel: 'thinking' }] }), false)
-    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'hmm', thought: 'x' }] }), false)
-    // 正常回答仍然算
-    assert.equal(hasTextOutput({ content: [{ type: 'text', text: '给你个进展' }] }), true)
-    // 同一条消息里既有思考又有回答 → 算说话
-    assert.equal(hasTextOutput({ content: [{ type: 'text', text: 'x', reasoning: 'y' }, { type: 'text', text: '结论' }] }), true)
+  it('工具块不算文本', () => {
+    assert.equal(hasTextOutput(wrap([{ type: 'tool-call', name: 'x' }])), false)
   })
 
-  it('工具块与 thinking 不算文本', () => {
-    assert.equal(hasTextOutput({ content: [{ type: 'thinking', text: 'hmm' }] }), false)
-    assert.equal(hasTextOutput({ content: [{ type: 'tool-call', text: 'x' }] }), false)
+  it('思考与回答混排：有回答就算说话', () => {
+    assert.equal(hasTextOutput(wrap([{ type: 'thinking', text: 'x' }, { type: 'text', text: '结论' }])), true)
   })
 })
 
