@@ -15,6 +15,26 @@
  * 事件类型见 `packages/core/session`：`tool/call` / `assistant/message` / `step/*` / `turn/*`。
  */
 
+import { appendFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+/**
+ * 调试日志（默认关闭）。
+ *
+ * 宿主侧 `ctx.logger` 不进 stdout，排查「有没有收到事件 / 有没有投递」只能靠文件：
+ * 设 `DSH_RUNE_NUDGE_DEBUG=1` 后写到 `%TEMP%/rune-nudge.log`。
+ */
+export function debugLog(line: string): void {
+  const flag = process.env.DSH_RUNE_NUDGE_DEBUG
+  if (flag === undefined || flag === '' || flag === '0') return
+  try {
+    appendFileSync(join(tmpdir(), 'rune-nudge.log'), `${new Date().toISOString()} ${line}\n`)
+  } catch {
+    // 日志失败不影响主流程
+  }
+}
+
 /** 计数节奏。 */
 export interface NudgeTiming {
   /** 连续多少次工具调用触发一次提醒。 */
@@ -137,12 +157,19 @@ export function buildContextMessage(
   }
 }
 
-/** `installNudge` 需要的最小 ctx 形状（只声明用到的成员）。 */
+/**
+ * `installNudge` 需要的最小 ctx 形状（只声明用到的成员）。
+ *
+ * 为什么必须有 `inject`：未在 `inject` 里声明的服务，`ctx.get('agents')` 会**抛**，
+ * 而 `deliver` 的 try/catch 会把它吞成 `false` —— 表现就是「提醒永远投不出去且无声」。
+ * 所以监听与取服务都放进 `ctx.inject(['agents'], child => …)` 的子上下文里。
+ */
 export interface NudgeContext {
   effect(callback: () => () => void, label?: string): unknown
   on(event: 'session/event', listener: (session: NudgeSession, event: NudgeEvent) => void): () => void
   on(event: 'agent/disposed', listener: (payload: { agent?: { id?: string } }) => void): () => void
   get(name: 'agents'): unknown
+  inject(services: readonly string[], callback: (child: NudgeContext) => void): unknown
 }
 
 export interface NudgeOptions extends NudgeTiming {
@@ -158,23 +185,37 @@ export function deliver(ctx: NudgeContext, sessionId: string, text: string, opti
   let agents: unknown
   try {
     agents = ctx.get('agents')
-  } catch {
+  } catch (error) {
+    debugLog(`deliver: ctx.get('agents') threw: ${String(error)}`)
     return false
   }
   const get = (agents as { get?: (id: string) => unknown } | undefined)?.get
-  if (typeof get !== 'function') return false
+  if (typeof get !== 'function') {
+    debugLog(`deliver: agents service has no get() (got ${typeof agents})`)
+    return false
+  }
   let agent: unknown
   try {
     agent = get.call(agents, sessionId)
-  } catch {
+  } catch (error) {
+    debugLog(`deliver: agents.get threw: ${String(error)}`)
+    return false
+  }
+  if (agent === undefined || agent === null) {
+    debugLog(`deliver: no agent for session ${sessionId}`)
     return false
   }
   const inject = (agent as { inject?: (message: unknown) => void } | undefined)?.inject
-  if (typeof inject !== 'function') return false
+  if (typeof inject !== 'function') {
+    debugLog('deliver: agent has no inject()')
+    return false
+  }
   try {
     inject.call(agent, buildContextMessage(options.plugin, text, options.section))
+    debugLog(`deliver: injected into ${sessionId}`)
     return true
-  } catch {
+  } catch (error) {
+    debugLog(`deliver: inject threw: ${String(error)}`)
     return false
   }
 }
@@ -182,6 +223,13 @@ export function deliver(ctx: NudgeContext, sessionId: string, text: string, opti
 /** 注册监听；`ctx.effect` 负责卸载回收（含计数器）。 */
 export function installNudge(ctx: NudgeContext, options: NudgeOptions): void {
   const counters = new Map<string, NudgeCounters>()
+  // 在声明过 `agents` 的子上下文里监听：否则 `ctx.get('agents')` 会抛，投递永远失败。
+  ctx.inject(['agents'], (child) => {
+    installListener(child, counters, options)
+  })
+}
+
+function installListener(ctx: NudgeContext, counters: Map<string, NudgeCounters>, options: NudgeOptions): void {
   ctx.effect(() => {
     const disposeEvent = ctx.on('session/event', (session, event) => {
       if (session === undefined || typeof session.id !== 'string' || session.id === '') return
@@ -189,7 +237,11 @@ export function installNudge(ctx: NudgeContext, options: NudgeOptions): void {
       const current = counters.get(session.id) ?? EMPTY_COUNTERS
       const outcome = advance(current, event, options)
       counters.set(session.id, outcome.counters)
-      if (outcome.remind !== undefined) deliver(ctx, session.id, outcome.remind, options)
+      debugLog(`event ${event.type} seq=${String(event.seq)} session=${session.id} toolCalls=${outcome.counters.toolCalls}`)
+      if (outcome.remind !== undefined) {
+        const sent = deliver(ctx, session.id, outcome.remind, options)
+        debugLog(`REMIND session=${session.id} sent=${String(sent)}`)
+      }
     })
     const disposeGone = ctx.on('agent/disposed', ({ agent }) => {
       const id = agent?.id
