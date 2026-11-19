@@ -77,16 +77,17 @@ describe('installNudge 接线', () => {
     installNudge(harness.ctx, OPTIONS)
     for (let i = 1; i <= 15; i++) harness.emit(MAIN, toolCall(i))
     await flush()
-    assert.deepEqual(harness.methods, ['steer'], '正在跑的会话必须 steer，而不是 inject')
+    assert.deepEqual(harness.methods, ['steer'], '正在跑的会话只走 steer，不 inject/followup')
   })
 
-  it('idle 时走 followup', async () => {
+  it('非 running 的会话不投递（不 followup、不 inject）', async () => {
     const harness = makeHarness()
     installNudge(harness.ctx, OPTIONS)
     harness.agentFor('main-1').status = 'idle'
     for (let i = 1; i <= 15; i++) harness.emit(MAIN, toolCall(i))
-    await flush()
-    assert.deepEqual(harness.methods, ['followup'])
+    await flush(400)
+    assert.deepEqual(harness.methods, [], '没在跑的会话不该被插话')
+    assert.equal(harness.injected.length, 0)
   })
 
   it('第 15 次连续工具调用时注入具名上下文', async () => {

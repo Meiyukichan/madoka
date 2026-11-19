@@ -181,50 +181,48 @@ export interface NudgeOptions extends NudgeTiming {
 }
 
 /** 往会话里投递一条具名上下文（agent 不在/已结束则静默丢弃）。 */
-export function deliver(ctx: NudgeContext, sessionId: string, text: string, options: NudgeOptions): boolean {
+export function deliver(ctx: NudgeContext, sessionId: string, text: string, options: NudgeOptions): 'sent' | 'skip' | 'retry' {
   let agents: unknown
   try {
     agents = ctx.get('agents')
   } catch (error) {
     debugLog(`deliver: ctx.get('agents') threw: ${String(error)}`)
-    return false
+    return 'retry'
   }
   const get = (agents as { get?: (id: string) => unknown } | undefined)?.get
   if (typeof get !== 'function') {
     debugLog(`deliver: agents service has no get() (got ${typeof agents})`)
-    return false
+    return 'retry'
   }
   let agent: unknown
   try {
     agent = get.call(agents, sessionId)
   } catch (error) {
     debugLog(`deliver: agents.get threw: ${String(error)}`)
-    return false
+    return 'retry'
   }
   if (agent === undefined || agent === null) {
     debugLog(`deliver: no agent for session ${sessionId}`)
-    return false
+    return 'retry'
   }
-  // 三档投递，与 spellbook 的 pushNamedContext 一致：
-  // 正在跑 → **steer**（插进最近的 step，模型立刻看到，不等下一轮）；
-  // 空闲 → followup（起一轮）；状态未知 → inject（挂进收件箱）。
-  // 我们的提醒本来就发生在「跑到一半」，所以正常路径就是 steer。
-  const live = agent as { status?: string; steer?: (message: unknown) => void; followup?: (message: unknown) => void; inject?: (message: unknown) => void }
-  const method = live.status === 'running'
-    ? 'steer'
-    : live.status === 'idle' ? 'followup' : 'inject'
-  const send = live[method]
-  if (typeof send !== 'function') {
-    debugLog(`deliver: agent has no ${method}() (status=${String(live.status)})`)
-    return false
+  // 只处理**正在跑**的会话：提醒的意义是「它还在闷头调工具」，插话（steer）
+  // 才能立刻生效。空闲/已结束的会话不管——用户已经在等下一句，不需要我们插嘴。
+  const live = agent as { status?: string; steer?: (message: unknown) => void }
+  if (live.status !== 'running') {
+    debugLog(`deliver: skip (status=${String(live.status)}) session=${sessionId}`)
+    return 'skip'
+  }
+  if (typeof live.steer !== 'function') {
+    debugLog(`deliver: agent has no steer() (status=${String(live.status)})`)
+    return 'retry'
   }
   try {
-    send.call(agent, buildContextMessage(options.plugin, text, options.section))
-    debugLog(`deliver: ${method} into ${sessionId} (status=${String(live.status)})`)
-    return true
+    live.steer.call(agent, buildContextMessage(options.plugin, text, options.section))
+    debugLog(`deliver: steer into ${sessionId} (status=running)`)
+    return 'sent'
   } catch (error) {
-    debugLog(`deliver: ${method} threw: ${String(error)} (status=${String(live.status)})`)
-    return false
+    debugLog(`deliver: steer threw: ${String(error)}`)
+    return 'retry'
   }
 }
 
@@ -232,11 +230,12 @@ export function deliver(ctx: NudgeContext, sessionId: string, text: string, opti
 const DELIVERY_RETRY_DELAYS = [0, 60, 200, 500] as const
 
 /**
- * 把投递挪到当前 append 之后。
+ * 把投递挪到当前 append 之后，并且**只对 running 会话**用 steer 插话。
  *
- * `session/event` 的派发发生在会话 append 发布期间，此时在监听里同步 `agent.inject()`
+ * `session/event` 的派发发生在会话 append 发布期间，此时在监听里同步 `agent.steer()`
  * 会抛 `session append cannot reenter while another append is being published`
- * （0.2.1 实测，seq=134 那次）。用 setTimeout 出栈后再投，并按固定间隔重试几次。
+ * （0.2.1 实测，seq=134）。用 setTimeout 出栈后再投，并按固定间隔重试几次；
+ * 会话没在跑（idle / 已结束）时直接跳过，不 followup、不 inject。
  */
 export function scheduleDelivery(
   ctx: NudgeContext,
@@ -247,8 +246,13 @@ export function scheduleDelivery(
 ): void {
   const attempt = (index: number): void => {
     if (isDisposed()) return
-    if (deliver(ctx, sessionId, text, options)) {
+    const outcome = deliver(ctx, sessionId, text, options)
+    if (outcome === 'sent') {
       debugLog(`REMIND session=${sessionId} sent=true attempt=${index}`)
+      return
+    }
+    if (outcome === 'skip') {
+      debugLog(`REMIND session=${sessionId} skipped（会话没在跑）`)
       return
     }
     if (index + 1 >= DELIVERY_RETRY_DELAYS.length) {
