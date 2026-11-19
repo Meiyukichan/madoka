@@ -5,7 +5,6 @@
  * 同一个 stepper 药丸（min-width 72 / 高 36 / radius md / bg-module-platform）、
  * 数字用 tabular-nums 居中，右侧箭头列 hover 才显现，单位跟在药丸后面。
  */
-import { useState } from 'react'
 import {
   IconChevronDownOutlineRegular, IconChevronUpOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -14,7 +13,8 @@ import {
 export interface NudgeRowProps {
   /** slot 把 `hooks: { everyToolCalls }` 变成这个钩子；快照是**整个 state 对象**。 */
   useEveryToolCalls: <R>(selector: (value: { everyToolCalls: number }) => R) => R
-  setEveryToolCalls: (value: number) => Promise<void>
+  /** 乐观更新 + 去抖：调用后立刻回显，写盘在后台合并。 */
+  setEveryToolCalls: (value: number) => void
   t: (key: string) => string
 }
 
@@ -28,15 +28,11 @@ const MAX = 100
  */
 export function NudgeRow({ useEveryToolCalls, setEveryToolCalls, t }: NudgeRowProps) {
   const value = useEveryToolCalls(state => state.everyToolCalls)
-  const [busy, setBusy] = useState(false)
-  const [failed, setFailed] = useState(false)
 
   const commit = (next: number): void => {
     const clamped = Math.min(MAX, Math.max(MIN, Math.round(next)))
     if (clamped === value) return
-    setFailed(false)
-    setBusy(true)
-    void setEveryToolCalls(clamped).catch(() => { setFailed(true) }).finally(() => { setBusy(false) })
+    setEveryToolCalls(clamped)
   }
 
   return (
@@ -44,7 +40,6 @@ export function NudgeRow({ useEveryToolCalls, setEveryToolCalls, t }: NudgeRowPr
       <div className="rune-setting-text">
         <div className="rune-setting-title">{t('nudge.title')}</div>
         <div className="rune-setting-desc">{t('nudge.description')}</div>
-        {failed && <div className="rune-setting-error" role="alert">{t('nudge.error')}</div>}
       </div>
       <div className="rune-setting-control">
         <div className="rune-stepper">
@@ -54,7 +49,7 @@ export function NudgeRow({ useEveryToolCalls, setEveryToolCalls, t }: NudgeRowPr
               type="button"
               className="rune-stepper-arrow"
               aria-label={t('nudge.increase')}
-              disabled={busy || value >= MAX}
+              disabled={value >= MAX}
               onClick={() => { commit(value + 1) }}
             >
               <IconChevronUpOutlineRegular size={9} />
@@ -63,7 +58,7 @@ export function NudgeRow({ useEveryToolCalls, setEveryToolCalls, t }: NudgeRowPr
               type="button"
               className="rune-stepper-arrow"
               aria-label={t('nudge.decrease')}
-              disabled={busy || value <= MIN}
+              disabled={value <= MIN}
               onClick={() => { commit(value - 1) }}
             >
               <IconChevronDownOutlineRegular size={9} />
