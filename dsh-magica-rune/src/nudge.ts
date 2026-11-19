@@ -15,25 +15,6 @@
  * 事件类型见 `packages/core/session`：`tool/call` / `assistant/message` / `step/*` / `turn/*`。
  */
 
-import { appendFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-
-/**
- * 调试日志（默认关闭）。
- *
- * 宿主侧 `ctx.logger` 不进 stdout，排查「有没有收到事件 / 有没有投递」只能靠文件：
- * 设 `DSH_RUNE_NUDGE_DEBUG=1` 后写到 `%TEMP%/rune-nudge.log`。
- */
-export function debugLog(line: string): void {
-  const flag = process.env.DSH_RUNE_NUDGE_DEBUG
-  if (flag === undefined || flag === '' || flag === '0') return
-  try {
-    appendFileSync(join(tmpdir(), 'rune-nudge.log'), `${new Date().toISOString()} ${line}\n`)
-  } catch {
-    // 日志失败不影响主流程
-  }
-}
 
 /** 计数节奏。 */
 export interface NudgeTiming {
@@ -186,42 +167,34 @@ export function deliver(ctx: NudgeContext, sessionId: string, text: string, opti
   try {
     agents = ctx.get('agents')
   } catch (error) {
-    debugLog(`deliver: ctx.get('agents') threw: ${String(error)}`)
     return 'retry'
   }
   const get = (agents as { get?: (id: string) => unknown } | undefined)?.get
   if (typeof get !== 'function') {
-    debugLog(`deliver: agents service has no get() (got ${typeof agents})`)
     return 'retry'
   }
   let agent: unknown
   try {
     agent = get.call(agents, sessionId)
   } catch (error) {
-    debugLog(`deliver: agents.get threw: ${String(error)}`)
     return 'retry'
   }
   if (agent === undefined || agent === null) {
-    debugLog(`deliver: no agent for session ${sessionId}`)
     return 'retry'
   }
   // 只处理**正在跑**的会话：提醒的意义是「它还在闷头调工具」，插话（steer）
   // 才能立刻生效。空闲/已结束的会话不管——用户已经在等下一句，不需要我们插嘴。
   const live = agent as { status?: string; steer?: (message: unknown) => void }
   if (live.status !== 'running') {
-    debugLog(`deliver: skip (status=${String(live.status)}) session=${sessionId}`)
     return 'skip'
   }
   if (typeof live.steer !== 'function') {
-    debugLog(`deliver: agent has no steer() (status=${String(live.status)})`)
     return 'retry'
   }
   try {
     live.steer.call(agent, buildContextMessage(options.plugin, text, options.section))
-    debugLog(`deliver: steer into ${sessionId} (status=running)`)
     return 'sent'
   } catch (error) {
-    debugLog(`deliver: steer threw: ${String(error)}`)
     return 'retry'
   }
 }
@@ -248,15 +221,12 @@ export function scheduleDelivery(
     if (isDisposed()) return
     const outcome = deliver(ctx, sessionId, text, options)
     if (outcome === 'sent') {
-      debugLog(`REMIND session=${sessionId} sent=true attempt=${index}`)
       return
     }
     if (outcome === 'skip') {
-      debugLog(`REMIND session=${sessionId} skipped（会话没在跑）`)
       return
     }
     if (index + 1 >= DELIVERY_RETRY_DELAYS.length) {
-      debugLog(`REMIND session=${sessionId} sent=false (retries exhausted)`)
       return
     }
     setTimeout(() => attempt(index + 1), DELIVERY_RETRY_DELAYS[index + 1])
@@ -283,7 +253,6 @@ function installListener(ctx: NudgeContext, counters: Map<string, NudgeCounters>
       const current = counters.get(session.id) ?? EMPTY_COUNTERS
       const outcome = advance(current, event, options)
       counters.set(session.id, outcome.counters)
-      debugLog(`event ${event.type} seq=${String(event.seq)} session=${session.id} toolCalls=${outcome.counters.toolCalls}`)
       if (outcome.remind !== undefined) {
         // 不能在派发过程中同步 inject：`session/event` 是在会话 append 发布期间派发的，
         // 此时 append 重入会抛 `session append cannot reenter while another append is being published`。

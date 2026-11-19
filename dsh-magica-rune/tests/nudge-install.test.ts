@@ -105,6 +105,32 @@ describe('installNudge 接线', () => {
     assert.deepEqual(harness.injectedInto, ['main-1'])
   })
 
+  it('连续语义：只有「真的说了话」才归零，工具块/thinking 不归零', async () => {
+    const harness = makeHarness()
+    installNudge(harness.ctx, OPTIONS)
+
+    for (let i = 1; i <= 10; i++) harness.emit(MAIN, toolCall(i))
+    // 只有工具块的 assistant/message 不算说话
+    harness.emit(MAIN, { type: 'assistant/message', seq: 11, data: { content: [{ type: 'tool-call', name: 'x' }] } })
+    harness.emit(MAIN, { type: 'assistant/message', seq: 12, data: { content: [{ type: 'thinking', text: 'hmm' }] } })
+    for (let i = 13; i <= 17; i++) harness.emit(MAIN, toolCall(i))
+    await flush()
+    assert.equal(harness.injected.length, 1, '10 + 5 = 15 次应触发（中间那些块不算文本）')
+
+    // 嵌套结构里的真文本才算说话（data.message.content）
+    const second = makeHarness()
+    installNudge(second.ctx, OPTIONS)
+    for (let i = 1; i <= 14; i++) second.emit(MAIN, toolCall(i))
+    second.emit(MAIN, { type: 'assistant/message', seq: 15, data: { message: { content: [{ type: 'text', text: '我来汇报一下' }] } } })
+    second.emit(MAIN, toolCall(16))
+    await flush()
+    assert.equal(second.injected.length, 0, '说过话就归零，1 次不该触发')
+    for (let i = 17; i <= 30; i++) second.emit(MAIN, toolCall(i))
+    second.emit(MAIN, toolCall(31))
+    await flush()
+    assert.equal(second.injected.length, 1, '归零后重新数满 15 次才触发')
+  })
+
   it('子代理会话不注入', async () => {
     const harness = makeHarness()
     installNudge(harness.ctx, OPTIONS)
