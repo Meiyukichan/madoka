@@ -40,8 +40,8 @@ export interface Config {
   builtinDisabled: VolatileRef<string[]>
   nonDisableable: VolatileRef<string[]>
   skillNonDisableable: VolatileRef<string[]>
-  /** 「连续工具调用无文本输出」提醒（普通配置，不进设置页）。 */
-  nudge: NudgeConfig
+  /** 「连续工具调用无文本输出」提醒（volatile：设置页可即时改）。 */
+  nudge: VolatileRef<NudgeConfig>
 }
 
 /** 提醒的配置形状。 */
@@ -89,6 +89,6 @@ export function readConfig(config: Config): {
     builtinDisabled: config.builtinDisabled.get(),
     nonDisableable: config.nonDisableable.get(),
     skillNonDisableable: config.skillNonDisableable.get(),
-    nudge: config.nudge,
+    nudge: config.nudge.get(),
   }
 }
