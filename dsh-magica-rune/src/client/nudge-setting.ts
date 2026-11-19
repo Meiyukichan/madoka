@@ -35,6 +35,8 @@ export class NudgeSettingController {
   private pending: number | undefined
   /** 去抖定时器：连点合并成一次写盘。 */
   private timer: ReturnType<typeof setTimeout> | undefined
+  /** 是否已有写盘在飞：在飞期间的点击排队，不并发。 */
+  private inFlight = false
 
   constructor(ctx: DshContextLike) {
     this.ctx = ctx
@@ -48,7 +50,7 @@ export class NudgeSettingController {
       if (found === undefined) return
       const every = readThreshold(found.value)
       this.store.update((draft) => {
-        draft.everyToolCalls = every
+        if (this.pending === undefined) draft.everyToolCalls = every
         draft.revision = Math.max(draft.revision, found.revision)
       })
     } catch {
@@ -69,33 +71,43 @@ export class NudgeSettingController {
       draft.busy = true
     })
     this.pending = value
-    if (this.timer !== undefined) return
+    if (this.inFlight || this.timer !== undefined) return
     this.timer = setTimeout(() => {
       this.timer = undefined
       void this.flush()
     }, 250)
   }
 
-  /** 真正落盘：只写一次，冲突时对账重试一次。 */
+  /**
+   * 真正落盘：**串行**消费 pending。
+   *
+   * 并发是卡顿/回跳的根源：两个 write 同时飞会撞乐观锁，其中一个失败后 load() 会把
+   * 屏幕上的新值拉回旧值（看到 7→5 又跳回 6）。所以同一时刻只允许一个 write，
+   * 期间的新点击只更新 pending，写完后再接着写最后一个。
+   */
   private async flush(): Promise<void> {
-    const value = this.pending
-    this.pending = undefined
-    if (value === undefined) {
-      this.store.update((draft) => { draft.busy = false })
-      return
-    }
+    if (this.inFlight) return
+    this.inFlight = true
     try {
-      await this.write(value, this.store.getSnapshot().revision)
-    } catch {
-      // 冲突：拿最新 revision 再写一次
-      try {
-        await this.load()
-        await this.write(value, this.store.getSnapshot().revision)
-      } catch {
-        await this.load()
+      while (this.pending !== undefined) {
+        const value = this.pending
+        this.pending = undefined
+        try {
+          await this.write(value, this.store.getSnapshot().revision)
+        } catch {
+          // 失败才对账；对账后如果用户又点了，循环会带着最新值继续写
+          await this.load()
+        }
       }
     } finally {
+      this.inFlight = false
       this.store.update((draft) => { draft.busy = false })
+      if (this.pending !== undefined) {
+        this.timer = setTimeout(() => {
+          this.timer = undefined
+          void this.flush()
+        }, 0)
+      }
     }
   }
 
@@ -115,7 +127,8 @@ export class NudgeSettingController {
     ) as RemoteResult<unknown>
     if (!written.ok) throw new Error(written.error?.message ?? 'settings replace failed')
     this.store.update((draft) => {
-      draft.everyToolCalls = value
+      // 用户在写盘期间又点了：屏幕以他的最新意图为准，别被这次响应拉回去
+      if (this.pending === undefined) draft.everyToolCalls = value
       draft.revision = Math.max(draft.revision, found.revision + 1)
     })
   }
