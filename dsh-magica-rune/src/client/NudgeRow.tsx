@@ -4,7 +4,8 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** 本行需要的注入面（slot 把 `hooks` 的每个键变成 `use<Key>` 钩子）。 */
 export interface NudgeRowProps {
-  useEveryToolCalls: <R>(selector: (value: number) => R) => R
+  /** slot 把 `hooks: { everyToolCalls }` 变成这个钩子；快照是**整个 state 对象**。 */
+  useEveryToolCalls: <R>(selector: (value: { everyToolCalls: number }) => R) => R
   setEveryToolCalls: (value: number) => Promise<void>
   t: (key: string) => string
 }
@@ -18,7 +19,7 @@ const MAX = 100
  * @returns 一行设置项。
  */
 export function NudgeRow({ useEveryToolCalls, setEveryToolCalls, t }: NudgeRowProps) {
-  const value = useEveryToolCalls(current => current)
+  const value = useEveryToolCalls(state => state.everyToolCalls)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
 
