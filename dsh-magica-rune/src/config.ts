@@ -40,6 +40,20 @@ export interface Config {
   builtinDisabled: VolatileRef<string[]>
   nonDisableable: VolatileRef<string[]>
   skillNonDisableable: VolatileRef<string[]>
+  /** 「连续工具调用无文本输出」提醒（普通配置，不进设置页）。 */
+  nudge: NudgeConfig
+}
+
+/** 提醒的配置形状。 */
+export interface NudgeConfig {
+  /** 关掉后完全不计数、不提醒。 */
+  enabled: boolean
+  /** 连续多少次工具调用触发一次（默认 15）。 */
+  everyToolCalls: number
+  /** 距上次提醒再隔多少次才允许再提醒（默认 15）。 */
+  remindEvery: number
+  /** 子代理（含 fork）不提醒。 */
+  skipSubagents: boolean
 }
 
 /** 名单字段：数组整体 volatile（固定路径，合法）。 */
@@ -51,6 +65,12 @@ export const Config: z<Config> = z.object({
   builtinDisabled: nameList(DEFAULT_TOOL_BUILTIN_DISABLED),
   nonDisableable: nameList(DEFAULT_TOOL_NON_DISABLEABLE),
   skillNonDisableable: nameList(DEFAULT_SKILL_NON_DISABLEABLE),
+  nudge: z.object({
+    enabled: z.boolean().default(true),
+    everyToolCalls: z.number().default(15),
+    remindEvery: z.number().default(15),
+    skipSubagents: z.boolean().default(true),
+  }).default({ enabled: true, everyToolCalls: 15, remindEvery: 15, skipSubagents: true }),
 }) as unknown as z<Config>
 
 /** 从 live config 取一份不可变快照。 */
@@ -60,6 +80,7 @@ export function readConfig(config: Config): {
   builtinDisabled: readonly string[]
   nonDisableable: readonly string[]
   skillNonDisableable: readonly string[]
+  nudge: Readonly<NudgeConfig>
 } {
   return {
     tools: config.tools.get(),
@@ -67,5 +88,6 @@ export function readConfig(config: Config): {
     builtinDisabled: config.builtinDisabled.get(),
     nonDisableable: config.nonDisableable.get(),
     skillNonDisableable: config.skillNonDisableable.get(),
+    nudge: config.nudge,
   }
 }

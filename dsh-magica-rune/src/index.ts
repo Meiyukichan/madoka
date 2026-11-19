@@ -17,6 +17,7 @@ import { installRestrict } from './restrict.ts'
 import { installSkillGate } from './skill-gate.ts'
 import { installCatalog } from './catalog.ts'
 import { registerBuiltinSkill } from './builtin-skill.ts'
+import { installNudge, type NudgeContext } from './nudge.ts'
 
 export { Config }
 export type { RuneConfig }
@@ -81,6 +82,23 @@ export function apply(ctx: DshContext, config: RuneConfig): void {
 
   // 5) 目录 HTTP
   const catalog = installCatalog(ctx, state)
+
+  // 5b) 「连续工具调用无文本输出」提醒：按 session 计数、子代理跳过。
+  //     与门禁链路无关，装失败只 warn，不影响能力管理。
+  const nudge = readConfig(config).nudge
+  if (nudge.enabled) {
+    try {
+      installNudge(ctx as unknown as NudgeContext, {
+        plugin: name,
+        section: 'rune-nudge',
+        everyToolCalls: nudge.everyToolCalls,
+        remindEvery: nudge.remindEvery,
+        skipSubagents: nudge.skipSubagents,
+      })
+    } catch (error) {
+      ctx.logger.warn(`[rune] nudge install failed: ${String(error)}`)
+    }
+  }
 
   // 6) 配置热更新：一条通道驱动全部重挂
   const watch = ctx.effect(() => ctx.on('loader/volatile-update', () => {
