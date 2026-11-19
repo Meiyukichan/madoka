@@ -217,12 +217,130 @@ const CSS = `
  * 注入一次样式表（**模块工厂执行期**调用，不是组件 render）。
  * 带 `data-plugin` 让模块系统在卸载 / HMR 时按插件回收。
  */
+
+/**
+ * 通用设置里「提醒阈值」那一行的样式。
+ *
+ * 逐项照 `packages/client/ui-theme/src/client/FontSizeRow.module.css` 抄的：
+ * row（16px 上下内边距 + 0.5px 分隔线 + gap 8）、stepper（min-width 72 / 高 36 /
+ * radius md / bg-module-platform）、value（14/22 tabular-nums）、unit（14/22 secondary）、
+ * 以及 hover 才显现的右侧箭头列。这样它和「字号大小」那行视觉一致。
+ */
+export const SETTINGS_CSS = `
+.rune-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.rune-setting-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 48px;
+}
+
+.rune-setting-title {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.rune-setting-desc {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rune-setting-error {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.rune-setting-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rune-stepper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  height: 36px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.rune-stepper-value {
+  min-width: 18px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-primary);
+}
+
+.rune-stepper-unit {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rune-stepper-arrows {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+}
+
+.rune-stepper:hover .rune-stepper-arrows,
+.rune-stepper:focus-within .rune-stepper-arrows {
+  opacity: 1;
+}
+
+.rune-stepper-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.rune-stepper-arrow:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.rune-stepper-arrow:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+`
+
 export function installStyles(): void {
   if (typeof document === 'undefined') return
   if (document.querySelector(`style[data-plugin-css="${STYLE_TAG_ID}"]`) !== null) return
   const tag = document.createElement('style')
   tag.dataset.plugin = PLUGIN_ID
   tag.dataset.pluginCss = STYLE_TAG_ID
-  tag.textContent = CSS
+  tag.textContent = CSS + SETTINGS_CSS
   document.head.appendChild(tag)
 }

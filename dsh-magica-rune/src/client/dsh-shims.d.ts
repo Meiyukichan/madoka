@@ -37,4 +37,6 @@ declare module '@deepseek-ai/dsh-client-ui-primitives' {
   export const Menu: (props: any) => any
   export const Modal: (props: any) => any
   export const Tooltip: (props: any) => any
+  export const IconChevronUpOutlineRegular: (props: any) => any
+  export const IconChevronDownOutlineRegular: (props: any) => any
 }

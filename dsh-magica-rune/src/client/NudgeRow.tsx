@@ -1,6 +1,14 @@
-/** 通用设置里的「提醒阈值」行：数字 + 增减按钮（照 ui-theme 的字号行做的）。 */
+/**
+ * 通用设置里的「提醒阈值」行。
+ *
+ * 视觉逐项照 `ui-theme` 的 FontSizeRow：同一套行距（16px 上下 + 0.5px 分隔线）、
+ * 同一个 stepper 药丸（min-width 72 / 高 36 / radius md / bg-module-platform）、
+ * 数字用 tabular-nums 居中，右侧箭头列 hover 才显现，单位跟在药丸后面。
+ */
 import { useState } from 'react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconChevronDownOutlineRegular, IconChevronUpOutlineRegular,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** 本行需要的注入面（slot 把 `hooks` 的每个键变成 `use<Key>` 钩子）。 */
 export interface NudgeRowProps {
@@ -31,18 +39,39 @@ export function NudgeRow({ useEveryToolCalls, setEveryToolCalls, t }: NudgeRowPr
     void setEveryToolCalls(clamped).catch(() => { setFailed(true) }).finally(() => { setBusy(false) })
   }
 
-  return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-    <div>
-      <div>{t('nudge.title')}</div>
-      <div style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px' }}>{t('nudge.description')}</div>
-      {failed && <div role="alert" style={{ color: 'var(--dsw-alias-state-error-primary)', fontSize: '12px' }}>{t('nudge.error')}</div>}
+  return (
+    <div className="rune-setting-row">
+      <div className="rune-setting-text">
+        <div className="rune-setting-title">{t('nudge.title')}</div>
+        <div className="rune-setting-desc">{t('nudge.description')}</div>
+        {failed && <div className="rune-setting-error" role="alert">{t('nudge.error')}</div>}
+      </div>
+      <div className="rune-setting-control">
+        <div className="rune-stepper">
+          <span className="rune-stepper-value">{value}</span>
+          <span className="rune-stepper-arrows">
+            <button
+              type="button"
+              className="rune-stepper-arrow"
+              aria-label={t('nudge.increase')}
+              disabled={busy || value >= MAX}
+              onClick={() => { commit(value + 1) }}
+            >
+              <IconChevronUpOutlineRegular size={9} />
+            </button>
+            <button
+              type="button"
+              className="rune-stepper-arrow"
+              aria-label={t('nudge.decrease')}
+              disabled={busy || value <= MIN}
+              onClick={() => { commit(value - 1) }}
+            >
+              <IconChevronDownOutlineRegular size={9} />
+            </button>
+          </span>
+        </div>
+        <span className="rune-stepper-unit">{t('nudge.unit')}</span>
+      </div>
     </div>
-    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-      <Button size="sm" variant="ghost" disabled={busy || value <= MIN} aria-label={t('nudge.decrease')}
-        onClick={() => commit(value - 1)}>−</Button>
-      <span style={{ minWidth: '2.5em', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
-      <Button size="sm" variant="ghost" disabled={busy || value >= MAX} aria-label={t('nudge.increase')}
-        onClick={() => commit(value + 1)}>+</Button>
-    </div>
-  </div>
+  )
 }

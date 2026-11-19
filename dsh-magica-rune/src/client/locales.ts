@@ -30,7 +30,7 @@ export type AbilityLocaleKey =
   | 'disable.title' | 'disable.desc' | 'disable.confirm' | 'disable.cancel'
   | 'disable.batchTitle' | 'disable.batchDesc'
   | 'loading' | 'error'
-  | 'nudge.title' | 'nudge.description' | 'nudge.increase' | 'nudge.decrease' | 'nudge.error'
+  | 'nudge.title' | 'nudge.description' | 'nudge.increase' | 'nudge.decrease' | 'nudge.error' | 'nudge.unit'
   | 'cat.file' | 'cat.shell' | 'cat.image' | 'cat.agent' | 'cat.job' | 'cat.goal'
   | 'cat.ralph' | 'cat.cordis' | 'cat.mcp' | 'cat.misc' | 'cat.builtin' | 'cat.plugin-other'
   | 'cat.web' | 'cat.workflow' | 'cat.plugin'
@@ -63,6 +63,7 @@ export const zh: Record<AbilityLocaleKey, string> = {
   'nudge.increase': '增大阈值',
   'nudge.decrease': '减小阈值',
   'nudge.error': '保存失败',
+  'nudge.unit': '次',
   error: '加载失败',
   'cat.file': '文件操作',
   'cat.shell': 'Shell',
@@ -109,6 +110,7 @@ export const en: Record<AbilityLocaleKey, string> = {
   'nudge.increase': 'Increase threshold',
   'nudge.decrease': 'Decrease threshold',
   'nudge.error': 'Could not save',
+  'nudge.unit': 'calls',
   error: 'Load failed',
   'cat.file': 'Files',
   'cat.shell': 'Shell',
