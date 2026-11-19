@@ -20,11 +20,15 @@ function makeHarness() {
   const agents = new Map<string, { inject: (message: Injected) => void }>()
   let injectServices: readonly string[] | undefined
 
+  const methods: string[] = []
   const agentFor = (id: string) => {
     const existing = agents.get(id)
     if (existing !== undefined) return existing
     const created = {
-      inject: (message: Injected) => { injected.push(message); injectedInto.push(id) },
+      status: 'running' as string,
+      steer: (message: Injected) => { methods.push('steer'); injected.push(message); injectedInto.push(id) },
+      followup: (message: Injected) => { methods.push('followup'); injected.push(message); injectedInto.push(id) },
+      inject: (message: Injected) => { methods.push('inject'); injected.push(message); injectedInto.push(id) },
     }
     agents.set(id, created)
     return created
@@ -44,8 +48,15 @@ function makeHarness() {
     for (const entry of listeners) if (entry.event === 'session/event') entry.listener(session, event)
   }
 
-  return { ctx, emit, injected, injectedInto, get injectServices() { return injectServices } }
+  return {
+    ctx, emit, injected, injectedInto, methods,
+    agentFor,
+    get injectServices() { return injectServices },
+  }
 }
+
+/** 投递是延后的（避免在 append 发布期重入），断言前等一下。 */
+const flush = (ms = 80) => new Promise(resolve => setTimeout(resolve, ms))
 
 const MAIN: NudgeSession = { id: 'main-1', header: {} }
 const SUB: NudgeSession = { id: 'sub-1', header: { origin: 'subagent', parentSession: 'main-1' } }
@@ -61,12 +72,31 @@ describe('installNudge 接线', () => {
     assert.deepEqual(harness.injectServices, ['agents'])
   })
 
-  it('第 15 次连续工具调用时注入具名上下文', () => {
+  it('running 时走 steer 插话（spellbook 的三档投递）', async () => {
+    const harness = makeHarness()
+    installNudge(harness.ctx, OPTIONS)
+    for (let i = 1; i <= 15; i++) harness.emit(MAIN, toolCall(i))
+    await flush()
+    assert.deepEqual(harness.methods, ['steer'], '正在跑的会话必须 steer，而不是 inject')
+  })
+
+  it('idle 时走 followup', async () => {
+    const harness = makeHarness()
+    installNudge(harness.ctx, OPTIONS)
+    harness.agentFor('main-1').status = 'idle'
+    for (let i = 1; i <= 15; i++) harness.emit(MAIN, toolCall(i))
+    await flush()
+    assert.deepEqual(harness.methods, ['followup'])
+  })
+
+  it('第 15 次连续工具调用时注入具名上下文', async () => {
     const harness = makeHarness()
     installNudge(harness.ctx, OPTIONS)
     for (let i = 1; i <= 14; i++) harness.emit(MAIN, toolCall(i))
+    await flush()
     assert.equal(harness.injected.length, 0, '14 次不应注入')
     harness.emit(MAIN, toolCall(15))
+    await flush()
     assert.equal(harness.injected.length, 1, '15 次应注入一次')
     assert.equal(harness.injected[0]?.source?.kind, 'rune-nudge')
     assert.equal(harness.injected[0]?.source?.plugin, 'dsh-magica-rune')
@@ -74,33 +104,38 @@ describe('installNudge 接线', () => {
     assert.deepEqual(harness.injectedInto, ['main-1'])
   })
 
-  it('子代理会话不注入', () => {
+  it('子代理会话不注入', async () => {
     const harness = makeHarness()
     installNudge(harness.ctx, OPTIONS)
     for (let i = 1; i <= 20; i++) harness.emit(SUB, toolCall(i))
+    await flush()
     assert.equal(harness.injected.length, 0)
   })
 
-  it('文本输出会清零，之后要重新数满 15 次', () => {
+  it('文本输出会清零，之后要重新数满 15 次', async () => {
     const harness = makeHarness()
     installNudge(harness.ctx, OPTIONS)
     for (let i = 1; i <= 14; i++) harness.emit(MAIN, toolCall(i))
     harness.emit(MAIN, text(15))
     for (let i = 16; i <= 29; i++) harness.emit(MAIN, toolCall(i))
+    await flush()
     assert.equal(harness.injected.length, 0, '清零后 14 次不应注入')
     harness.emit(MAIN, toolCall(30))
+    await flush()
     assert.equal(harness.injected.length, 1)
   })
 
-  it('两个会话各自计数，互不影响', () => {
+  it('两个会话各自计数，互不影响', async () => {
     const harness = makeHarness()
     installNudge(harness.ctx, OPTIONS)
     const other: NudgeSession = { id: 'main-2', header: {} }
     for (let i = 1; i <= 15; i++) harness.emit(MAIN, toolCall(i))
     for (let i = 1; i <= 14; i++) harness.emit(other, toolCall(i))
+    await flush()
     assert.equal(harness.injected.length, 1)
     assert.deepEqual(harness.injectedInto, ['main-1'])
     harness.emit(other, toolCall(15))
+    await flush()
     assert.deepEqual(harness.injectedInto, ['main-1', 'main-2'])
   })
 })

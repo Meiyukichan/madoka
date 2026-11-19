@@ -205,19 +205,59 @@ export function deliver(ctx: NudgeContext, sessionId: string, text: string, opti
     debugLog(`deliver: no agent for session ${sessionId}`)
     return false
   }
-  const inject = (agent as { inject?: (message: unknown) => void } | undefined)?.inject
-  if (typeof inject !== 'function') {
-    debugLog('deliver: agent has no inject()')
+  // 三档投递，与 spellbook 的 pushNamedContext 一致：
+  // 正在跑 → **steer**（插进最近的 step，模型立刻看到，不等下一轮）；
+  // 空闲 → followup（起一轮）；状态未知 → inject（挂进收件箱）。
+  // 我们的提醒本来就发生在「跑到一半」，所以正常路径就是 steer。
+  const live = agent as { status?: string; steer?: (message: unknown) => void; followup?: (message: unknown) => void; inject?: (message: unknown) => void }
+  const method = live.status === 'running'
+    ? 'steer'
+    : live.status === 'idle' ? 'followup' : 'inject'
+  const send = live[method]
+  if (typeof send !== 'function') {
+    debugLog(`deliver: agent has no ${method}() (status=${String(live.status)})`)
     return false
   }
   try {
-    inject.call(agent, buildContextMessage(options.plugin, text, options.section))
-    debugLog(`deliver: injected into ${sessionId}`)
+    send.call(agent, buildContextMessage(options.plugin, text, options.section))
+    debugLog(`deliver: ${method} into ${sessionId} (status=${String(live.status)})`)
     return true
   } catch (error) {
-    debugLog(`deliver: inject threw: ${String(error)}`)
+    debugLog(`deliver: ${method} threw: ${String(error)} (status=${String(live.status)})`)
     return false
   }
+}
+
+/** 延后投递的重试间隔（毫秒）；投递成功即停止。 */
+const DELIVERY_RETRY_DELAYS = [0, 60, 200, 500] as const
+
+/**
+ * 把投递挪到当前 append 之后。
+ *
+ * `session/event` 的派发发生在会话 append 发布期间，此时在监听里同步 `agent.inject()`
+ * 会抛 `session append cannot reenter while another append is being published`
+ * （0.2.1 实测，seq=134 那次）。用 setTimeout 出栈后再投，并按固定间隔重试几次。
+ */
+export function scheduleDelivery(
+  ctx: NudgeContext,
+  sessionId: string,
+  text: string,
+  options: NudgeOptions,
+  isDisposed: () => boolean,
+): void {
+  const attempt = (index: number): void => {
+    if (isDisposed()) return
+    if (deliver(ctx, sessionId, text, options)) {
+      debugLog(`REMIND session=${sessionId} sent=true attempt=${index}`)
+      return
+    }
+    if (index + 1 >= DELIVERY_RETRY_DELAYS.length) {
+      debugLog(`REMIND session=${sessionId} sent=false (retries exhausted)`)
+      return
+    }
+    setTimeout(() => attempt(index + 1), DELIVERY_RETRY_DELAYS[index + 1])
+  }
+  setTimeout(() => attempt(0), DELIVERY_RETRY_DELAYS[0])
 }
 
 /** 注册监听；`ctx.effect` 负责卸载回收（含计数器）。 */
@@ -231,6 +271,8 @@ export function installNudge(ctx: NudgeContext, options: NudgeOptions): void {
 
 function installListener(ctx: NudgeContext, counters: Map<string, NudgeCounters>, options: NudgeOptions): void {
   ctx.effect(() => {
+    let disposed = false
+    const isDisposed = () => disposed
     const disposeEvent = ctx.on('session/event', (session, event) => {
       if (session === undefined || typeof session.id !== 'string' || session.id === '') return
       if (options.skipSubagents && isSubagentSession(session)) return
@@ -239,8 +281,10 @@ function installListener(ctx: NudgeContext, counters: Map<string, NudgeCounters>
       counters.set(session.id, outcome.counters)
       debugLog(`event ${event.type} seq=${String(event.seq)} session=${session.id} toolCalls=${outcome.counters.toolCalls}`)
       if (outcome.remind !== undefined) {
-        const sent = deliver(ctx, session.id, outcome.remind, options)
-        debugLog(`REMIND session=${session.id} sent=${String(sent)}`)
+        // 不能在派发过程中同步 inject：`session/event` 是在会话 append 发布期间派发的，
+        // 此时 append 重入会抛 `session append cannot reenter while another append is being published`。
+        // 所以延后到当前 append 结束后再投递，并做有界重试（可能撞上别的 append）。
+        scheduleDelivery(ctx, session.id, outcome.remind, options, isDisposed)
       }
     })
     const disposeGone = ctx.on('agent/disposed', ({ agent }) => {
@@ -248,6 +292,7 @@ function installListener(ctx: NudgeContext, counters: Map<string, NudgeCounters>
       if (typeof id === 'string') counters.delete(id)
     })
     return () => {
+      disposed = true
       disposeEvent()
       disposeGone()
       counters.clear()
