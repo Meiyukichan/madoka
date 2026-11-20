@@ -1,11 +1,12 @@
 # 重点事项
 
 - **用中文回答**
-- **新代码一律面向 `0.2.0-rc.2` 的 DSH**；本地源码：`D:\project-code\llm\deepseek-harness`（下文路径都相对它）。
+- **新代码一律面向 `0.2.0 ~ 0.2.1` 的 DSH**（本机运行/源码当前是 `0.2.1-rc.5`，已实测适配）；本地源码：`D:\project-code\test\deepseek-harness`（下文路径都相对它）。
 - 本仓另有 0.1.2 线（`@meiyukichan/dsh-index`）：**只维护，不复用其代码、类型和 API 记忆** 。
 - 写插件前先查源码中同类官方实现，对齐 API、命名与返回结构；**不要照抄 0.1.2 时代的代码**（本文件末尾列了常见漂移）。
 - 项目下所有子包采用pnpm构建 (pnpm-workspace.yaml)，版本统一从0.2.0-alpha.1开始，最后lib/只有两个文件：index.js/client.js【压缩源码】。*.js.map 禁止进入 lib/
 - 要有tests单元测试
+- 可以用playwright看网页，已安装到全局npm
 
 ## 一、包结构与构建产物
 
@@ -141,7 +142,7 @@
 
 ## 五、源码与文档索引
 
-1. **本地 DSH 源码**：`D:\project-code\llm\deepseek-harness`（`0.2.0-rc.2`，tag `dsh-v0.2.0-rc.2`）。找不到本地源码时才 `where dsh`（Windows）/ `which dsh` 读已装产物。
+1. **本地 DSH 源码**：`D:\project-code\test\deepseek-harness`（`0.2.1-rc.5`，tag `dsh-v0.2.1-rc.5`）。找不到本地源码时才 `where dsh`（Windows）/ `which dsh` 读已装产物。
 2. **权威文档**（相对源码根）：
    - client 栈规则：`packages/client/AGENTS.md`
    - slot 模型与实时树：`docs/subsystems/slots.zh.md`

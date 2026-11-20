@@ -5,7 +5,7 @@
 不喜欢的工具可以关掉，模型就看不见它、也调不动它；同一个工具还能做到「A 项目里禁用、B 项目里保留」。改动即时生效，不用重启 DSH，也不用改任何配置文件。
 
 - 包名：`@meiyukichan/dsh-magica-rune`（设置命名空间仍是 `dsh-magica-rune`）
-- 适用版本：DSH **0.2.0-rc.2**（Web 端）
+- 适用版本：DSH **0.2.0 ~ 0.2.1**（在 0.2.1-rc.5 实测；Web 端）
 - 界面入口：**设置 → 能力管理**（在「内置插件」之后、「Agent 预设」之前，图标是扳手 + 螺丝刀）
 
 ---
@@ -165,7 +165,15 @@ dsh plugin --profile web add @meiyukichan/dsh-magica-rune
 
 ## 七、兼容性
 
-- 需要 DSH **0.2.0-rc.2**（`@deepseek-ai/dsh*` peer 范围 `>=0.2.0-rc.2`，不满足会在装配期被直接禁用）。
+- 支持 DSH **0.2.0 ~ 0.2.1**；本机运行与源码均为 `0.2.1-rc.5`，已全量实测（typecheck / 单测 / E2E / 真机提醒）。
+- peer 范围（`@deepseek-ai/dsh-*` 六个包一致）：
+
+  ```text
+  >=0.2.0-rc.2 <0.2.2-0 || >=0.2.1-rc.5 <0.2.2-0
+  ```
+
+  `0.2.1` 的 rc 预发布必须单独列一条（semver 的预发布规则：只写 `>=0.2.0-rc.2 <0.2.2-0` 会拒绝 `0.2.1-rc.x`）。
+- **0.2.2 及以上未验证**：peer 会拒绝装配；确需试用可 `dsh plugin allow-version` 逐版本豁免。
 - 仅 Web 平台（`dsh.client.platform: "web"`）。
 - 中英文界面随 DSH 语言切换。
 
