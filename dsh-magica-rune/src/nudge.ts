@@ -56,7 +56,7 @@ export interface NudgeSession {
 export function nudgeText(toolCalls: number): string {
   return [
     `You have made ${toolCalls} consecutive tool calls without any text to the user.`,
-    'They only see your messages, not tool output — send a brief progress note now, one to three sentences is enough.',
+    'They only see your messages, not tool output — send a brief progress note now, 1-3 sentences is enough.',
   ].join('\n')
 }
 
