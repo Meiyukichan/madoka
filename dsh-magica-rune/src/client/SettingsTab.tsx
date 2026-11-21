@@ -94,7 +94,9 @@ export function SettingsTab({ t }: { t: (key: string, params?: Record<string, st
         ? <div className="rune-setting-desc" style={{ padding: '12px 0' }}>{t('loading')}</div>
         : PANEL_KEYS.map(key => {
           const row = panels.find(item => item.id === key.id)
-          const disabled = row?.disabled === true
+          // 缺字段（旧宿主 / 未覆盖）按「默认已关」处理：我们这 6 个里 5 个默认关，
+          // 只有账号 Host 默认开，它由 host 端 effectivePanelDisabled 显式返回 false。
+          const disabled = row?.disabled !== false
           return (
             <div key={key.id} className="rune-setting-row">
               <div className="rune-setting-text">
