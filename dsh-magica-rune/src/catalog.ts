@@ -22,6 +22,10 @@ import type {
 import type { GuardState } from './state.ts'
 import { CATALOG_PATH, ABILITY_NS } from './namespace.ts'
 import { sendJson, sendMethodNotAllowed } from './router.ts'
+import { PANEL_PLUGINS, readPanelOverrides, resolvePatchPath, writePanelOverride } from './panels.ts'
+
+/** 官方界面插件开关（读写 profile 的 cordis.patch.yml）。 */
+const PANEL_PATH = '/rune-ability/panels'
 
 /** 设置页即时改阈值的内存通道（不写盘；写盘由 client 侧延后合并）。 */
 const NUDGE_PATH = '/rune-ability/nudge'
@@ -116,7 +120,54 @@ export function installCatalog(ctx: DshContext, state: GuardState): () => void {
     },
   }), 'dsh-magica-rune: nudge route')
 
-  return () => { disposeRoute(); disposeNudgeRoute(); disposeListeners() }
+  // 官方界面插件开关：GET 读 profile 覆盖，POST 写一条 { id, disabled }。
+  const disposePanelRoute = ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: PANEL_PATH,
+    async handler(req, res) {
+      if (req.method !== 'GET' && req.method !== 'POST') {
+        sendMethodNotAllowed(res, 'GET, POST')
+        return
+      }
+      const patchPath = resolvePatchPath(ctx as unknown as { get?: (name: string) => unknown })
+      if (patchPath === undefined) {
+        sendJson(res, 500, { ok: false, error: 'profile patch path not resolvable' })
+        return
+      }
+      try {
+        if (req.method === 'GET') {
+          const overrides = readPanelOverrides(patchPath)
+          sendJson(res, 200, {
+            ok: true,
+            patchPath,
+            plugins: PANEL_PLUGINS.map(plugin => ({
+              id: plugin.id,
+              label: plugin.label,
+              hint: plugin.hint,
+              disabled: overrides[plugin.id],
+            })),
+          })
+          return
+        }
+        let raw = ''
+        for await (const chunk of req) {
+          raw += String(chunk)
+          if (raw.length > 4096) throw new Error('body too large')
+        }
+        const parsed = (raw === '' ? {} : JSON.parse(raw)) as { id?: unknown; enabled?: unknown }
+        const id = typeof parsed.id === 'string' ? parsed.id : ''
+        if (!PANEL_PLUGINS.some(plugin => plugin.id === id)) throw new Error('unknown plugin id: ' + id)
+        if (typeof parsed.enabled !== 'boolean') throw new Error('enabled must be boolean')
+        writePanelOverride(patchPath, id, parsed.enabled)
+        const overrides = readPanelOverrides(patchPath)
+        sendJson(res, 200, { ok: true, id, disabled: overrides[id] })
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: String(error) })
+      }
+    },
+  }), 'dsh-magica-rune: panels route')
+
+  return () => { disposeRoute(); disposeNudgeRoute(); disposePanelRoute(); disposeListeners() }
 }
 
 function firstAgent(agents: Map<string, DshAgent>): DshAgent | undefined {
