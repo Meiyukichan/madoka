@@ -45,7 +45,6 @@ export interface Config {
        * 默认压掉 llm-deepseek-account 的「model listing … loaded N model(s)」——
        * 那行是 info，但每次启动都刷，属于噪声。
        */
-  quietLogs: string[]
   /** 「连续工具调用无文本输出」提醒（volatile：设置页可即时改）。 */
   nudge: VolatileRef<NudgeConfig>
 }
@@ -72,7 +71,6 @@ export const Config: z<Config> = z.object({
   nonDisableable: nameList(DEFAULT_TOOL_NON_DISABLEABLE),
   skillNonDisableable: nameList(DEFAULT_SKILL_NON_DISABLEABLE),
   // 整段标 volatile：通用设置页要能即时改 everyToolCalls（settings.update 只写 volatile 字段）。
-  quietLogs: z.array(z.string()).default(['llm-deepseek-account']),
   nudge: z.object({
     enabled: z.boolean().default(true),
     everyToolCalls: z.number().default(15),
@@ -89,7 +87,6 @@ export function readConfig(config: Config): {
   nonDisableable: readonly string[]
   skillNonDisableable: readonly string[]
   nudge: Readonly<NudgeConfig>
-  quietLogs: readonly string[]
 } {
   return {
     tools: config.tools.get(),
@@ -98,6 +95,5 @@ export function readConfig(config: Config): {
     nonDisableable: config.nonDisableable.get(),
     skillNonDisableable: config.skillNonDisableable.get(),
     nudge: config.nudge.get(),
-    quietLogs: config.quietLogs,
   }
 }

@@ -18,7 +18,6 @@ import { installSkillGate } from './skill-gate.ts'
 import { installCatalog } from './catalog.ts'
 import { registerBuiltinSkill } from './builtin-skill.ts'
 import { installNudge, type NudgeContext, type NudgeOptions } from './nudge.ts'
-import { quietLoggers } from './quiet.ts'
 
 export { Config }
 export type { RuneConfig }
@@ -91,19 +90,6 @@ export function apply(ctx: DshContext, config: RuneConfig): void {
 
   // 5) 目录 HTTP
   const catalog = installCatalog(ctx, state)
-
-  // 5a) 日志降噪：把指定 logger 的 info 压掉（warn/error 照旧）。
-  const restoreQuiet = (() => {
-    const names = readConfig(config).quietLogs
-    try {
-      // 直接用内置 logger 服务：ctx.get('logger') 在未声明时可能拿不到或抛错，
-      // 而 ctx.logger 是内置属性，任何 fiber 都能访问。
-      return quietLoggers((ctx as unknown as { logger?: { exporters?: Map<number, { export: (m: { name?: string; type?: string }) => void }> } }).logger, names)
-    } catch (error) {
-      ctx.logger.warn(`[rune] quiet logs failed: ${String(error)}`)
-      return () => {}
-    }
-  })()
 
   // 5b) 「连续工具调用无文本输出」提醒：按 session 计数、子代理跳过。
   //     与门禁链路无关，装失败只 warn，不影响能力管理。
