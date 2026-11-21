@@ -219,6 +219,7 @@ export function scheduleDelivery(
   text: string,
   options: NudgeOptions,
   isDisposed: () => boolean,
+  onSkip?: () => void,
 ): void {
   const attempt = (index: number): void => {
     if (isDisposed()) return
@@ -227,6 +228,9 @@ export function scheduleDelivery(
       return
     }
     if (outcome === 'skip') {
+      // 会话此刻没在跑 → 这次没投出去，把「已提醒」的位置退回去，下一个工具调用再试，
+      // 否则 10/20 这种窗口会被白白吃掉，用户只能看到 30 那一次。
+      onSkip?.()
       return
     }
     if (index + 1 >= DELIVERY_RETRY_DELAYS.length) {
@@ -261,7 +265,11 @@ function installListener(ctx: NudgeContext, counters: Map<string, NudgeCounters>
         // 不能在派发过程中同步 inject：`session/event` 是在会话 append 发布期间派发的，
         // 此时 append 重入会抛 `session append cannot reenter while another append is being published`。
         // 所以延后到当前 append 结束后再投递，并做有界重试（可能撞上别的 append）。
-        scheduleDelivery(ctx, session.id, outcome.remind, settings, isDisposed)
+        scheduleDelivery(ctx, session.id, outcome.remind, settings, isDisposed, () => {
+          const latest = counters.get(session.id)
+          if (latest === undefined) return
+          counters.set(session.id, { ...latest, nudgedAt: Math.max(0, latest.nudgedAt - 1) })
+        })
       }
     })
     const disposeGone = ctx.on('agent/disposed', ({ agent }) => {
