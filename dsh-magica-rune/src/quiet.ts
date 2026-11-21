@@ -33,14 +33,8 @@ interface LoggerServiceLike {
  * @param names - 要静音的名字（与日志行里的 `[name]` 一致）。
  * @returns 还原函数。
  */
-export function quietLoggers(ctx: { get: <T>(name: string) => T | undefined }, names: readonly string[]): () => void {
+export function quietLoggers(logger: LoggerServiceLike | undefined, names: readonly string[]): () => void {
   if (names.length === 0) return () => {}
-  let logger: LoggerServiceLike | undefined
-  try {
-    logger = ctx.get<LoggerServiceLike>('logger')
-  } catch {
-    return () => {}
-  }
   const exporters = logger?.exporters
   if (!(exporters instanceof Map)) return () => {}
 

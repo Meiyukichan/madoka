@@ -96,7 +96,9 @@ export function apply(ctx: DshContext, config: RuneConfig): void {
   const restoreQuiet = (() => {
     const names = readConfig(config).quietLogs
     try {
-      return quietLoggers(ctx as unknown as { get: <T>(name: string) => T | undefined }, names)
+      // 直接用内置 logger 服务：ctx.get('logger') 在未声明时可能拿不到或抛错，
+      // 而 ctx.logger 是内置属性，任何 fiber 都能访问。
+      return quietLoggers((ctx as unknown as { logger?: { exporters?: Map<number, { export: (m: { name?: string; type?: string }) => void }> } }).logger, names)
     } catch (error) {
       ctx.logger.warn(`[rune] quiet logs failed: ${String(error)}`)
       return () => {}
