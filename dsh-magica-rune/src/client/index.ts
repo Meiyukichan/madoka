@@ -16,7 +16,6 @@ import { AbilityController } from './controller.ts'
 import { setupNavIcon } from './nav-icon.ts'
 import { installStyles } from './styles.ts'
 import { AbilitySection } from './AbilitySection.tsx'
-import { NudgeRow } from './NudgeRow.tsx'
 import { NudgeSettingController } from './nudge-setting.ts'
 import { ABILITY_NS } from '../namespace.ts'
 
@@ -70,17 +69,5 @@ export function apply(ctx: DshContextLike): void {
     }),
   }, AbilitySection))
 
-  // 通用设置里的一行：提醒阈值（数字 + 增减）
-  ctx.slots.inject('settings.general.item', () => ctx.slots.register({
-    name: 'settings.general.item',
-    id: 'rune-nudge',
-    order: 16,
-    label: () => t('nudge.title'),
-    locale: NS,
-    inject: () => ({
-      hooks: { everyToolCalls: nudge.store },
-      setEveryToolCalls: (value: number) => nudge.setEveryToolCalls(value),
-    }),
-  }, NudgeRow))
 }
 

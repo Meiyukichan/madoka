@@ -33,6 +33,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 declare module '@deepseek-ai/dsh-client-ui-primitives' {
   export type IconComponent = (props: any) => any
   export const Button: (props: any) => any
+  export const Switch: (props: any) => any
   export const Input: (props: any) => any
   export const Menu: (props: any) => any
   export const Modal: (props: any) => any

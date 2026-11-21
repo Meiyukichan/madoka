@@ -57,9 +57,9 @@ describe('骨架与标题', () => {
 })
 
 describe('Tab 条', () => {
-  it('只有两个 tab：工具 / 技能', async () => {
+  it('三个 tab：工具 / 技能 / 设置', async () => {
     const texts = await page.locator('.rune-tab').allTextContents()
-    assert.deepEqual(texts.map(text => text.trim()), ['工具', '技能'])
+    assert.deepEqual(texts.map(text => text.trim()), ['工具', '技能', '设置'])
   })
 
   it('gap 22px、13px/20px、padding 7px 1px 9px', async () => {

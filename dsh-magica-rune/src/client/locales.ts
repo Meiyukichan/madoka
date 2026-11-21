@@ -21,7 +21,7 @@ export const NS = 'settings.ability'
 /** 全部文案键（目录 / 分组 / 交互 / 占位）。 */
 export type AbilityLocaleKey =
   | 'nav' | 'desc' | 'close'
-  | 'tab.tools' | 'tab.skills'
+  | 'tab.tools' | 'tab.skills' | 'tab.settings'
   | 'scope.global' | 'scope.workspace' | 'scope.placeholder'
   | 'search.tools' | 'search.skills'
   | 'empty.tools' | 'empty.skills'
@@ -31,6 +31,13 @@ export type AbilityLocaleKey =
   | 'disable.batchTitle' | 'disable.batchDesc'
   | 'loading' | 'error'
   | 'nudge.title' | 'nudge.description' | 'nudge.increase' | 'nudge.decrease' | 'nudge.error' | 'nudge.unit'
+  | 'panel.section' | 'panel.sectionDesc' | 'panel.saveFailed'
+  | 'panel.plugins' | 'panel.pluginsHint'
+  | 'panel.more' | 'panel.moreHint'
+  | 'panel.schedule' | 'panel.scheduleHint'
+  | 'panel.accountPage' | 'panel.accountPageHint'
+  | 'panel.accountRpc' | 'panel.accountRpcHint'
+  | 'panel.accountHost' | 'panel.accountHostHint'
   | 'cat.file' | 'cat.shell' | 'cat.image' | 'cat.agent' | 'cat.job' | 'cat.goal'
   | 'cat.ralph' | 'cat.cordis' | 'cat.mcp' | 'cat.misc' | 'cat.builtin' | 'cat.plugin-other'
   | 'cat.web' | 'cat.workflow' | 'cat.plugin'
@@ -64,6 +71,22 @@ export const zh: Record<AbilityLocaleKey, string> = {
   'nudge.decrease': '减小阈值',
   'nudge.error': '保存失败',
   'nudge.unit': '次',
+  'tab.settings': '设置',
+  'panel.section': '官方界面插件',
+  'panel.sectionDesc': '开关会写进 profile 的 cordis.patch.yml，重启后生效',
+  'panel.saveFailed': '保存失败',
+  'panel.plugins': '插件页',
+  'panel.pluginsHint': '侧栏「插件」行与插件安装页',
+  'panel.more': '更多菜单',
+  'panel.moreHint': '侧栏 / 会话 / 右栏的「更多」；依赖插件页，必须一起停',
+  'panel.schedule': '自动化任务',
+  'panel.scheduleHint': '侧栏「自动化任务」行与任务页',
+  'panel.accountPage': '账号页',
+  'panel.accountPageHint': '设置「账号」；每轮拉 profile/balance 的消费方',
+  'panel.accountRpc': '账号 RPC',
+  'panel.accountRpcHint': '账号页的 RPC 后端',
+  'panel.accountHost': '账号 Host',
+  'panel.accountHostHint': '真正发 HTTP 的一层；停它前先把默认模型切到 deepseek-official',
   error: '加载失败',
   'cat.file': '文件操作',
   'cat.shell': 'Shell',
@@ -111,6 +134,22 @@ export const en: Record<AbilityLocaleKey, string> = {
   'nudge.decrease': 'Decrease threshold',
   'nudge.error': 'Could not save',
   'nudge.unit': 'calls',
+  'tab.settings': 'Settings',
+  'panel.section': 'Official UI plugins',
+  'panel.sectionDesc': 'Toggles are written to the profile cordis.patch.yml and apply after a restart',
+  'panel.saveFailed': 'Could not save',
+  'panel.plugins': 'Plugin page',
+  'panel.pluginsHint': 'Sidebar Plugins row and the install page',
+  'panel.more': 'More menu',
+  'panel.moreHint': 'Sidebar / session / right rail "More"; needs the plugin page, disable both together',
+  'panel.schedule': 'Schedules',
+  'panel.scheduleHint': 'Sidebar Schedules row and its page',
+  'panel.accountPage': 'Account page',
+  'panel.accountPageHint': 'Settings Account; the one that polls profile/balance',
+  'panel.accountRpc': 'Account RPC',
+  'panel.accountRpcHint': 'RPC backend of the account page',
+  'panel.accountHost': 'Account host',
+  'panel.accountHostHint': 'The layer that actually makes HTTP calls; switch the default model to deepseek-official first',
   error: 'Load failed',
   'cat.file': 'Files',
   'cat.shell': 'Shell',

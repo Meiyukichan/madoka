@@ -12,10 +12,13 @@ import { defineStore } from '@deepseek-ai/dsh-client-store'
 import type { AbilityKind, ScopeKind } from '../shared/ability.ts'
 
 /** 只有两个 tab。 */
-export const TABS: readonly AbilityKind[] = ['tools', 'skills']
+/** tab 键：两种能力 + 一个设置视图。 */
+export type AbilityTab = AbilityKind | 'settings'
+
+export const TABS: readonly AbilityTab[] = ['tools', 'skills', 'settings']
 
 export interface AbilityViewState {
-  tab: AbilityKind
+  tab: AbilityTab
   /** 全局 zone 默认展开。 */
   globalOpen: boolean
   /** 工作区 zone 默认折叠。 */
@@ -36,7 +39,7 @@ ames：分组批量（整组里含 DSH 内置工具时，同样先确认）
 }
 
 type AbilityViewActions = {
-  selectTab(d: AbilityViewState, tab: AbilityKind): void
+  selectTab(d: AbilityViewState, tab: AbilityTab): void
   toggleZone(d: AbilityViewState, zone: 'global' | 'workspace'): void
   setSearch(d: AbilityViewState, tab: AbilityKind, text: string): void
   selectWorkspace(d: AbilityViewState, id: string): void

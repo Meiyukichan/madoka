@@ -76,6 +76,7 @@ describe('目录接口契约', () => {
 
 describe('技能 tab', () => {
   it('能列出可管理技能，且不含受保护项', async () => {
+    // 第三个 tab 是「设置」，技能仍是第 2 个
     await page.locator('.rune-tab').nth(1).click()
     await page.waitForSelector('.rune-pill')
     const names = await pillNames(page, 0)

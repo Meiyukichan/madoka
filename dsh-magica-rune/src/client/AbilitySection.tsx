@@ -12,12 +12,13 @@
 
 import { useEffect, useRef } from 'react'
 import { cls, installStyles } from './styles.ts'
-import { TABS, type AbilityViewState } from './store.ts'
+import { TABS, type AbilityTab, type AbilityViewState } from './store.ts'
 import type { AbilityDataState } from './controller.ts'
 import { isProtected } from './controller.ts'
 import { DSH_BUILTIN_CATS } from './categorize.ts'
 import { effectiveState, type AbilityKind, type ScopeKind } from '../shared/ability.ts'
 import { KindTab, skillRows, toolRows } from './tabs.tsx'
+import { SettingsTab } from './SettingsTab.tsx'
 import { ConfirmDisable, WorkspaceDropdown } from './parts.tsx'
 import type { RowState } from './parts.tsx'
 
@@ -29,7 +30,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string
  * 会变成 `fn | undefined`，每个调用点都要 `!`，得不偿失。
  */
 export interface AbilitySectionActions {
-  selectTab(tab: AbilityKind): void
+  selectTab(tab: AbilityTab): void
   toggleZone(zone: ScopeKind): void
   setSearch(kind: AbilityKind, text: string): void
   selectWorkspace(id: string): void
@@ -153,7 +154,9 @@ export function AbilitySection(props: AbilitySectionProps) {
     ? <div className={cls.loading}>{translate('loading')}</div>
     : data.status === 'error'
       ? <div className={cls.error}>{`${translate('error')}${data.error === null ? '' : `：${data.error}`}`}</div>
-      : renderTab(view.tab)
+      : view.tab === 'settings'
+        ? <SettingsTab t={translate} />
+        : renderTab(view.tab as AbilityKind)
 
   const pending = view.pending
 
