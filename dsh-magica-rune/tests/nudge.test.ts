@@ -130,6 +130,32 @@ describe('isSubagentSession', () => {
 })
 
 describe('nudgeText / buildContextMessage', () => {
+  it('语气递增：第一次轻、第二次中、第三次起重', () => {
+    const first = nudgeText(10, 1)
+    const second = nudgeText(20, 2)
+    const third = nudgeText(30, 3)
+    assert.match(first, /1-3 sentences/)
+    assert.match(second, /previous nudge was ignored/)
+    assert.match(third, /Reminder #3/)
+    // 三次都点明「连续 N 次没有文本」
+    for (const text of [first, second, third]) assert.match(text, /consecutive tool calls|tool calls in a row/)
+  })
+
+  it('有文本输出后语气也归零（level 重置）', () => {
+    const { counters } = run([
+      ...Array.from({ length: 30 }, (_, i) => tool(i + 1)),
+      { type: 'assistant/message', seq: 31, data: { message: { content: [{ type: 'text', text: '汇报' }] } } },
+    ])
+    assert.equal(counters.level, 0)
+    const after = run([
+      ...Array.from({ length: 30 }, (_, i) => tool(i + 1)),
+      { type: 'assistant/message', seq: 31, data: { message: { content: [{ type: 'text', text: '汇报' }] } } },
+      ...Array.from({ length: 7 }, (_, i) => tool(32 + i)),
+    ])
+    // 归零后从 1 开始数：第 7 次要达到 7 才触发（阈值 7），语气回到 level 1
+    assert.match(String(after.reminders[after.reminders.length - 1] ?? ''), /1-3 sentences/)
+  })
+
   it('文案是简短英文，且带次数', () => {
     const value = nudgeText(7)
     assert.match(value, /7 consecutive tool calls/)

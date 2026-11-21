@@ -32,9 +32,11 @@ export interface NudgeCounters {
   nudgedAt: number
   /** 已处理的最大事件序号（重放/恢复时会重复投递事件）。 */
   lastSeq: number
+  /** 本轮累积里**第几次**提醒（决定语气强度）；有文本输出时归零。 */
+  level: number
 }
 
-export const EMPTY_COUNTERS: NudgeCounters = { toolCalls: 0, nudgedAt: 0, lastSeq: 0 }
+export const EMPTY_COUNTERS: NudgeCounters = { toolCalls: 0, nudgedAt: 0, lastSeq: 0, level: 0 }
 
 /** 会话事件的最小形状（只取用到的字段，避免依赖宿主类型）。 */
 export interface NudgeEvent {
@@ -52,11 +54,30 @@ export interface NudgeSession {
   }
 }
 
-/** 提醒文案：短、英文、只说要做什么。 */
-export function nudgeText(toolCalls: number): string {
+/**
+ * 提醒文案：短、英文、只说要做什么。
+ *
+ * **语气随次数递增**：提醒了也不一定回答，所以不清零，只是越攒越多、越说越重；
+ * 只有真的输出文本才会把计数与语气一起归零。
+ * @param toolCalls - 本轮已累积的工具调用数。
+ * @param level - 本轮第几次提醒（1 起）。
+ */
+export function nudgeText(toolCalls: number, level = 1): string {
+  if (level <= 1) {
+    return [
+      `You have made ${toolCalls} consecutive tool calls without any text to the user.`,
+      'They only see your messages, not tool output — send a brief progress note now, 1-3 sentences is enough.',
+    ].join('\n')
+  }
+  if (level === 2) {
+    return [
+      `You have made ${toolCalls} consecutive tool calls without any text to the user, and the previous nudge was ignored.`,
+      'Stop and write 1-3 sentences now — the user cannot tell what you are doing or whether you are stuck.',
+    ].join('\n')
+  }
   return [
-    `You have made ${toolCalls} consecutive tool calls without any text to the user.`,
-    'They only see your messages, not tool output — send a brief progress note now, 1-3 sentences is enough.',
+    `Reminder #${level}: ${toolCalls} tool calls in a row and still no text to the user.`,
+    'Write 1-3 sentences to the user right now, before any further tool call. This silence is a problem for the user.',
   ].join('\n')
 }
 
@@ -104,9 +125,10 @@ export function advance(
   const next: NudgeCounters = { ...counters, lastSeq: seq ?? counters.lastSeq }
 
   if (event.type === 'assistant/message' && hasTextOutput(event.data)) {
-    // 有说话 → 清零，下次重新数
+    // 真的说了话 → 计数与语气**一起**归零
     next.toolCalls = 0
     next.nudgedAt = 0
+    next.level = 0
     return { counters: next }
   }
 
@@ -119,7 +141,8 @@ export function advance(
   if (next.toolCalls - next.nudgedAt < remindEvery) return { counters: next }
 
   next.nudgedAt = next.toolCalls
-  return { counters: next, remind: nudgeText(next.toolCalls) }
+  next.level = counters.level + 1
+  return { counters: next, remind: nudgeText(next.toolCalls, next.level) }
 }
 
 /** 具名上下文消息（与 spellbook 的 `buildPluginMessage` 同形，dsh 的官方扩展点）。 */
