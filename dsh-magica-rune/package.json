@@ -60,7 +60,8 @@
     "e2e": "node e2e/run.mjs",
     "prepare": "node scripts/build.mjs",
     "prepublishOnly": "node scripts/build.mjs",
-    "clean": "node scripts/clean.mjs"
+    "clean": "node scripts/clean.mjs",
+    "patch:dsh-log": "node scripts/patch-dsh-log.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.4",
