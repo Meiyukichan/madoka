@@ -13,12 +13,14 @@ import { join } from 'node:path'
 
 /** 可以被本页开关的 6 个官方插件（顺序即 UI 顺序）。 */
 export const PANEL_PLUGINS = [
-  { id: 'ui-plugin-manager', label: '插件页', hint: '侧栏「插件」行 + 插件安装页' },
-  { id: 'entry-customization', label: '更多菜单', hint: '侧栏 / 会话 / 右栏的「更多」；依赖插件页，必须一起停' },
-  { id: 'ui-schedule', label: '自动化任务', hint: '侧栏「自动化任务」行与任务页' },
-  { id: 'ui-settings-account', label: '账号页', hint: '设置「账号」；每轮拉 profile/balance 的消费方' },
-  { id: 'account-controller', label: '账号 RPC', hint: '账号页的 RPC 后端，页面停了它就是空转' },
-  { id: 'deepseek-account', label: '账号 Host', hint: '真正发 HTTP 的一层；⚠️ 停止前必须把默认模型切到 deepseek-official' },
+  // defaultDisabled = 本插件 bundle patch 里给的默认值；profile 没有覆盖行时以它为准，
+  // 否则 UI 会把「默认已关」显示成「开着」，与实际生效状态相反。
+  { id: 'ui-plugin-manager', label: '插件页', hint: '侧栏「插件」行 + 插件安装页', defaultDisabled: true },
+  { id: 'entry-customization', label: '更多菜单', hint: '侧栏 / 会话 / 右栏的「更多」；依赖插件页，必须一起停', defaultDisabled: true },
+  { id: 'ui-schedule', label: '自动化任务', hint: '侧栏「自动化任务」行与任务页', defaultDisabled: true },
+  { id: 'ui-settings-account', label: '账号页', hint: '设置「账号」；每轮拉 profile/balance 的消费方', defaultDisabled: true },
+  { id: 'account-controller', label: '账号 RPC', hint: '账号页的 RPC 后端，页面停了它就是空转', defaultDisabled: true },
+  { id: 'deepseek-account', label: '账号 Host', hint: '真正发 HTTP 的一层；⚠️ 停止前必须把默认模型切到 deepseek-official', defaultDisabled: false },
 ] as const
 
 /** 解析 profile 的 patch 文件路径（服务优先，其次命令行，最后退回 web）。 */
@@ -62,6 +64,13 @@ function findRow(lines: string[], id: string): RowState | undefined {
     return { disabled, start: i, end }
   }
   return undefined
+}
+
+/** 某个 id 的生效状态：profile 有覆盖用覆盖，否则用 bundle 默认。 */
+export function effectivePanelDisabled(id: string, overrides: Record<string, boolean | undefined>): boolean | undefined {
+  const override = overrides[id]
+  if (override !== undefined) return override
+  return PANEL_PLUGINS.find(plugin => plugin.id === id)?.defaultDisabled
 }
 
 /** 读当前**用户覆盖**状态：返回每个 id 是否被 profile 显式关了（没有行 = 未覆盖）。 */

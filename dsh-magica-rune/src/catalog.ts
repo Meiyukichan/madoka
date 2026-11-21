@@ -22,7 +22,7 @@ import type {
 import type { GuardState } from './state.ts'
 import { CATALOG_PATH, ABILITY_NS } from './namespace.ts'
 import { sendJson, sendMethodNotAllowed } from './router.ts'
-import { PANEL_PLUGINS, readPanelOverrides, resolvePatchPath, writePanelOverride } from './panels.ts'
+import { PANEL_PLUGINS, effectivePanelDisabled, readPanelOverrides, resolvePatchPath, writePanelOverride } from './panels.ts'
 
 /** 官方界面插件开关（读写 profile 的 cordis.patch.yml）。 */
 const PANEL_PATH = '/rune-ability/panels'
@@ -144,7 +144,7 @@ export function installCatalog(ctx: DshContext, state: GuardState): () => void {
               id: plugin.id,
               label: plugin.label,
               hint: plugin.hint,
-              disabled: overrides[plugin.id],
+              disabled: effectivePanelDisabled(plugin.id, overrides),
             })),
           })
           return
@@ -160,7 +160,7 @@ export function installCatalog(ctx: DshContext, state: GuardState): () => void {
         if (typeof parsed.enabled !== 'boolean') throw new Error('enabled must be boolean')
         writePanelOverride(patchPath, id, parsed.enabled)
         const overrides = readPanelOverrides(patchPath)
-        sendJson(res, 200, { ok: true, id, disabled: overrides[id] })
+        sendJson(res, 200, { ok: true, id, disabled: effectivePanelDisabled(id, overrides) })
       } catch (error) {
         sendJson(res, 400, { ok: false, error: String(error) })
       }
