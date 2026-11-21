@@ -23,6 +23,20 @@ export const PANEL_PLUGINS = [
   { id: 'deepseek-account', label: '账号 Host', hint: '真正发 HTTP 的一层；⚠️ 停止前必须把默认模型切到 deepseek-official', defaultDisabled: false },
 ] as const
 
+/**
+ * 依赖关系：`entry-customization` 的 inject 里有 `pluginNavigation`，它由
+ * `ui-plugin-manager` 提供。只停后者会让前者一直 pending，Web 启动审计把 pending
+ * 当失败（`1 entry did not activate / waiting for service: pluginNavigation`）。
+ */
+const PANEL_REQUIRES: Record<string, string> = {
+  'entry-customization': 'ui-plugin-manager',
+}
+
+/** 某个 id 被禁用时，必须一起禁用的「依赖它的」条目。 */
+function dependentsOf(id: string): string[] {
+  return Object.entries(PANEL_REQUIRES).filter(([, needs]) => needs === id).map(([dependent]) => dependent)
+}
+
 /** 解析 profile 的 patch 文件路径（服务优先，其次命令行，最后退回 web）。 */
 export function resolvePatchPath(ctx: { get?: (name: string) => unknown }): string | undefined {
   try {
@@ -73,6 +87,26 @@ export function effectivePanelDisabled(id: string, overrides: Record<string, boo
   return PANEL_PLUGINS.find(plugin => plugin.id === id)?.defaultDisabled
 }
 
+/**
+ * 自愈：若某个提供者被显式禁用、而依赖它的条目没有被显式禁用，就补一条禁用，
+ * 否则下次启动会 pending 失败。返回修正过的 id 列表。
+ */
+export function healPanelDependencies(patchPath: string): string[] {
+  let text = ''
+  try { text = readFileSync(patchPath, 'utf8') } catch { return [] }
+  const lines = text.split(/\r?\n/)
+  const healed: string[] = []
+  for (const [dependent, needs] of Object.entries(PANEL_REQUIRES)) {
+    const providerRow = findRow(lines, needs)
+    const dependentRow = findRow(lines, dependent)
+    if (providerRow?.disabled !== true) continue
+    if (dependentRow?.disabled === true) continue
+    writePanelOverride(patchPath, dependent, false)
+    healed.push(dependent)
+  }
+  return healed
+}
+
 /** 读当前**用户覆盖**状态：返回每个 id 是否被 profile 显式关了（没有行 = 未覆盖）。 */
 export function readPanelOverrides(patchPath: string): Record<string, boolean | undefined> {
   let text = ''
@@ -88,6 +122,20 @@ export function readPanelOverrides(patchPath: string): Record<string, boolean | 
  * 只改这一条行块，其余字节保持原样；用 tmp + rename 原子替换。
  */
 export function writePanelOverride(patchPath: string, id: string, enabled: boolean): void {
+  // 依赖成对处理，避免出现「提供者停了、依赖者还在」的 pending 死局
+  const also: Array<{ id: string; enabled: boolean }> = []
+  if (!enabled) {
+    for (const dependent of dependentsOf(id)) also.push({ id: dependent, enabled: false })
+  } else {
+    const needs = PANEL_REQUIRES[id]
+    if (needs !== undefined) also.push({ id: needs, enabled: true })
+  }
+  writePanelRow(patchPath, id, enabled)
+  for (const extra of also) writePanelRow(patchPath, extra.id, extra.enabled)
+}
+
+/** 写单条 `{ id, disabled }`（不改其他行）。 */
+function writePanelRow(patchPath: string, id: string, enabled: boolean): void {
   let text = ''
   try { text = readFileSync(patchPath, 'utf8') } catch { text = '' }
   if (text.trim() === '') text = '[]\n'

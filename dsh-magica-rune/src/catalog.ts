@@ -22,7 +22,7 @@ import type {
 import type { GuardState } from './state.ts'
 import { CATALOG_PATH, ABILITY_NS } from './namespace.ts'
 import { sendJson, sendMethodNotAllowed } from './router.ts'
-import { PANEL_PLUGINS, effectivePanelDisabled, readPanelOverrides, resolvePatchPath, writePanelOverride } from './panels.ts'
+import { PANEL_PLUGINS, effectivePanelDisabled, healPanelDependencies, readPanelOverrides, resolvePatchPath, writePanelOverride } from './panels.ts'
 
 /** 官方界面插件开关（读写 profile 的 cordis.patch.yml）。 */
 const PANEL_PATH = '/rune-ability/panels'
@@ -136,6 +136,8 @@ export function installCatalog(ctx: DshContext, state: GuardState): () => void {
       }
       try {
         if (req.method === 'GET') {
+          // 顺手自愈：provider 被禁用而 dependent 没禁用时补一条，避免下次启动 pending。
+          healPanelDependencies(patchPath)
           const overrides = readPanelOverrides(patchPath)
           sendJson(res, 200, {
             ok: true,
