@@ -21,6 +21,29 @@
 #   1. `id` 就是 settings 的命名空间（`entry.options.id`），改了前端就写不回去；
 #      它必须与 src/namespace.ts 的 ABILITY_NS 完全一致。
 #   2. 只有「裸包名」这一行会挂载 ./client —— 不要改成 pkg/host 之类子路径。
+#
+# ── 默认关掉四个官方 UI 插件（本插件安装后即生效）──────────────
+# 用户要的是「干净的侧栏 + 不刷账号日志」，这些都属于官方 UI 插件自带的行为：
+#   ui-plugin-manager      → 侧栏「插件」行 + 插件安装页
+#   entry-customization    → 侧栏/会话/右栏的「更多」菜单
+#   ui-schedule            → 侧栏「自动化任务」行
+#   ui-settings-account    → 设置里的「账号」页；它是唯一每轮去拉 profile/balance 的
+#                            消费方（Host 的 deepseek-account 只负责执行），禁用后日志消失
+#
+# 两个必须一起停的坑（否则页面报 did not activate）：
+#   entry-customization 的 inject 含 pluginNavigation，而它由 ui-plugin-manager 提供，
+#   只停前者会让它一直 pending，Web 启动审计把 pending 当失败。
+#
+# 想恢复某一项：在 **profile** 的 cordis.patch.yml 写同 id 的 `disabled: false` 覆盖
+# （后应用的层胜出），或删掉这里对应的三行。
+- id: ui-plugin-manager
+  disabled: true
+- id: entry-customization
+  disabled: true
+- id: ui-schedule
+  disabled: true
+- id: ui-settings-account
+  disabled: true
 - insert:
     - id: dsh-magica-rune
       name: '@meiyukichan/dsh-magica-rune'
