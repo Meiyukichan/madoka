@@ -1,6 +1,8 @@
 /** 「设置」tab：官方界面插件开关 + 提醒阈值（都走 host 的内存/补丁通道）。 */
 import { useEffect, useState } from 'react'
-import { Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconChevronDownOutlineRegular, IconChevronUpOutlineRegular, Switch,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 
 interface PanelRow {
   id: string
@@ -124,9 +126,13 @@ export function SettingsTab({ t }: { t: (key: string, params?: Record<string, st
             <span className="rune-stepper-value">{every}</span>
             <span className="rune-stepper-arrows">
               <button type="button" className="rune-stepper-arrow" aria-label={t('nudge.increase')}
-                disabled={every >= 100} onClick={() => { commitEvery(every + 1) }}>＋</button>
+                disabled={every >= 100} onClick={() => { commitEvery(every + 1) }}>
+                <IconChevronUpOutlineRegular size={9} />
+              </button>
               <button type="button" className="rune-stepper-arrow" aria-label={t('nudge.decrease')}
-                disabled={every <= 1} onClick={() => { commitEvery(every - 1) }}>－</button>
+                disabled={every <= 1} onClick={() => { commitEvery(every - 1) }}>
+                <IconChevronDownOutlineRegular size={9} />
+              </button>
             </span>
           </div>
           <span className="rune-stepper-unit">{t('nudge.unit')}</span>
