@@ -1,6 +1,6 @@
 {
   "name": "@meiyukichan/dsh-magica-rune",
-  "version": "0.2.0-alpha.5",
+  "version": "0.2.0-alpha.7",
   "type": "module",
   "license": "MIT",
   "publishConfig": {
@@ -61,7 +61,8 @@
     "prepare": "node scripts/build.mjs",
     "prepublishOnly": "node scripts/build.mjs",
     "clean": "node scripts/clean.mjs",
-    "patch:dsh-log": "node scripts/patch-dsh-log.mjs"
+    "patch:dsh-log": "node scripts/patch-dsh-log.mjs",
+    "uninstall:clean": "node scripts/uninstall-clean.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.4",

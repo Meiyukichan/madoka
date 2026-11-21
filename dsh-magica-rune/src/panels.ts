@@ -134,29 +134,71 @@ export function writePanelOverride(patchPath: string, id: string, enabled: boole
   for (const extra of also) writePanelRow(patchPath, extra.id, extra.enabled)
 }
 
-/** 写单条 `{ id, disabled }`（不改其他行）。 */
+/** 该 id 在 bundle patch 里的默认状态（未覆盖时生效的值）。 */
+function defaultDisabledOf(id: string): boolean | undefined {
+  return PANEL_PLUGINS.find(plugin => plugin.id === id)?.defaultDisabled
+}
+
+/**
+ * 写单条 `{ id, disabled }`。
+ *
+ * **与 bundle 默认相同时不写、反而删除已有行** —— 这样 profile 里只留「用户改过」的覆盖，
+ * 卸载本插件后不会残留一堆 `disabled: true` 把官方插件永久关掉。
+ */
 function writePanelRow(patchPath: string, id: string, enabled: boolean): void {
+  const desired = !enabled
+  const fallback = defaultDisabledOf(id)
+  if (fallback !== undefined && desired === fallback) {
+    removePanelRow(patchPath, id)
+    return
+  }
   let text = ''
   try { text = readFileSync(patchPath, 'utf8') } catch { text = '' }
   if (text.trim() === '') text = '[]\n'
   const lines = text.split(/\r?\n/)
   if (lines[lines.length - 1] === '') lines.pop()
-  const disabled = !enabled
   const row = findRow(lines, id)
 
   if (row === undefined) {
-    lines.push(`- id: ${id}`, `  disabled: ${String(disabled)}`)
+    lines.push(`- id: ${id}`, `  disabled: ${String(desired)}`)
   } else {
     let replaced = false
     for (let j = row.start + 1; j < row.end; j++) {
       if (/^\s*disabled:\s*(true|false)\s*$/.test(lines[j] ?? '')) {
-        lines[j] = `  disabled: ${String(disabled)}`
+        lines[j] = `  disabled: ${String(desired)}`
         replaced = true
       }
     }
-    if (!replaced) lines.splice(row.start + 1, 0, `  disabled: ${String(disabled)}`)
+    if (!replaced) lines.splice(row.start + 1, 0, `  disabled: ${String(desired)}`)
   }
 
+  writeAtomic(patchPath, lines)
+}
+
+/** 删除某个 id 的整条 patch 行块（没有就什么都不做）。 */
+export function removePanelRow(patchPath: string, id: string): boolean {
+  let text = ''
+  try { text = readFileSync(patchPath, 'utf8') } catch { return false }
+  const lines = text.split(/\r?\n/)
+  if (lines[lines.length - 1] === '') lines.pop()
+  const row = findRow(lines, id)
+  if (row === undefined) return false
+  lines.splice(row.start, row.end - row.start)
+  writeAtomic(patchPath, lines)
+  return true
+}
+
+/** 清掉本插件写过的**全部**开关行（卸载后恢复官方默认用）。返回删掉的 id。 */
+export function clearPanelOverrides(patchPath: string): string[] {
+  const removed: string[] = []
+  for (const plugin of PANEL_PLUGINS) {
+    if (removePanelRow(patchPath, plugin.id)) removed.push(plugin.id)
+  }
+  return removed
+}
+
+/** 原子写回（tmp + rename）。 */
+function writeAtomic(patchPath: string, lines: string[]): void {
   const next = `${lines.join('\n')}\n`
   const tmp = `${patchPath}.rune.tmp`
   writeFileSync(tmp, next, 'utf8')
