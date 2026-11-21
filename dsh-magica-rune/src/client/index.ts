@@ -57,7 +57,10 @@ export function apply(ctx: DshContextLike): void {
     // root scope 用工厂形式：每个 entry 一份实例
     store: createAbilityViewStore,
     inject: () => ({
-      hooks: { ability: controller.store },
+      // nudgeEvery 用**同一个** controller store（apply 时创建一次），
+      // 这样切 tab 重挂、甚至整页重投影都不会把用户刚改的阈值丢掉。
+      hooks: { ability: controller.store, nudgeEvery: nudge.store },
+      setEveryToolCalls: (value: number) => nudge.setEveryToolCalls(value),
       load: (silent?: boolean) => controller.load(silent),
       toggle: (
         kind: 'tools' | 'skills', name: string, scope: 'global' | 'workspace', workspaceId?: string,

@@ -40,18 +40,22 @@ async function readState(): Promise<PanelsPayload | undefined> {
  * 设置视图：上半是六个官方界面插件的开关（写 profile patch），下半是提醒阈值（改内存 + 延后落盘）。
  * @param props - 只用到 `t`。
  */
-export function SettingsTab({ t }: { t: (key: string, params?: Record<string, string>) => string }) {
+export function SettingsTab({ t, useEveryToolCalls, setEveryToolCalls }: {
+  t: (key: string, params?: Record<string, string>) => string
+  /** 与 nudge controller 共享的 store：跨 tab 重挂保留用户刚改的值。 */
+  useEveryToolCalls: <R>(selector: (state: { everyToolCalls: number }) => R) => R
+  setEveryToolCalls: (value: number) => void
+}) {
   const [panels, setPanels] = useState<PanelRow[] | undefined>(undefined)
-  const [every, setEvery] = useState<number>(15)
   const [busy, setBusy] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  const every = useEveryToolCalls(state => state.everyToolCalls)
 
   useEffect(() => {
     let alive = true
     void readState().then(payload => {
       if (!alive || payload === undefined) return
       setPanels(payload.plugins ?? [])
-      if (typeof payload.nudgeEveryCalls === 'number') setEvery(payload.nudgeEveryCalls)
     })
     return () => { alive = false }
   }, [])
@@ -75,12 +79,7 @@ export function SettingsTab({ t }: { t: (key: string, params?: Record<string, st
   const commitEvery = (next: number): void => {
     const clamped = Math.min(100, Math.max(1, Math.round(next)))
     if (clamped === every) return
-    setEvery(clamped)
-    void fetch('/rune-ability/nudge', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ everyToolCalls: clamped }),
-    }).catch(() => { /* 落盘那条路兜底 */ })
+    setEveryToolCalls(clamped)
   }
 
   return (

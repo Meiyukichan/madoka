@@ -47,6 +47,9 @@ export interface AbilitySectionProps {
   toggleBatch: (
     kind: AbilityKind, names: readonly string[], scope: ScopeKind, workspaceId?: string,
   ) => Promise<void>
+  /** 提醒阈值（与 nudge controller 共享的 store，跨重挂保留）。 */
+  useNudgeEvery: <R>(selector: (state: { everyToolCalls: number }) => R) => R
+  setEveryToolCalls: (value: number) => void
 }
 
 /** 样式在模块工厂执行期注入一次（不是组件 render 里）。 */
@@ -155,7 +158,13 @@ export function AbilitySection(props: AbilitySectionProps) {
     : data.status === 'error'
       ? <div className={cls.error}>{`${translate('error')}${data.error === null ? '' : `：${data.error}`}`}</div>
       : view.tab === 'settings'
-        ? <SettingsTab t={translate} />
+        ? (
+          <SettingsTab
+            t={translate}
+            useEveryToolCalls={props.useNudgeEvery}
+            setEveryToolCalls={props.setEveryToolCalls}
+          />
+        )
         : renderTab(view.tab as AbilityKind)
 
   const pending = view.pending
