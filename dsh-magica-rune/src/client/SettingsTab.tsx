@@ -16,7 +16,7 @@ interface PanelsPayload {
   nudgeEveryCalls?: number
 }
 
-/** 六个开关的展示文案（host 只给 id/状态，文案走 i18n）。 */
+/** 各开关的展示文案（host 只给 id/状态，文案走 i18n）。 */
 const PANEL_KEYS: ReadonlyArray<{ id: string; title: string; hint: string }> = [
   { id: 'ui-plugin-manager', title: 'panel.plugins', hint: 'panel.pluginsHint' },
   { id: 'entry-customization', title: 'panel.more', hint: 'panel.moreHint' },
@@ -24,6 +24,14 @@ const PANEL_KEYS: ReadonlyArray<{ id: string; title: string; hint: string }> = [
   { id: 'ui-settings-account', title: 'panel.accountPage', hint: 'panel.accountPageHint' },
   { id: 'account-controller', title: 'panel.accountRpc', hint: 'panel.accountRpcHint' },
   { id: 'deepseek-account', title: 'panel.accountHost', hint: 'panel.accountHostHint' },
+  // 遥测 / 反馈 / 会话日志上报
+  { id: 'desktop-product-telemetry', title: 'panel.telemetryHost', hint: 'panel.telemetryHostHint' },
+  { id: 'product-analytics', title: 'panel.analyticsClient', hint: 'panel.analyticsClientHint' },
+  { id: 'session-log-deepseek', title: 'panel.sessionLogUpload', hint: 'panel.sessionLogUploadHint' },
+  { id: 'ui-settings-session-log', title: 'panel.sessionLogUi', hint: 'panel.sessionLogUiHint' },
+  { id: 'message-feedback', title: 'panel.feedbackHost', hint: 'panel.feedbackHostHint' },
+  { id: 'ui-message-feedback', title: 'panel.feedbackUi', hint: 'panel.feedbackUiHint' },
+  { id: 'session-log-download', title: 'panel.sessionLogExport', hint: 'panel.sessionLogExportHint' },
 ]
 
 async function readState(): Promise<PanelsPayload | undefined> {

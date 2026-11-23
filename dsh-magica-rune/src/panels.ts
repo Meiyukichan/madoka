@@ -11,7 +11,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-/** 可以被本页开关的 6 个官方插件（顺序即 UI 顺序）。 */
+/** 可以被本页开关的官方插件（顺序即 UI 顺序）。 */
 export const PANEL_PLUGINS = [
   // defaultDisabled = 本插件 bundle patch 里给的默认值；profile 没有覆盖行时以它为准，
   // 否则 UI 会把「默认已关」显示成「开着」，与实际生效状态相反。
@@ -21,6 +21,50 @@ export const PANEL_PLUGINS = [
   { id: 'ui-settings-account', label: '账号页', hint: '设置「账号」；每轮拉 profile/balance 的消费方', defaultDisabled: true },
   { id: 'account-controller', label: '账号 RPC', hint: '账号页的 RPC 后端，页面停了它就是空转', defaultDisabled: true },
   { id: 'deepseek-account', label: '账号 Host', hint: '真正发 HTTP 的一层；⚠️ 停止前必须把默认模型切到 deepseek-official', defaultDisabled: false },
+
+  // ── 遥测 / 反馈 / 会话日志上报（隐私相关，默认全关）──────────────
+  {
+    id: 'desktop-product-telemetry',
+    label: '产品遥测（Host）',
+    hint: 'OTel 上报宿主侧产品指标；官方默认只在 desktop profile 启用',
+    defaultDisabled: true,
+  },
+  {
+    id: 'product-analytics',
+    label: '产品分析（客户端）',
+    hint: '上报客户端行为事件；官方默认只在 desktop profile 启用',
+    defaultDisabled: true,
+  },
+  {
+    id: 'session-log-deepseek',
+    label: 'Session Log 上报',
+    hint: '把会话日志上传到 DeepSeek（「在使用官方模型 API 时上传」那个开关真正生效的一层）',
+    defaultDisabled: true,
+  },
+  {
+    id: 'ui-settings-session-log',
+    label: 'Session Log 开关 UI',
+    hint: '设置里「在使用官方模型 API 时上传 Session Log」那一行',
+    defaultDisabled: true,
+  },
+  {
+    id: 'message-feedback',
+    label: '消息反馈（Host）',
+    hint: '点赞/点踩与 /feedback 的存储与上报',
+    defaultDisabled: true,
+  },
+  {
+    id: 'ui-message-feedback',
+    label: '消息反馈（UI）',
+    hint: '消息操作条上的点赞/点踩与反馈弹窗',
+    defaultDisabled: true,
+  },
+  {
+    id: 'session-log-download',
+    label: 'Session Log 导出',
+    hint: '本地导出会话日志（纯本地、不上传，默认保留）',
+    defaultDisabled: false,
+  },
 ] as const
 
 /**
@@ -30,6 +74,9 @@ export const PANEL_PLUGINS = [
  */
 const PANEL_REQUIRES: Record<string, string> = {
   'entry-customization': 'ui-plugin-manager',
+  // 这两个 UI 行都要消费 Host 侧服务；只停 Host 会让它们 pending（启动审计算失败）。
+  'ui-settings-session-log': 'session-log-deepseek',
+  'ui-message-feedback': 'message-feedback',
 }
 
 /** 某个 id 被禁用时，必须一起禁用的「依赖它的」条目。 */

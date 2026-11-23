@@ -38,6 +38,13 @@ export type AbilityLocaleKey =
   | 'panel.accountPage' | 'panel.accountPageHint'
   | 'panel.accountRpc' | 'panel.accountRpcHint'
   | 'panel.accountHost' | 'panel.accountHostHint'
+  | 'panel.telemetryHost' | 'panel.telemetryHostHint'
+  | 'panel.analyticsClient' | 'panel.analyticsClientHint'
+  | 'panel.sessionLogUpload' | 'panel.sessionLogUploadHint'
+  | 'panel.sessionLogUi' | 'panel.sessionLogUiHint'
+  | 'panel.feedbackHost' | 'panel.feedbackHostHint'
+  | 'panel.feedbackUi' | 'panel.feedbackUiHint'
+  | 'panel.sessionLogExport' | 'panel.sessionLogExportHint'
   | 'cat.file' | 'cat.shell' | 'cat.image' | 'cat.agent' | 'cat.job' | 'cat.goal'
   | 'cat.ralph' | 'cat.cordis' | 'cat.mcp' | 'cat.misc' | 'cat.builtin' | 'cat.plugin-other'
   | 'cat.web' | 'cat.workflow' | 'cat.plugin'
@@ -75,6 +82,20 @@ export const zh: Record<AbilityLocaleKey, string> = {
   'panel.section': '官方界面插件',
   'panel.sectionDesc': '开关会写进 profile 的 cordis.patch.yml，重启后生效',
   'panel.saveFailed': '保存失败',
+  'panel.telemetryHost': '产品遥测（Host）',
+  'panel.telemetryHostHint': 'OTel 上报宿主侧产品指标；官方默认只在 desktop 启用',
+  'panel.analyticsClient': '产品分析（客户端）',
+  'panel.analyticsClientHint': '上报客户端行为事件；官方默认只在 desktop 启用',
+  'panel.sessionLogUpload': 'Session Log 上报',
+  'panel.sessionLogUploadHint': '把会话日志上传到 DeepSeek：那个「在使用官方模型 API 时上传」开关真正生效的一层',
+  'panel.sessionLogUi': 'Session Log 开关 UI',
+  'panel.sessionLogUiHint': '设置里「在使用官方模型 API 时上传 Session Log」那一行',
+  'panel.feedbackHost': '消息反馈（Host）',
+  'panel.feedbackHostHint': '点赞/点踩与 /feedback 的存储与上报',
+  'panel.feedbackUi': '消息反馈（UI）',
+  'panel.feedbackUiHint': '消息操作条上的点赞/点踩与反馈弹窗',
+  'panel.sessionLogExport': 'Session Log 导出',
+  'panel.sessionLogExportHint': '本地导出会话日志（纯本地、不上传，默认保留）',
   'panel.plugins': '插件页',
   'panel.pluginsHint': '侧栏「插件」行与插件安装页',
   'panel.more': '更多菜单',
@@ -150,6 +171,20 @@ export const en: Record<AbilityLocaleKey, string> = {
   'panel.accountRpcHint': 'RPC backend of the account page',
   'panel.accountHost': 'Account host',
   'panel.accountHostHint': 'The layer that actually makes HTTP calls; switch the default model to deepseek-official first',
+  'panel.telemetryHost': 'Product telemetry (host)',
+  'panel.telemetryHostHint': 'OTel telemetry for host-side product metrics; upstream enables it only on the desktop profile',
+  'panel.analyticsClient': 'Product analytics (client)',
+  'panel.analyticsClientHint': 'Client-side behaviour events; upstream enables it only on the desktop profile',
+  'panel.sessionLogUpload': 'Session Log upload',
+  'panel.sessionLogUploadHint': 'Uploads session logs to DeepSeek — the layer behind "upload Session Log when using the official model API"',
+  'panel.sessionLogUi': 'Session Log toggle UI',
+  'panel.sessionLogUiHint': 'The general-settings row "upload Session Log when using the official model API"',
+  'panel.feedbackHost': 'Message feedback (host)',
+  'panel.feedbackHostHint': 'Storage and submission for likes/dislikes and /feedback',
+  'panel.feedbackUi': 'Message feedback (UI)',
+  'panel.feedbackUiHint': 'Like/dislike buttons and the feedback dialog on assistant messages',
+  'panel.sessionLogExport': 'Session Log export',
+  'panel.sessionLogExportHint': 'Local session-log export (offline only, nothing uploaded; kept enabled by default)',
   error: 'Load failed',
   'cat.file': 'Files',
   'cat.shell': 'Shell',

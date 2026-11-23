@@ -65,6 +65,28 @@
 #    `disabled: true`）。
 # - id: deepseek-account
 #   disabled: true
+
+# ── 遥测 / 反馈 / 会话日志上报：默认全关（隐私优先）──────────────
+# 这几条都能在「设置 → 能力管理 → 设置」里单独打开。
+#   desktop-product-telemetry  Host 侧 OTel 产品指标（官方默认只在 desktop 启用）
+#   product-analytics          客户端行为事件（同上）
+#   session-log-deepseek       「在使用官方模型 API 时上传 Session Log」真正生效的一层
+#   ui-settings-session-log    上面那个开关在设置页里的 UI 行
+#   message-feedback           点赞/点踩与 /feedback 的 Host 存储与上报
+#   ui-message-feedback        消息操作条上的点赞/点踩与反馈弹窗
+# 注意：session-log-download（本地导出）**不在这里**，它纯本地、不上传，默认保留。
+- id: desktop-product-telemetry
+  disabled: true
+- id: product-analytics
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: ui-settings-session-log
+  disabled: true
+- id: message-feedback
+  disabled: true
+- id: ui-message-feedback
+  disabled: true
 - insert:
     - id: dsh-magica-rune
       name: '@meiyukichan/dsh-magica-rune'
