@@ -5,28 +5,28 @@
  * - `register` 按 `code` upsert（同批重复由服务端去重，保留最后一条）。
  */
 
-import type { LatticeTransport } from '../transport.js'
-import { latticeOk, type LatticeResult } from '../result.js'
-import type { LatticeSource, LatticeSourceInput } from '../types.js'
+import type { CastboardTransport } from '../transport.js'
+import { castboardOk, type CastboardResult } from '../result.js'
+import type { CastboardSource, CastboardSourceInput } from '../types.js'
 import { pick, toPositiveIntId, toSourceCode } from '../wire.js'
 
 const SOURCE_KEYS = ['code', 'description', 'pluginName'] as const
 
-export class LatticeSourceApi {
-  constructor(private readonly transport: LatticeTransport) {}
+export class CastboardSourceApi {
+  constructor(private readonly transport: CastboardTransport) {}
 
   /** C13 `GET /issue-sources?q=`：查字典（`code` 省略 = 全部；服务端按 code/description 模糊） */
-  async list(code?: string): Promise<LatticeResult<LatticeSource[]>> {
-    const result = await this.transport.call<LatticeSource[] | null>('issueSourceList', {}, {
+  async list(code?: string): Promise<CastboardResult<CastboardSource[]>> {
+    const result = await this.transport.call<CastboardSource[] | null>('issueSourceList', {}, {
       query: code === undefined || code.trim() === '' ? {} : { q: code.trim() },
     })
     if (!result.ok) return result
-    return latticeOk(result.status, Array.isArray(result.data) ? result.data : [])
+    return castboardOk(result.status, Array.isArray(result.data) ? result.data : [])
   }
 
   /** C14 `POST /issue-sources/batch`：批量注册 / 更新（返回写入条数） */
-  async register(batch: readonly LatticeSourceInput[]): Promise<LatticeResult<{ count: number }>> {
-    if (batch.length === 0) return latticeOk(200, { count: 0 })
+  async register(batch: readonly CastboardSourceInput[]): Promise<CastboardResult<{ count: number }>> {
+    if (batch.length === 0) return castboardOk(200, { count: 0 })
     const body: Record<string, unknown>[] = []
     for (const [index, item] of batch.entries()) {
       const checked = toSourceCode(item.code)
@@ -43,22 +43,22 @@ export class LatticeSourceApi {
     }
     const result = await this.transport.call<{ count?: number }>('issueSourceRegister', {}, { body })
     if (!result.ok) return result
-    return latticeOk(result.status, { count: typeof result.data?.count === 'number' ? result.data.count : 0 })
+    return castboardOk(result.status, { count: typeof result.data?.count === 'number' ? result.data.count : 0 })
   }
 
   /** C15 `PUT /issue-sources/{id}`：改描述 / 插件名（administrator；`code` 不可改） */
   async update(
     id: number | string,
     patch: { description?: string | null; pluginName?: string | null },
-  ): Promise<LatticeResult<LatticeSource>> {
+  ): Promise<CastboardResult<CastboardSource>> {
     const checked = toPositiveIntId(id, 'id', 'invalid_request', '来源主键', '')
     if (!checked.ok) return checked.fail
     const body = pick(patch as Record<string, unknown>, ['description', 'pluginName'])
-    return this.transport.call<LatticeSource>('issueSourceUpdate', { id: checked.value }, { body })
+    return this.transport.call<CastboardSource>('issueSourceUpdate', { id: checked.value }, { body })
   }
 
   /** C16 `DELETE /issue-sources/{id}`：删来源（administrator；已有 issue 的 `source` 字符串不受影响） */
-  async remove(id: number | string): Promise<LatticeResult<void>> {
+  async remove(id: number | string): Promise<CastboardResult<void>> {
     const checked = toPositiveIntId(id, 'id', 'invalid_request', '来源主键', '')
     if (!checked.ok) return checked.fail
     const result = await this.transport.call<void>('issueSourceDelete', { id: checked.value })

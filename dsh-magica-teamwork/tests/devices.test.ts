@@ -1,4 +1,4 @@
-﻿/** 设备与工作区肖像 */
+/** 设备与工作区肖像 */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { bootHarness, isCode, PASSWORD, signToken } from './helpers.js'
@@ -26,6 +26,26 @@ test('全量同步：本批之外置 inactive；空批 = 全部下线', async (t
   const cleared = await alice.devices.sync([])
   assert.equal(cleared.synced, 0)
   assert.equal((await alice.devices.listActive()).length, 0)
+})
+
+test('组合索引冲突：同 host+port 更新 os/status/last_active，不新增行', async (t) => {
+  const h = await bootHarness()
+  t.after(() => h.close())
+  const alice = await h.register('alice')
+
+  await alice.devices.sync([{ host: 'same-host', port: 3080, os: 'linux' }])
+  const first = await alice.devices.mine({ pageNum: 1, pageSize: 10 })
+  assert.equal(first.items.length, 1)
+  const firstRow = first.items[0]!
+
+  await alice.devices.sync([{ host: 'same-host', port: 3080, os: 'windows' }])
+  const second = await alice.devices.mine({ pageNum: 1, pageSize: 10 })
+  assert.equal(second.items.length, 1)
+  const secondRow = second.items[0]!
+  assert.equal(secondRow.id, firstRow.id)
+  assert.equal(secondRow.os, 'windows')
+  assert.equal(secondRow.status, 'active')
+  assert.ok(Date.parse(secondRow.lastActiveAt ?? '') >= Date.parse(firstRow.lastActiveAt ?? ''))
 })
 
 test('同步：host 必填 / port 范围 / 条数上限', async (t) => {

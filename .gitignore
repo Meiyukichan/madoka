@@ -28,7 +28,7 @@ yarn-error.log*
 coverage/
 .e2e
 /.e2e/
-/e2e/
+*/e2e/
 
 # ── 本地配置 / 密钥 ───────────────────────────────────
 .env
@@ -50,3 +50,6 @@ Desktop.ini
 /docs/
 /dsh-magica-im/
 /dsh-magica-index/
+.*/
+tools/*.ps1
+dsh-magica-castboard/docs

@@ -7,40 +7,41 @@
  *  3. 失败语义要可判：`status_conflict`（别重试）/ `update_rejected`（看 failed[]）/
  *     `read_back_failed`（已写入，带 `created`）。
  *
- * 与 raw 的 24 个方法一一对应；差异逐条记在 `docs/design/lattice-sdk-design.zh.md` §14。
+ * 与 raw 的 24 个方法一一对应；差异逐条记在 `docs/design/castboard-sdk-design.zh.md` §14。
  */
 
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 
-import type { LatticeClient } from './client.js'
-import { latticeFail, latticeOk, type LatticeErrorCode, type LatticeFail, type LatticeResult } from './result.js'
+import type { CastboardClient } from './client.js'
+import { castboardFail, castboardOk, type CastboardErrorCode, type CastboardFail, type CastboardResult } from './result.js'
 import {
-  isLatticeIssueStatus,
-  isLatticePermission,
-  isLatticeUrgency,
-  type LatticeAttachment,
-  type LatticeAttachmentInput,
-  type LatticeAttachmentType,
-  type LatticeComment,
-  type LatticeCommentAuthorType,
-  type LatticeCommentIncrement,
-  type LatticeCommentIncrementQuery,
-  type LatticeCommentRole,
-  type LatticeDevice,
-  type LatticeDeviceWorkspace,
-  type LatticeIssue,
-  type LatticeIssueInput,
-  type LatticeIssueStatus,
-  type LatticeOs,
-  type LatticePermission,
-  type LatticeProject,
-  type LatticeProjectMember,
-  type LatticeSource,
-  type LatticeSourceInput,
-  type LatticeStatusFailure,
-  type LatticeUrgency,
+  isCastboardAttachmentRole,
+  isCastboardIssueStatus,
+  isCastboardPermission,
+  isCastboardUrgency,
+  type CastboardAttachment,
+  type CastboardAttachmentInput,
+  type CastboardAttachmentRole,
+  type CastboardComment,
+  type CastboardCommentAuthorType,
+  type CastboardCommentIncrement,
+  type CastboardCommentIncrementQuery,
+  type CastboardCommentRole,
+  type CastboardDevice,
+  type CastboardDeviceWorkspace,
+  type CastboardIssue,
+  type CastboardIssueInput,
+  type CastboardIssueStatus,
+  type CastboardOs,
+  type CastboardPermission,
+  type CastboardProject,
+  type CastboardProjectMember,
+  type CastboardSource,
+  type CastboardSourceInput,
+  type CastboardStatusFailure,
+  type CastboardUrgency,
 } from './types.js'
 import { checkIssueId, toIsoLocal, toSourceCode } from './wire.js'
 import { teamworkDefaultDevice, teamworkInstanceName, teamworkUserId } from './env.js'
@@ -50,36 +51,36 @@ import { mapLimit } from './net.js'
 // 类型（对齐 raw 的组合层形状；见设计文档 §10.2）
 // ────────────────────────────────────────────────────────────────────────────
 
-export interface LatticeProjectMemberQuery {
+export interface CastboardProjectMemberQuery {
   /** `true` = 只留能派活的角色（owner / manager） */
   manager?: boolean
 }
 
-export interface LatticeMyInstanceIssuesOptions {
-  status?: LatticeIssueStatus
+export interface CastboardMyInstanceIssuesOptions {
+  status?: CastboardIssueStatus
   pageSize?: number
   maxPages?: number
-  os?: LatticeOs
+  os?: CastboardOs
   instance?: string
   userId?: string
 }
 
-export interface LatticeMyInstanceIssues {
+export interface CastboardMyInstanceIssues {
   instance: string
   userId: string
-  os: LatticeOs
+  os: CastboardOs
   scanned: number
   pages: number
   truncated: boolean
-  items: LatticeIssue[]
-  unclaimed: LatticeIssue[]
-  otherInstance: LatticeIssue[]
+  items: CastboardIssue[]
+  unclaimed: CastboardIssue[]
+  otherInstance: CastboardIssue[]
 }
 
-/** 附件规格：路径字符串，或带方向/描述的对象 */
-export type LatticeIssueAttachmentSpec = string | { path: string; type?: LatticeAttachmentType; description?: string }
+/** 附件规格：路径字符串，或带角色/描述的对象（创建时默认角色 `assigner`） */
+export type CastboardIssueAttachmentSpec = string | { path: string; role?: CastboardAttachmentRole; description?: string }
 
-export interface LatticeIssueCreateInput {
+export interface CastboardIssueCreateInput {
   issueId?: string
   /** 顶层优先；缺省从 `assignerMeta.title` 兜底（D9） */
   title?: string
@@ -92,128 +93,128 @@ export interface LatticeIssueCreateInput {
   assignerTask?: string
   assignerMeta?: string | Record<string, unknown> | unknown[]
   cwd?: string
-  urgency?: LatticeUrgency
-  permission?: LatticePermission | '' | null
+  urgency?: CastboardUrgency
+  permission?: CastboardPermission | '' | null
   projectId?: number
   source?: string
   sourceInstance?: string
   dependsOn?: readonly string[] | null
-  attachments?: readonly LatticeIssueAttachmentSpec[]
+  attachments?: readonly CastboardIssueAttachmentSpec[]
   /** 撞已有 `issueId` 时：默认 `skip`（读一次、一致就跳过，D13） */
   onExist?: 'skip' | 'overwrite'
 }
 
-export interface LatticeIssueCreateResult {
-  issue: LatticeIssue
-  attachments: LatticeAttachmentInput[]
+export interface CastboardIssueCreateResult {
+  issue: CastboardIssue
+  attachments: CastboardAttachmentInput[]
   /** `true` = 命中已有记录被跳过（`onExist:'skip'`） */
   skipped: boolean
 }
 
-export interface LatticeIssueCreateManyResult {
-  issues: LatticeIssue[]
-  attachments: LatticeAttachmentInput[]
+export interface CastboardIssueCreateManyResult {
+  issues: CastboardIssue[]
+  attachments: CastboardAttachmentInput[]
   skipped: string[]
 }
 
-export interface LatticeIssueUpdateStatusInput {
+export interface CastboardIssueUpdateStatusInput {
   issueId: string
-  status: LatticeIssueStatus
-  expectedStatus?: LatticeIssueStatus
+  status: CastboardIssueStatus
+  expectedStatus?: CastboardIssueStatus
   assigneeTask?: string
   assigneeInstance?: string
   assigneeMeta?: string | Record<string, unknown> | unknown[]
   assignedAt?: string
 }
 
-export interface LatticeIssueClaimResult {
+export interface CastboardIssueClaimResult {
   claimed: string[]
-  failed: LatticeStatusFailure[]
-  issues: LatticeIssue[]
+  failed: CastboardStatusFailure[]
+  issues: CastboardIssue[]
 }
 
-export interface LatticeIssueAbandonResult {
+export interface CastboardIssueAbandonResult {
   abandoned: string[]
-  failed: LatticeStatusFailure[]
+  failed: CastboardStatusFailure[]
 }
 
-export interface LatticeIssueRoutingResult {
+export interface CastboardIssueRoutingResult {
   routed: string[]
-  failed: LatticeStatusFailure[]
+  failed: CastboardStatusFailure[]
 }
 
-export interface LatticeIssueFinalizeInput {
+export interface CastboardIssueFinalizeInput {
   status: 'success' | 'failed'
   assigneeMeta: string | Record<string, unknown> | unknown[]
   assigneeTask?: string
-  attachments?: readonly LatticeIssueAttachmentSpec[]
+  attachments?: readonly CastboardIssueAttachmentSpec[]
 }
 
-export interface LatticeIssueFinalizeResult {
-  issue: LatticeIssue
-  attachments: LatticeAttachmentInput[]
+export interface CastboardIssueFinalizeResult {
+  issue: CastboardIssue
+  attachments: CastboardAttachmentInput[]
 }
 
-export interface LatticeIssueRoutedInput {
+export interface CastboardIssueRoutedInput {
   assigneeTask: string
   cwd: string
   assignerMeta: string | Record<string, unknown> | unknown[]
-  urgency?: LatticeUrgency
-  permission?: LatticePermission
+  urgency?: CastboardUrgency
+  permission?: CastboardPermission
   assignedAt?: string
 }
 
-export interface LatticeIssueAttachmentDownloadItem {
-  attachment: LatticeAttachment
+export interface CastboardIssueAttachmentDownloadItem {
+  attachment: CastboardAttachment
   path: string
   size: number
 }
 
-export interface LatticeIssueAttachmentDownloadFailure {
+export interface CastboardIssueAttachmentDownloadFailure {
   fileId: string
   fileName: string
-  code: LatticeErrorCode
+  code: CastboardErrorCode
   reason: string
 }
 
-export interface LatticeIssueAttachmentDownloadResult {
+export interface CastboardIssueAttachmentDownloadResult {
   outputDir: string
-  downloaded: LatticeIssueAttachmentDownloadItem[]
-  failed: LatticeIssueAttachmentDownloadFailure[]
+  downloaded: CastboardIssueAttachmentDownloadItem[]
+  failed: CastboardIssueAttachmentDownloadFailure[]
 }
 
-export interface LatticeIssueAttachmentDownloadOptions {
-  type?: LatticeAttachmentType
+export interface CastboardIssueAttachmentDownloadOptions {
+  role?: CastboardAttachmentRole
 }
 
-export interface LatticeIssueCommentInput {
+export interface CastboardIssueCommentInput {
   commentId: string
   content: string
   commentAt?: string
-  commentRole?: LatticeCommentRole | (string & {})
-  commentAuthorType?: LatticeCommentAuthorType | (string & {})
+  commentRole?: CastboardCommentRole | (string & {})
+  commentAuthorType?: CastboardCommentAuthorType | (string & {})
 }
 
-export interface LatticeIssueCommentFailure {
+export interface CastboardIssueCommentFailure {
   index: number
   content: string
-  code: LatticeErrorCode
+  code: CastboardErrorCode
   reason: string
 }
 
-export interface LatticeIssueAddCommentsResult {
+export interface CastboardIssueAddCommentsResult {
   issueId: string
   written: number
-  failed: LatticeIssueCommentFailure[]
+  failed: CastboardIssueCommentFailure[]
 }
 
-export interface LatticeWorkspaceIndexInput {
+export interface CastboardWorkspaceIndexInput {
   detail: string
   userId?: string
   instance?: string
 }
 
-export interface LatticeWorkspacePortalInput {
+export interface CastboardWorkspacePortalInput {
   workspaceId: string
   cwd: string
   detail: string
@@ -221,20 +222,20 @@ export interface LatticeWorkspacePortalInput {
   instance?: string
 }
 
-export interface LatticeWorkspacePortalQuery {
+export interface CastboardWorkspacePortalQuery {
   workspaceId: string
   instance: string
   userId?: string
 }
 
 /** E1（本协议扩展）：依赖门禁用的批量状态查询 */
-export interface LatticeIssueStatusesQuery {
+export interface CastboardIssueStatusesQuery {
   issueIds: readonly string[]
   /** 并发上限，默认 4（底座闸也是 4） */
   concurrency?: number
 }
 
-export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>
+export type CastboardIssueStatuses = Record<string, CastboardIssueStatus | null>
 
 /** 依赖门禁用的 ISO-8601 校验（服务端只写不校验格式，这里先拦） */
 const ISO_LOCAL_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?$/
@@ -244,11 +245,11 @@ const ISO_LOCAL_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?
 // ────────────────────────────────────────────────────────────────────────────
 
 /** 未预期异常兜底：折成 `status:0 / internal_error`，绝不让 reject 冒出去 */
-export async function guard<T>(name: string, fn: () => Promise<LatticeResult<T>>): Promise<LatticeResult<T>> {
+export async function guard<T>(name: string, fn: () => Promise<CastboardResult<T>>): Promise<CastboardResult<T>> {
   try {
     return await fn()
   } catch (err) {
-    return latticeFail({
+    return castboardFail({
       status: 0,
       code: 'internal_error',
       reason: `${name} 未预期异常：${(err as Error).message}`,
@@ -275,17 +276,17 @@ function metaTitleDetail(meta: unknown): { title?: string; detail?: string } {
 }
 
 /** 附件读盘：0 字节拒收（服务端 S3 会 400）；返回可上传的字节与文件名 */
-async function readAttachmentFile(path: string): Promise<{ name: string; bytes: Uint8Array } | { fail: LatticeFail }> {
+async function readAttachmentFile(path: string): Promise<{ name: string; bytes: Uint8Array } | { fail: CastboardFail }> {
   try {
     const info = await stat(path)
     if (info.isDirectory()) {
       return {
-        fail: latticeFail({ status: 400, code: 'invalid_attachment', reason: `附件是目录，不能上传：${path}`, field: 'attachments' }),
+        fail: castboardFail({ status: 400, code: 'invalid_attachment', reason: `附件是目录，不能上传：${path}`, field: 'attachments' }),
       }
     }
     if (info.size === 0) {
       return {
-        fail: latticeFail({
+        fail: castboardFail({
           status: 400,
           code: 'invalid_attachment',
           reason: `附件是 0 字节，会被服务端拒收：${path}`,
@@ -297,7 +298,7 @@ async function readAttachmentFile(path: string): Promise<{ name: string; bytes: 
     return { name: basename(path), bytes }
   } catch (err) {
     return {
-      fail: latticeFail({
+      fail: castboardFail({
         status: 400,
         code: 'invalid_attachment',
         reason: `附件读盘失败：${path}（${(err as Error).message}）`,
@@ -316,7 +317,7 @@ function toSafeFileName(raw: string, fallback: string): string {
 }
 
 /** 本机平台默认值 */
-function defaultOs(): LatticeOs {
+function defaultOs(): CastboardOs {
   return process.platform === 'win32' ? 'windows' : 'linux'
 }
 
@@ -330,51 +331,51 @@ function clampConcurrency(value: number | undefined): number {
 // 1–4：查询类
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function queryMyProjects(client: LatticeClient): Promise<LatticeResult<LatticeProject[]>> {
-  return guard('latticeMyProjects', () => client.project.list())
+export async function queryMyProjects(client: CastboardClient): Promise<CastboardResult<CastboardProject[]>> {
+  return guard('castboardMyProjects', () => client.project.list())
 }
 
 export async function queryProjectMembers(
-  client: LatticeClient,
+  client: CastboardClient,
   projectId: number | string,
-  options: LatticeProjectMemberQuery = {},
-): Promise<LatticeResult<LatticeProjectMember[]>> {
-  return guard('latticeProjectMembers', async () => {
+  options: CastboardProjectMemberQuery = {},
+): Promise<CastboardResult<CastboardProjectMember[]>> {
+  return guard('castboardProjectMembers', async () => {
     const result = await client.project.members(projectId)
     if (!result.ok) return result
     if (options.manager !== true) return result
-    return latticeOk(
+    return castboardOk(
       result.status,
       result.data.filter((member) => member.role === 'owner' || member.role === 'manager'),
     )
   })
 }
 
-export async function queryUserDevices(client: LatticeClient, userId: string): Promise<LatticeResult<LatticeDevice[]>> {
-  return guard('latticeUserDevices', () => client.device.list(userId))
+export async function queryUserDevices(client: CastboardClient, userId: string): Promise<CastboardResult<CastboardDevice[]>> {
+  return guard('castboardUserDevices', () => client.device.list(userId))
 }
 
 export async function queryMyInstanceIssues(
-  client: LatticeClient,
-  options: LatticeMyInstanceIssuesOptions = {},
-): Promise<LatticeResult<LatticeMyInstanceIssues>> {
-  return guard('latticeMyInstanceIssues', async () => {
+  client: CastboardClient,
+  options: CastboardMyInstanceIssuesOptions = {},
+): Promise<CastboardResult<CastboardMyInstanceIssues>> {
+  return guard('castboardMyInstanceIssues', async () => {
     const userId = options.userId ?? client.userId ?? teamworkUserId()
     const instance = options.instance ?? client.instance ?? teamworkInstanceName()
     const os = options.os ?? client.os ?? defaultOs()
     if (userId === undefined || userId === '') {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_user_id',
-        reason: 'latticeMyInstanceIssues 需要账号：client 没有登录，也没有显式传 userId',
+        reason: 'castboardMyInstanceIssues 需要账号：client 没有登录，也没有显式传 userId',
       })
     }
     const pageSize = Math.min(200, Math.max(1, Math.floor(options.pageSize ?? 200)))
     const maxPages = Math.max(1, Math.floor(options.maxPages ?? 1000))
 
-    const items: LatticeIssue[] = []
-    const unclaimed: LatticeIssue[] = []
-    const otherInstance: LatticeIssue[] = []
+    const items: CastboardIssue[] = []
+    const unclaimed: CastboardIssue[] = []
+    const otherInstance: CastboardIssue[] = []
     let scanned = 0
     let pages = 0
     let truncated = false
@@ -407,7 +408,7 @@ export async function queryMyInstanceIssues(
       if (batch.length < pageSize) break
     }
 
-    return latticeOk(200, {
+    return castboardOk(200, {
       instance,
       userId,
       os,
@@ -427,25 +428,25 @@ export async function queryMyInstanceIssues(
 
 interface NormalizedCreate {
   issueId: string
-  input: LatticeIssueInput
-  attachments: readonly LatticeIssueAttachmentSpec[]
+  input: CastboardIssueInput
+  attachments: readonly CastboardIssueAttachmentSpec[]
   onExist: 'skip' | 'overwrite'
   /** `true` = issueId 是本地现生成的（不会撞已有记录，省一次 GET） */
   generated: boolean
 }
 
 function validateCreateInput(
-  raw: LatticeIssueCreateInput,
+  raw: CastboardIssueCreateInput,
   index: number,
   currentAccountId: string | null,
-): { ok: true; value: NormalizedCreate } | { ok: false; fail: LatticeFail } {
+): { ok: true; value: NormalizedCreate } | { ok: false; fail: CastboardFail } {
   const where = index < 0 ? 'issueCreate' : `issueCreateMany[${index}]`
   const meta = metaTitleDetail(raw.assignerMeta)
   const title = typeof raw.title === 'string' && raw.title.trim() !== '' ? raw.title : meta.title
   if (title === undefined || title.trim() === '') {
     return {
       ok: false,
-      fail: latticeFail({
+      fail: castboardFail({
         status: 400,
         code: 'invalid_request',
         reason: `issueCreate 的 title 必填（可用顶层 title，或 assignerMeta.title）`,
@@ -454,13 +455,13 @@ function validateCreateInput(
     }
   }
   if (title.length > 200) {
-    return { ok: false, fail: latticeFail({ status: 400, code: 'invalid_title', reason: 'title 最多 200 个字符', field: 'title' }) }
+    return { ok: false, fail: castboardFail({ status: 400, code: 'invalid_title', reason: 'title 最多 200 个字符', field: 'title' }) }
   }
   const assignee = typeof raw.assignee === 'string' ? raw.assignee.trim() : ''
   if (assignee === '') {
     return {
       ok: false,
-      fail: latticeFail({
+      fail: castboardFail({
         status: 400,
         code: 'invalid_request',
         reason: 'issueCreate 的 assignee 必填（责任人账号）',
@@ -471,7 +472,7 @@ function validateCreateInput(
   if (raw.assigner !== undefined && currentAccountId !== null && raw.assigner !== currentAccountId) {
     return {
       ok: false,
-      fail: latticeFail({
+      fail: castboardFail({
         status: 400,
         code: 'invalid_body',
         reason: `issueCreate 的 assigner 恒为当前登录账号（本协议身份只来自 token），收到 ${raw.assigner}`,
@@ -479,16 +480,16 @@ function validateCreateInput(
       }),
     }
   }
-  if (raw.urgency !== undefined && !isLatticeUrgency(raw.urgency)) {
-    return { ok: false, fail: latticeFail({ status: 400, code: 'invalid_urgency', reason: 'urgency 取值不合法', field: 'urgency' }) }
+  if (raw.urgency !== undefined && !isCastboardUrgency(raw.urgency)) {
+    return { ok: false, fail: castboardFail({ status: 400, code: 'invalid_urgency', reason: 'urgency 取值不合法', field: 'urgency' }) }
   }
-  if (raw.permission !== undefined && raw.permission !== '' && raw.permission !== null && !isLatticePermission(raw.permission)) {
-    return { ok: false, fail: latticeFail({ status: 400, code: 'invalid_permission', reason: 'permission 取值不合法', field: 'permission' }) }
+  if (raw.permission !== undefined && raw.permission !== '' && raw.permission !== null && !isCastboardPermission(raw.permission)) {
+    return { ok: false, fail: castboardFail({ status: 400, code: 'invalid_permission', reason: 'permission 取值不合法', field: 'permission' }) }
   }
   if (raw.cwd !== undefined && raw.cwd !== null && raw.cwd.length > 500) {
     return {
       ok: false,
-      fail: latticeFail({ status: 400, code: 'invalid_request', reason: 'issueCreate 的 cwd 最多 500 个字符', field: 'cwd' }),
+      fail: castboardFail({ status: 400, code: 'invalid_request', reason: 'issueCreate 的 cwd 最多 500 个字符', field: 'cwd' }),
     }
   }
   if (raw.source !== undefined) {
@@ -499,7 +500,7 @@ function validateCreateInput(
   const checked = checkIssueId(issueId, where)
   if (checked !== null) return { ok: false, fail: checked }
 
-  const input: LatticeIssueInput = {
+  const input: CastboardIssueInput = {
     issueId,
     title,
     ...(raw.detail === undefined ? (meta.detail === undefined ? {} : { detail: meta.detail }) : { detail: raw.detail }),
@@ -529,32 +530,32 @@ function validateCreateInput(
 }
 
 /** 来源字典自愈：给定 code 不存在就注册一次，再读回 */
-async function ensureSource(client: LatticeClient, code: string): Promise<LatticeResult<LatticeSource>> {
+async function ensureSource(client: CastboardClient, code: string): Promise<CastboardResult<CastboardSource>> {
   const listed = await client.issue.source.list(code)
   if (!listed.ok) return listed
   const hit = listed.data.find((item) => item.code === code)
-  if (hit !== undefined) return latticeOk(listed.status, hit)
+  if (hit !== undefined) return castboardOk(listed.status, hit)
   const registered = await client.issue.source.register([{ code }])
   if (!registered.ok) return registered
   const again = await client.issue.source.list(code)
   if (!again.ok) return again
   const created = again.data.find((item) => item.code === code)
   if (created === undefined) {
-    return latticeFail({
+    return castboardFail({
       status: 200,
       code: 'read_back_failed',
       reason: `来源 ${code} 注册后仍读不到`,
     })
   }
-  return latticeOk(200, created)
+  return castboardOk(200, created)
 }
 
 export async function issueCreateMany(
-  client: LatticeClient,
-  inputs: readonly LatticeIssueCreateInput[],
-): Promise<LatticeResult<LatticeIssueCreateManyResult>> {
+  client: CastboardClient,
+  inputs: readonly CastboardIssueCreateInput[],
+): Promise<CastboardResult<CastboardIssueCreateManyResult>> {
   return guard('issueCreateMany', async () => {
-    if (inputs.length === 0) return latticeOk(200, { issues: [], attachments: [], skipped: [] })
+    if (inputs.length === 0) return castboardOk(200, { issues: [], attachments: [], skipped: [] })
 
     // ① 本地校验：任一条不合格 → 整批不发
     const normalized: NormalizedCreate[] = []
@@ -589,11 +590,11 @@ export async function issueCreateMany(
     }
 
     // ④ 附件先上传（先传后建，避免"issue 存在但引用了不存在的文件"）
-    const uploaded: { issueId: string; attachment: LatticeAttachmentInput }[] = []
+    const uploaded: { issueId: string; attachment: CastboardAttachmentInput }[] = []
     for (const item of toSubmit) {
       for (const spec of item.attachments) {
         const path = typeof spec === 'string' ? spec : spec.path
-        const type: LatticeAttachmentType = typeof spec === 'string' ? 'input' : (spec.type ?? 'input')
+        const role: CastboardAttachmentRole = typeof spec === 'string' ? 'assigner' : (spec.role ?? 'assigner')
         const description = typeof spec === 'string' ? undefined : spec.description
         const read = await readAttachmentFile(path)
         if ('fail' in read) return read.fail
@@ -602,10 +603,11 @@ export async function issueCreateMany(
         uploaded.push({
           issueId: item.issueId,
           attachment: {
-            issueId: item.issueId,
+            targetType: 'issue',
+            targetId: item.issueId,
             fileId: up.data.fileId,
             fileName: up.data.fileName,
-            type,
+            role,
             ...(description === undefined ? {} : { description }),
           },
         })
@@ -613,7 +615,7 @@ export async function issueCreateMany(
     }
 
     // ⑤ 提交（只发未跳过的）
-    const submitted = toSubmit.length === 0 ? latticeOk(200, [] as string[]) : await client.issue.submit(toSubmit.map((item) => item.input))
+    const submitted = toSubmit.length === 0 ? castboardOk(200, [] as string[]) : await client.issue.submit(toSubmit.map((item) => item.input))
     if (!submitted.ok) return submitted
     const createdIds = submitted.data
 
@@ -621,7 +623,7 @@ export async function issueCreateMany(
     if (uploaded.length > 0) {
       const attached = await client.issue.attachment.add(uploaded.map((item) => item.attachment))
       if (!attached.ok) {
-        return latticeFail({
+        return castboardFail({
           status: attached.status,
           code: 'read_back_failed',
           reason: `issue 已创建但附件关联失败：${attached.code}: ${attached.reason}`,
@@ -632,11 +634,11 @@ export async function issueCreateMany(
     }
 
     // ⑦ 读回完整记录
-    const issues: LatticeIssue[] = []
+    const issues: CastboardIssue[] = []
     for (const issueId of createdIds) {
       const got = await client.issue.get(issueId)
       if (!got.ok) {
-        return latticeFail({
+        return castboardFail({
           status: got.status,
           code: 'read_back_failed',
           reason: `issue 已创建但读回失败：${got.code}: ${got.reason}`,
@@ -652,29 +654,29 @@ export async function issueCreateMany(
       if (got.ok) issues.push(got.data)
     }
     if (issues.length === 0 && createdIds.length === 0 && skipped.length > 0) {
-      return latticeFail({ status: 200, code: 'read_back_failed', reason: 'issueCreate 提交成功但没拿到创建后的记录（服务端返回空数组）' })
+      return castboardFail({ status: 200, code: 'read_back_failed', reason: 'issueCreate 提交成功但没拿到创建后的记录（服务端返回空数组）' })
     }
 
-    return latticeOk(200, { issues, attachments: uploaded.map((item) => item.attachment), skipped })
+    return castboardOk(200, { issues, attachments: uploaded.map((item) => item.attachment), skipped })
   })
 }
 
 export async function issueCreate(
-  client: LatticeClient,
-  input: LatticeIssueCreateInput,
-): Promise<LatticeResult<LatticeIssueCreateResult>> {
+  client: CastboardClient,
+  input: CastboardIssueCreateInput,
+): Promise<CastboardResult<CastboardIssueCreateResult>> {
   return guard('issueCreate', async () => {
     const result = await issueCreateMany(client, [input])
     if (!result.ok) return result
     const issue = result.data.issues[0]
     if (issue === undefined) {
-      return latticeFail({
+      return castboardFail({
         status: 200,
         code: 'read_back_failed',
         reason: 'issueCreate 提交成功但没拿到创建后的记录（服务端返回空数组）',
       })
     }
-    return latticeOk(200, {
+    return castboardOk(200, {
       issue,
       attachments: result.data.attachments,
       skipped: result.data.skipped.includes(issue.issueId),
@@ -687,25 +689,25 @@ export async function issueCreate(
 // ────────────────────────────────────────────────────────────────────────────
 
 export async function issueUpdateStatus(
-  client: LatticeClient,
-  input: LatticeIssueUpdateStatusInput,
-): Promise<LatticeResult<LatticeIssue>> {
+  client: CastboardClient,
+  input: CastboardIssueUpdateStatusInput,
+): Promise<CastboardResult<CastboardIssue>> {
   return guard('issueUpdateStatus', async () => {
     const checked = checkIssueId(input.issueId, 'issueUpdateStatus')
     if (checked !== null) return checked
-    if (!isLatticeIssueStatus(input.status)) {
-      return latticeFail({
+    if (!isCastboardIssueStatus(input.status)) {
+      return castboardFail({
         status: 400,
         code: 'invalid_status',
         reason: 'status 必须是 pending / accepted / routing / running / success / failed / abandoned',
         field: 'status',
       })
     }
-    if (input.expectedStatus !== undefined && !isLatticeIssueStatus(input.expectedStatus)) {
-      return latticeFail({ status: 400, code: 'invalid_status', reason: 'expectedStatus 取值不合法', field: 'expectedStatus' })
+    if (input.expectedStatus !== undefined && !isCastboardIssueStatus(input.expectedStatus)) {
+      return castboardFail({ status: 400, code: 'invalid_status', reason: 'expectedStatus 取值不合法', field: 'expectedStatus' })
     }
     if (input.assignedAt !== undefined && !ISO_LOCAL_DATETIME.test(input.assignedAt)) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_datetime',
         reason: 'issueUpdateStatus 的 assignedAt 必须是 ISO-8601 时间（如 2025-06-16T10:12:30）',
@@ -726,7 +728,7 @@ export async function issueUpdateStatus(
     if (!updated.ok) return updated
     if (updated.data.failed.length > 0) {
       const failure = updated.data.failed[0]!
-      return latticeFail({
+      return castboardFail({
         status: updated.status,
         code: 'update_rejected',
         reason: `issueUpdateStatus 被拒（${failure.reason}）`,
@@ -737,16 +739,16 @@ export async function issueUpdateStatus(
   })
 }
 
-export async function issueClaim(client: LatticeClient, issueIds: readonly string[]): Promise<LatticeResult<LatticeIssueClaimResult>> {
+export async function issueClaim(client: CastboardClient, issueIds: readonly string[]): Promise<CastboardResult<CastboardIssueClaimResult>> {
   return guard('issueClaim', async () => {
-    if (issueIds.length === 0) return latticeOk(200, { claimed: [], failed: [], issues: [] })
+    if (issueIds.length === 0) return castboardOk(200, { claimed: [], failed: [], issues: [] })
     for (const [index, issueId] of issueIds.entries()) {
       const checked = checkIssueId(issueId, `issueClaim[${index}]`)
       if (checked !== null) return checked
     }
     const instance = client.instance ?? teamworkInstanceName()
     if (instance === '') {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_user_id',
         reason: '解析不到 instance（ip:port）：没传，也没解析到本机实例标识',
@@ -763,18 +765,18 @@ export async function issueClaim(client: LatticeClient, issueIds: readonly strin
     if (!updated.ok) return updated
     const failedIds = new Set(updated.data.failed.map((item) => item.issueId))
     const claimed = issueIds.filter((issueId) => !failedIds.has(issueId))
-    const issues: LatticeIssue[] = []
+    const issues: CastboardIssue[] = []
     for (const issueId of claimed) {
       const got = await client.issue.get(issueId)
       if (got.ok) issues.push(got.data)
     }
-    return latticeOk(200, { claimed, failed: updated.data.failed, issues })
+    return castboardOk(200, { claimed, failed: updated.data.failed, issues })
   })
 }
 
-export async function issueAbandon(client: LatticeClient, issueIds: readonly string[]): Promise<LatticeResult<LatticeIssueAbandonResult>> {
+export async function issueAbandon(client: CastboardClient, issueIds: readonly string[]): Promise<CastboardResult<CastboardIssueAbandonResult>> {
   return guard('issueAbandon', async () => {
-    if (issueIds.length === 0) return latticeOk(200, { abandoned: [], failed: [] })
+    if (issueIds.length === 0) return castboardOk(200, { abandoned: [], failed: [] })
     for (const [index, issueId] of issueIds.entries()) {
       const checked = checkIssueId(issueId, `issueAbandon[${index}]`)
       if (checked !== null) return checked
@@ -782,13 +784,13 @@ export async function issueAbandon(client: LatticeClient, issueIds: readonly str
     const updated = await client.issue.updateStatuses(issueIds.map((issueId) => ({ issueId, status: 'abandoned' as const })))
     if (!updated.ok) return updated
     const failedIds = new Set(updated.data.failed.map((item) => item.issueId))
-    return latticeOk(200, { abandoned: issueIds.filter((issueId) => !failedIds.has(issueId)), failed: updated.data.failed })
+    return castboardOk(200, { abandoned: issueIds.filter((issueId) => !failedIds.has(issueId)), failed: updated.data.failed })
   })
 }
 
-export async function issueRouting(client: LatticeClient, issueIds: readonly string[]): Promise<LatticeResult<LatticeIssueRoutingResult>> {
+export async function issueRouting(client: CastboardClient, issueIds: readonly string[]): Promise<CastboardResult<CastboardIssueRoutingResult>> {
   return guard('issueRouting', async () => {
-    if (issueIds.length === 0) return latticeOk(200, { routed: [], failed: [] })
+    if (issueIds.length === 0) return castboardOk(200, { routed: [], failed: [] })
     for (const [index, issueId] of issueIds.entries()) {
       const checked = checkIssueId(issueId, `issueRouting[${index}]`)
       if (checked !== null) return checked
@@ -799,27 +801,27 @@ export async function issueRouting(client: LatticeClient, issueIds: readonly str
     )
     if (!updated.ok) return updated
     const failedIds = new Set(updated.data.failed.map((item) => item.issueId))
-    return latticeOk(200, { routed: issueIds.filter((issueId) => !failedIds.has(issueId)), failed: updated.data.failed })
+    return castboardOk(200, { routed: issueIds.filter((issueId) => !failedIds.has(issueId)), failed: updated.data.failed })
   })
 }
 
-export async function issueRunning(client: LatticeClient, issueId: string): Promise<LatticeResult<LatticeIssue>> {
+export async function issueRunning(client: CastboardClient, issueId: string): Promise<CastboardResult<CastboardIssue>> {
   return guard('issueRunning', () => issueUpdateStatus(client, { issueId, status: 'running' }))
 }
 
 export async function issueFinalize(
-  client: LatticeClient,
+  client: CastboardClient,
   issueId: string,
-  input: LatticeIssueFinalizeInput,
-): Promise<LatticeResult<LatticeIssueFinalizeResult>> {
+  input: CastboardIssueFinalizeInput,
+): Promise<CastboardResult<CastboardIssueFinalizeResult>> {
   return guard('issueFinalize', async () => {
     const checked = checkIssueId(issueId, 'issueFinalize')
     if (checked !== null) return checked
     if (input.status !== 'success' && input.status !== 'failed') {
-      return latticeFail({ status: 400, code: 'invalid_status', reason: 'issueFinalize 的 status 只能是 success / failed', field: 'status' })
+      return castboardFail({ status: 400, code: 'invalid_status', reason: 'issueFinalize 的 status 只能是 success / failed', field: 'status' })
     }
     if (input.assigneeMeta === undefined || input.assigneeMeta === null) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_meta',
         reason: 'issueFinalize 的 assigneeMeta 必填（执行结果 JSON）',
@@ -828,25 +830,27 @@ export async function issueFinalize(
     }
 
     // ① 产物先上传（先传再改状态：状态一变就可能被展示，此时不该缺产物）
-    const attachments: LatticeAttachmentInput[] = []
+    const attachments: CastboardAttachmentInput[] = []
     for (const spec of input.attachments ?? []) {
       const path = typeof spec === 'string' ? spec : spec.path
       const description = typeof spec === 'string' ? undefined : spec.description
+      const role: CastboardAttachmentRole = typeof spec === 'string' ? 'assignee' : (spec.role ?? 'assignee')
       const read = await readAttachmentFile(path)
       if ('fail' in read) return read.fail
       const up = await client.file.upload({ name: read.name, data: read.bytes })
       if (!up.ok) return up
       attachments.push({
-        issueId,
+        targetType: 'issue',
+        targetId: issueId,
         fileId: up.data.fileId,
         fileName: up.data.fileName,
-        type: typeof spec === 'string' ? 'output' : (spec.type ?? 'output'),
+        role,
         ...(description === undefined ? {} : { description }),
       })
     }
 
     // ② 改状态（失败则整条失败，状态不变）
-    const statusInput: LatticeIssueUpdateStatusInput = {
+    const statusInput: CastboardIssueUpdateStatusInput = {
       issueId,
       status: input.status,
       assigneeMeta: input.assigneeMeta,
@@ -860,7 +864,7 @@ export async function issueFinalize(
     if (attachments.length > 0) {
       const attached = await client.issue.attachment.add(attachments)
       if (!attached.ok) {
-        return latticeFail({
+        return castboardFail({
           status: attached.status,
           code: 'read_back_failed',
           reason: `issue 状态已改但产物挂载失败：${attached.code}: ${attached.reason}`,
@@ -872,27 +876,27 @@ export async function issueFinalize(
     // ④ 读回
     const got = await client.issue.get(issueId)
     if (!got.ok) {
-      return latticeFail({
+      return castboardFail({
         status: got.status,
         code: 'read_back_failed',
         reason: `issue 已收尾但读回失败：${got.code}: ${got.reason}`,
         created: [issueId],
       })
     }
-    return latticeOk(200, { issue: got.data, attachments })
+    return castboardOk(200, { issue: got.data, attachments })
   })
 }
 
 export async function issueRouted(
-  client: LatticeClient,
+  client: CastboardClient,
   issueId: string,
-  input: LatticeIssueRoutedInput,
-): Promise<LatticeResult<LatticeIssue>> {
+  input: CastboardIssueRoutedInput,
+): Promise<CastboardResult<CastboardIssue>> {
   return guard('issueRouted', async () => {
     const checked = checkIssueId(issueId, 'issueRouted')
     if (checked !== null) return checked
     if (typeof input.assigneeTask !== 'string' || input.assigneeTask.trim() === '') {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_request',
         reason: 'issueRouted 的 assigneeTask 必填（这个 issue 最终转成了哪个 task）',
@@ -900,13 +904,13 @@ export async function issueRouted(
       })
     }
     if (typeof input.cwd !== 'string' || input.cwd.trim() === '' || input.cwd.length > 500) {
-      return latticeFail({ status: 400, code: 'invalid_request', reason: 'issueRouted 的 cwd 必填（≤500）', field: 'cwd' })
+      return castboardFail({ status: 400, code: 'invalid_request', reason: 'issueRouted 的 cwd 必填（≤500）', field: 'cwd' })
     }
-    if (input.urgency !== undefined && !isLatticeUrgency(input.urgency)) {
-      return latticeFail({ status: 400, code: 'invalid_urgency', reason: 'urgency 取值不合法', field: 'urgency' })
+    if (input.urgency !== undefined && !isCastboardUrgency(input.urgency)) {
+      return castboardFail({ status: 400, code: 'invalid_urgency', reason: 'urgency 取值不合法', field: 'urgency' })
     }
-    if (input.permission !== undefined && !isLatticePermission(input.permission)) {
-      return latticeFail({
+    if (input.permission !== undefined && !isCastboardPermission(input.permission)) {
+      return castboardFail({
         status: 400,
         code: 'invalid_permission',
         reason: 'permission 必须是 read-only / workspace-write / danger-full-access',
@@ -914,7 +918,7 @@ export async function issueRouted(
       })
     }
     if (input.assignerMeta === undefined || input.assignerMeta === null) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_meta',
         reason: 'issueRouted 的 assignerMeta 必填（诉求内容 JSON）',
@@ -922,7 +926,7 @@ export async function issueRouted(
       })
     }
     if (input.assignedAt !== undefined && !ISO_LOCAL_DATETIME.test(input.assignedAt)) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_datetime',
         reason: 'issueRouted 的 assignedAt 必须是 ISO-8601 时间（如 2025-06-16T10:12:30）',
@@ -934,7 +938,7 @@ export async function issueRouted(
     const current = await client.issue.get(issueId)
     if (!current.ok) return current
     if (current.data.status !== 'accepted' && current.data.status !== 'routing') {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_request',
         reason: `issueRouted 只能在 accepted / routing 状态下调用，当前 ${current.data.status}`,
@@ -943,7 +947,7 @@ export async function issueRouted(
     }
 
     // ② 只发改动字段（本协议 PUT 是 undefined→保留，不需要旧实现那种"原值回填"）
-    const patch: LatticeIssueInput = {
+    const patch: CastboardIssueInput = {
       assigneeTask: input.assigneeTask,
       cwd: input.cwd,
       assignerMeta: input.assignerMeta,
@@ -961,37 +965,50 @@ export async function issueRouted(
 // 10：来源字典
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function latticeIssueSources(client: LatticeClient, code?: string): Promise<LatticeResult<LatticeSource[]>> {
-  return guard('latticeIssueSources', () => client.issue.source.list(code))
+export async function castboardIssueSources(client: CastboardClient, code?: string): Promise<CastboardResult<CastboardSource[]>> {
+  return guard('castboardIssueSources', () => client.issue.source.list(code))
 }
 
-export async function latticeAddIssueSource(client: LatticeClient, input: LatticeSourceInput): Promise<LatticeResult<LatticeSource>> {
-  return guard('latticeAddIssueSource', () => ensureSource(client, input.code))
+export async function castboardAddIssueSource(client: CastboardClient, input: CastboardSourceInput): Promise<CastboardResult<CastboardSource>> {
+  return guard('castboardAddIssueSource', () => ensureSource(client, input.code))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // 11：附件下载
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function latticeDownloadIssueAttachments(
-  client: LatticeClient,
+export async function castboardDownloadIssueAttachments(
+  client: CastboardClient,
   issueId: string,
   outputDir: string,
-  options: LatticeIssueAttachmentDownloadOptions = {},
-): Promise<LatticeResult<LatticeIssueAttachmentDownloadResult>> {
-  return guard('latticeDownloadIssueAttachments', async () => {
-    const checked = checkIssueId(issueId, 'latticeDownloadIssueAttachments')
+  options: CastboardIssueAttachmentDownloadOptions = {},
+): Promise<CastboardResult<CastboardIssueAttachmentDownloadResult>> {
+  return guard('castboardDownloadIssueAttachments', async () => {
+    const checked = checkIssueId(issueId, 'castboardDownloadIssueAttachments')
     if (checked !== null) return checked
-    const listed = await client.issue.attachment.list(issueId, options.type)
+    if (options.role !== undefined && !isCastboardAttachmentRole(options.role)) {
+      return castboardFail({
+        status: 400,
+        code: 'invalid_role',
+        reason: 'castboardDownloadIssueAttachments 的 role 只能是 assigner / assignee',
+        field: 'role',
+      })
+    }
+    // 不传 role = 两种角色都要；返回行原样使用（不做类型翻译）
+    const listed = await client.issue.attachment.list({
+      targetType: 'issue',
+      targetId: issueId,
+      ...(options.role === undefined ? {} : { role: options.role }),
+    })
     if (!listed.ok) return listed
     try {
       await mkdir(outputDir, { recursive: true })
     } catch (err) {
-      return latticeFail({ status: 400, code: 'invalid_path', reason: `输出目录不合法：${outputDir}`, field: 'outputDir' })
+      return castboardFail({ status: 400, code: 'invalid_path', reason: `输出目录不合法：${outputDir}`, field: 'outputDir' })
     }
 
-    const downloaded: LatticeIssueAttachmentDownloadItem[] = []
-    const failed: LatticeIssueAttachmentDownloadFailure[] = []
+    const downloaded: CastboardIssueAttachmentDownloadItem[] = []
+    const failed: CastboardIssueAttachmentDownloadFailure[] = []
     const usedNames = new Set<string>()
 
     for (const attachment of listed.data) {
@@ -1026,7 +1043,7 @@ export async function latticeDownloadIssueAttachments(
       downloaded.push({ attachment, path, size: got.data.byteLength })
     }
 
-    return latticeOk(200, { outputDir, downloaded, failed })
+    return castboardOk(200, { outputDir, downloaded, failed })
   })
 }
 
@@ -1034,24 +1051,24 @@ export async function latticeDownloadIssueAttachments(
 // 12：评论
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function latticeIssueComments(client: LatticeClient, issueId: string): Promise<LatticeResult<LatticeComment[]>> {
-  return guard('latticeIssueComments', () => client.issue.comment.list(issueId))
+export async function castboardIssueComments(client: CastboardClient, issueId: string): Promise<CastboardResult<CastboardComment[]>> {
+  return guard('castboardIssueComments', () => client.issue.comment.list(issueId))
 }
 
-export async function latticeAddIssueComments(
-  client: LatticeClient,
+export async function castboardAddIssueComments(
+  client: CastboardClient,
   issueId: string,
-  comments: readonly LatticeIssueCommentInput[],
-): Promise<LatticeResult<LatticeIssueAddCommentsResult>> {
-  return guard('latticeAddIssueComments', async () => {
-    const checked = checkIssueId(issueId, 'latticeAddIssueComments')
+  comments: readonly CastboardIssueCommentInput[],
+): Promise<CastboardResult<CastboardIssueAddCommentsResult>> {
+  return guard('castboardAddIssueComments', async () => {
+    const checked = checkIssueId(issueId, 'castboardAddIssueComments')
     if (checked !== null) return checked
-    if (comments.length === 0) return latticeOk(200, { issueId, written: 0, failed: [] })
+    if (comments.length === 0) return castboardOk(200, { issueId, written: 0, failed: [] })
 
     // 整批校验：任一条不合格 → 一条都不发
     for (const [index, comment] of comments.entries()) {
       if (typeof comment.commentId !== 'string' || comment.commentId.trim() === '' || comment.commentId.length > 100) {
-        return latticeFail({
+        return castboardFail({
           status: 400,
           code: 'invalid_request',
           reason: `评论 ${index} 的 commentId 必填（幂等键，重试必须复用）`,
@@ -1059,10 +1076,10 @@ export async function latticeAddIssueComments(
         })
       }
       if (typeof comment.content !== 'string' || comment.content.length < 1 || comment.content.length > 10000) {
-        return latticeFail({ status: 400, code: 'invalid_content', reason: '评论内容必须是 1..10000 个字符', field: 'content' })
+        return castboardFail({ status: 400, code: 'invalid_content', reason: '评论内容必须是 1..10000 个字符', field: 'content' })
       }
       if (comment.commentAt !== undefined && !ISO_LOCAL_DATETIME.test(comment.commentAt)) {
-        return latticeFail({
+        return castboardFail({
           status: 400,
           code: 'invalid_datetime',
           reason: 'commentAt 必须是 ISO-8601 时间（如 2025-06-16T10:12:30）',
@@ -1073,7 +1090,7 @@ export async function latticeAddIssueComments(
 
     // 逐条发送：单条失败只进 failed[]
     let written = 0
-    const failed: LatticeIssueCommentFailure[] = []
+    const failed: CastboardIssueCommentFailure[] = []
     for (const [index, comment] of comments.entries()) {
       const result = await client.issue.comment.add(issueId, {
         commentId: comment.commentId,
@@ -1088,40 +1105,40 @@ export async function latticeAddIssueComments(
       }
       failed.push({ index, content: comment.content, code: result.code, reason: result.reason })
     }
-    return latticeOk(200, { issueId, written, failed })
+    return castboardOk(200, { issueId, written, failed })
   })
 }
 
-export async function latticeCommentsSince(
-  client: LatticeClient,
-  query: LatticeCommentIncrementQuery = {},
-): Promise<LatticeResult<LatticeCommentIncrement>> {
-  return guard('latticeCommentsSince', () => client.issue.comment.listSince(query))
+export async function castboardCommentsSince(
+  client: CastboardClient,
+  query: CastboardCommentIncrementQuery = {},
+): Promise<CastboardResult<CastboardCommentIncrement>> {
+  return guard('castboardCommentsSince', () => client.issue.comment.listSince(query))
 }
 
-export async function latticeCommentCursor(client: LatticeClient): Promise<LatticeResult<number>> {
-  return guard('latticeCommentCursor', () => client.issue.comment.cursor())
+export async function castboardCommentCursor(client: CastboardClient): Promise<CastboardResult<number>> {
+  return guard('castboardCommentCursor', () => client.issue.comment.cursor())
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // 13：工作区肖像
 // ────────────────────────────────────────────────────────────────────────────
 
-function resolveWorkspaceUser(client: LatticeClient, userId?: string): string | null {
+function resolveWorkspaceUser(client: CastboardClient, userId?: string): string | null {
   const resolved = userId ?? client.userId ?? teamworkUserId()
   return resolved === undefined || resolved === '' ? null : resolved
 }
 
-function resolveWorkspaceInstance(client: LatticeClient, instance?: string): string | null {
+function resolveWorkspaceInstance(client: CastboardClient, instance?: string): string | null {
   const resolved = instance ?? client.instance ?? teamworkInstanceName()
   return resolved === '' ? null : resolved
 }
 
 /** 上报后读回那一条（`index` 用 `workspaceId === null` 定位） */
 async function readBackWorkspace(
-  client: LatticeClient,
+  client: CastboardClient,
   query: { accountId: string; instance: string; workspaceId?: string; type: 'index' | 'portal' },
-): Promise<LatticeResult<LatticeDeviceWorkspace>> {
+): Promise<CastboardResult<CastboardDeviceWorkspace>> {
   const listed = await client.issue.workspace.list({
     accountId: query.accountId,
     instance: query.instance,
@@ -1135,55 +1152,55 @@ async function readBackWorkspace(
       (query.workspaceId === undefined ? row.workspaceId === null : row.workspaceId === query.workspaceId),
   )
   if (hit === undefined) {
-    return latticeFail({ status: 200, code: 'read_back_failed', reason: '工作区上报后读不到那一条记录' })
+    return castboardFail({ status: 200, code: 'read_back_failed', reason: '工作区上报后读不到那一条记录' })
   }
-  return latticeOk(200, hit)
+  return castboardOk(200, hit)
 }
 
-export async function latticeWorkspaceIndexes(
-  client: LatticeClient,
+export async function castboardWorkspaceIndexes(
+  client: CastboardClient,
   userId?: string,
-): Promise<LatticeResult<LatticeDeviceWorkspace[]>> {
-  return guard('latticeWorkspaceIndexes', async () => {
+): Promise<CastboardResult<CastboardDeviceWorkspace[]>> {
+  return guard('castboardWorkspaceIndexes', async () => {
     const user = resolveWorkspaceUser(client, userId)
     if (user === null) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_user_id',
-        reason: 'latticeWorkspaceIndexes 解析不到 userId：没传，也没从登录会话/环境解析到账号',
+        reason: 'castboardWorkspaceIndexes 解析不到 userId：没传，也没从登录会话/环境解析到账号',
       })
     }
     return client.issue.workspace.list({ accountId: user, type: 'index' })
   })
 }
 
-export async function latticeWorkspacePortal(
-  client: LatticeClient,
-  query: LatticeWorkspacePortalQuery,
-): Promise<LatticeResult<LatticeDeviceWorkspace | null>> {
-  return guard('latticeWorkspacePortal', async () => {
+export async function castboardWorkspacePortal(
+  client: CastboardClient,
+  query: CastboardWorkspacePortalQuery,
+): Promise<CastboardResult<CastboardDeviceWorkspace | null>> {
+  return guard('castboardWorkspacePortal', async () => {
     if (typeof query.instance !== 'string' || query.instance.trim() === '') {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_body',
-        reason: 'latticeWorkspacePortal 的 instance 必填（ip:port）—— 要查的是哪台机器上的工作区',
+        reason: 'castboardWorkspacePortal 的 instance 必填（ip:port）—— 要查的是哪台机器上的工作区',
         field: 'instance',
       })
     }
     if (typeof query.workspaceId !== 'string' || query.workspaceId.trim() === '') {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_body',
-        reason: 'latticeWorkspacePortal 的 workspaceId 必填',
+        reason: 'castboardWorkspacePortal 的 workspaceId 必填',
         field: 'workspaceId',
       })
     }
     const user = resolveWorkspaceUser(client, query.userId)
     if (user === null) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_user_id',
-        reason: 'latticeWorkspacePortal 解析不到 userId：没传，也没从登录会话/环境解析到账号',
+        reason: 'castboardWorkspacePortal 解析不到 userId：没传，也没从登录会话/环境解析到账号',
       })
     }
     const listed = await client.issue.workspace.list({
@@ -1194,18 +1211,18 @@ export async function latticeWorkspacePortal(
     })
     if (!listed.ok) return listed
     const hit = listed.data.find((row) => row.workspaceId === query.workspaceId)
-    return latticeOk(200, hit ?? null)
+    return castboardOk(200, hit ?? null)
   })
 }
 
-export async function latticeUpsertWorkspaceIndex(
-  client: LatticeClient,
-  input: LatticeWorkspaceIndexInput,
-): Promise<LatticeResult<LatticeDeviceWorkspace>> {
-  return guard('latticeUpsertWorkspaceIndex', async () => {
+export async function castboardUpsertWorkspaceIndex(
+  client: CastboardClient,
+  input: CastboardWorkspaceIndexInput,
+): Promise<CastboardResult<CastboardDeviceWorkspace>> {
+  return guard('castboardUpsertWorkspaceIndex', async () => {
     const user = resolveWorkspaceUser(client, input.userId)
     if (user === null) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_user_id',
         reason: '解析不到 userId：没传，也没从登录会话/环境解析到账号',
@@ -1213,7 +1230,7 @@ export async function latticeUpsertWorkspaceIndex(
     }
     const instance = resolveWorkspaceInstance(client, input.instance)
     if (instance === null) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_body',
         reason: '解析不到 instance（ip:port）：没传，也没解析到本机实例标识',
@@ -1225,22 +1242,22 @@ export async function latticeUpsertWorkspaceIndex(
   })
 }
 
-export async function latticeUpsertWorkspacePortal(
-  client: LatticeClient,
-  input: LatticeWorkspacePortalInput,
-): Promise<LatticeResult<LatticeDeviceWorkspace>> {
-  return guard('latticeUpsertWorkspacePortal', async () => {
+export async function castboardUpsertWorkspacePortal(
+  client: CastboardClient,
+  input: CastboardWorkspacePortalInput,
+): Promise<CastboardResult<CastboardDeviceWorkspace>> {
+  return guard('castboardUpsertWorkspacePortal', async () => {
     if (typeof input.workspaceId !== 'string' || input.workspaceId.trim() === '') {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_workspace_shape',
-        reason: 'latticeUpsertWorkspacePortal 需要 workspaceId 与 cwd（portal 形状）',
+        reason: 'castboardUpsertWorkspacePortal 需要 workspaceId 与 cwd（portal 形状）',
         field: 'workspaceId',
       })
     }
     const user = resolveWorkspaceUser(client, input.userId)
     if (user === null) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_user_id',
         reason: '解析不到 userId：没传，也没从登录会话/环境解析到账号',
@@ -1248,7 +1265,7 @@ export async function latticeUpsertWorkspacePortal(
     }
     const instance = resolveWorkspaceInstance(client, input.instance)
     if (instance === null) {
-      return latticeFail({
+      return castboardFail({
         status: 400,
         code: 'invalid_body',
         reason: '解析不到 instance（ip:port）：没传，也没解析到本机实例标识',
@@ -1270,20 +1287,20 @@ export async function latticeUpsertWorkspacePortal(
 // E1（扩展）：依赖门禁
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function latticeIssueStatuses(
-  client: LatticeClient,
-  query: LatticeIssueStatusesQuery,
-): Promise<LatticeResult<LatticeIssueStatuses>> {
-  return guard('latticeIssueStatuses', async () => {
+export async function castboardIssueStatuses(
+  client: CastboardClient,
+  query: CastboardIssueStatusesQuery,
+): Promise<CastboardResult<CastboardIssueStatuses>> {
+  return guard('castboardIssueStatuses', async () => {
     const unique = [...new Set(query.issueIds)]
-    if (unique.length === 0) return latticeOk(200, {})
+    if (unique.length === 0) return castboardOk(200, {})
     for (const [index, issueId] of unique.entries()) {
-      const checked = checkIssueId(issueId, `latticeIssueStatuses[${index}]`)
+      const checked = checkIssueId(issueId, `castboardIssueStatuses[${index}]`)
       if (checked !== null) return checked
     }
     const concurrency = clampConcurrency(query.concurrency)
     const results = await mapLimit(unique, concurrency, async (issueId) => ({ issueId, result: await client.issue.get(issueId) }))
-    const map: LatticeIssueStatuses = {}
+    const map: CastboardIssueStatuses = {}
     for (const { issueId, result } of results) {
       if (result.ok) {
         map[issueId] = result.data.status
@@ -1294,22 +1311,22 @@ export async function latticeIssueStatuses(
         continue
       }
       // 其它失败：整体失败（code 透传），避免"把网络错误当成未满足"
-      return latticeFail({
+      return castboardFail({
         status: result.status,
         code: result.code,
-        reason: `latticeIssueStatuses 查询 ${issueId} 失败：${result.reason}`,
+        reason: `castboardIssueStatuses 查询 ${issueId} 失败：${result.reason}`,
       })
     }
-    return latticeOk(200, map)
+    return castboardOk(200, map)
   })
 }
 
 /** 组合方法名清单（测试对账用；E1 用 `E:` 前缀单列） */
-export const LATTICE_COMPOSITES = [
-  'latticeMyProjects',
-  'latticeProjectMembers',
-  'latticeUserDevices',
-  'latticeMyInstanceIssues',
+export const CASTBOARD_COMPOSITES = [
+  'castboardMyProjects',
+  'castboardProjectMembers',
+  'castboardUserDevices',
+  'castboardMyInstanceIssues',
   'issueCreate',
   'issueCreateMany',
   'issueUpdateStatus',
@@ -1319,28 +1336,28 @@ export const LATTICE_COMPOSITES = [
   'issueRunning',
   'issueFinalize',
   'issueRouted',
-  'latticeIssueSources',
-  'latticeAddIssueSource',
-  'latticeDownloadIssueAttachments',
-  'latticeIssueComments',
-  'latticeAddIssueComments',
-  'latticeCommentsSince',
-  'latticeCommentCursor',
-  'latticeWorkspaceIndexes',
-  'latticeWorkspacePortal',
-  'latticeUpsertWorkspaceIndex',
-  'latticeUpsertWorkspacePortal',
+  'castboardIssueSources',
+  'castboardAddIssueSource',
+  'castboardDownloadIssueAttachments',
+  'castboardIssueComments',
+  'castboardAddIssueComments',
+  'castboardCommentsSince',
+  'castboardCommentCursor',
+  'castboardWorkspaceIndexes',
+  'castboardWorkspacePortal',
+  'castboardUpsertWorkspaceIndex',
+  'castboardUpsertWorkspacePortal',
 ] as const
 
 /** 扩展组合方法（不计入 raw 的 24） */
-export const LATTICE_EXTENSION_COMPOSITES = ['latticeIssueStatuses'] as const
+export const CASTBOARD_EXTENSION_COMPOSITES = ['castboardIssueStatuses'] as const
 
 /** 便于诊断/日志用的默认设备信息 */
 export function defaultDeviceInfo(): { host: string; os: string; port?: number } {
   return teamworkDefaultDevice()
 }
 
-/** 只用一次的工具：给外部拼 `LatticeIssueCommentInput` 时省一次 UUID 生成 */
+/** 只用一次的工具：给外部拼 `CastboardIssueCommentInput` 时省一次 UUID 生成 */
 export function newCommentId(): string {
   return randomUUID()
 }

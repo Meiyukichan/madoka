@@ -11,6 +11,8 @@
  * @module dsh-magica-spellbook/sessions/core
  */
 
+import { randomUUID } from 'node:crypto'
+
 import {
   asMessageId,
   asSessionId,
@@ -207,7 +209,6 @@ export function releaseRunState(state: SessionRunState): void {
 }
 
 let messageSeq = 0
-let sessionSeq = 0
 
 /** 造一个消息 id（本地单调计数器 + 时间 + 随机，不 import dsh 的品牌函数）。 */
 export function mintMessageId(): string {
@@ -220,12 +221,13 @@ export function mintMessageId(): string {
 /** 会话 id 的自定义铸造器允许的字符集（比文件名正则更严：不允许点号）。 */
 export const SESSION_ID_SAFE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/
 
-/** 造一个会话 id（随机段 8 位，因为它会变成文件名）。 */
-export function mintSessionId(prefix: string): string {
-  sessionSeq += 1
-  return `${prefix}-${Date.now().toString(36)}-${sessionSeq.toString(36)}-${Math.random()
-    .toString(36)
-    .slice(2, 10)}`
+/** 造一个标准的 dsh 会话 id（UUID；与 dsh ACP / Web 新建会话同口径）。
+ *
+ * `prefix` 仅为兼容旧调用保留；dsh 会话 id 的标准形状是 `session-<uuid>`，
+ * 不再自造 `magica-...` 前缀，避免台账、workspace 附件和 GUI 会话列表对不上。
+ */
+export function mintSessionId(_prefix: string): string {
+  return `session-${randomUUID()}`
 }
 
 /** 会话 id 的 brand 铸造器集中在 `shared/dsh.ts`（这里转出以保持公开 API 不变）。 */

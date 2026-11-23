@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { LatticeClient } from '../src/sdk/index.js'
+import type { CastboardClient } from '../src/sdk/index.js'
 import { bootServer, makeClient, registeredClient } from './sdk-helpers.js'
 
 const BOB_INSTANCE = '10.9.9.9:3090'
@@ -22,8 +22,8 @@ const ALICE_INSTANCE = '10.8.8.8:3080'
 let baseUrl = ''
 let cleanup: () => Promise<void>
 let workdir = ''
-let alice: LatticeClient
-let bob: LatticeClient
+let alice: CastboardClient
+let bob: CastboardClient
 let projectId = 0
 let issueId = ''
 let inputPath = ''
@@ -68,12 +68,12 @@ test('组合层：派活 → 创建 → 认领仲裁 → 规划 → 回填 → �
   const memberAdded = await alice.teamwork.project.memberAdd(projectId, { accountId: 'comp-bob', role: 'manager' })
   assert.equal(memberAdded.ok, true, memberAdded.ok ? '' : `${memberAdded.code}: ${memberAdded.reason}`)
 
-  const myProjects = await alice.latticeMyProjects()
+  const myProjects = await alice.castboardMyProjects()
   assert.equal(myProjects.ok, true)
   if (myProjects.ok) assert.ok(myProjects.data.some((p) => p.id === projectId))
 
   // ② 派活第 2 步：能派活的人（owner + manager，bob 是 manager）
-  const members = await alice.latticeProjectMembers(projectId, { manager: true })
+  const members = await alice.castboardProjectMembers(projectId, { manager: true })
   assert.equal(members.ok, true, members.ok ? '' : `${members.code}: ${members.reason}`)
   if (members.ok) {
     const ids = members.data.map((m) => m.accountId).sort()
@@ -83,21 +83,21 @@ test('组合层：派活 → 创建 → 认领仲裁 → 规划 → 回填 → �
   // ③ 派活第 3 步：bob 的实例（先上报设备）
   const bobDevice = await bob.device.sync([{ host: '10.9.9.9', port: 3090, os: 'linux' }])
   assert.equal(bobDevice.ok, true)
-  const bobDevices = await alice.latticeUserDevices('comp-bob')
+  const bobDevices = await alice.castboardUserDevices('comp-bob')
   assert.equal(bobDevices.ok, true)
   if (bobDevices.ok) assert.ok(bobDevices.data.some((d) => `${d.host}:${d.port}` === BOB_INSTANCE))
 
   // ④ 派活第 4 步：bob 那台机器的项目索引（先上报）
-  const index = await bob.latticeUpsertWorkspaceIndex({ detail: '# comp-bob 的索引' })
+  const index = await bob.castboardUpsertWorkspaceIndex({ detail: '# comp-bob 的索引' })
   assert.equal(index.ok, true, index.ok ? '' : `${index.code}: ${index.reason}`)
   if (index.ok) assert.equal(index.data.type, 'index')
 
-  const indexes = await alice.latticeWorkspaceIndexes('comp-bob')
+  const indexes = await alice.castboardWorkspaceIndexes('comp-bob')
   assert.equal(indexes.ok, true)
   if (indexes.ok) assert.ok(indexes.data.some((row) => row.instance === BOB_INSTANCE))
 
   // ⑤ 来源字典 + 创建（带附件、dependsOn、source）
-  const source = await alice.latticeAddIssueSource({ code: 'comp-source', pluginName: 'composite-test' })
+  const source = await alice.castboardAddIssueSource({ code: 'comp-source', pluginName: 'composite-test' })
   assert.equal(source.ok, true, source.ok ? '' : `${source.code}: ${source.reason}`)
 
   issueId = `comp-${Date.now()}`
@@ -109,11 +109,13 @@ test('组合层：派活 → 创建 → 认领仲裁 → 规划 → 回填 → �
     projectId,
     source: 'comp-source',
     dependsOn: ['dep-fake'],
-    attachments: [{ path: inputPath, type: 'input', description: '现场材料' }],
+    attachments: [{ path: inputPath, role: 'assigner', description: '现场材料' }],
   })
   assert.equal(created.ok, true, created.ok ? '' : `${created.code}: ${created.reason}`)
   if (!created.ok) return
   assert.equal(created.data.attachments.length, 1)
+  assert.equal(created.data.attachments[0]!.role, 'assigner', 'issueCreate 附件默认/显式角色都是 assigner')
+  assert.equal(created.data.attachments[0]!.targetType, 'issue')
   assert.equal(created.data.skipped, false)
   assert.deepEqual(created.data.issue.dependsOn, ['dep-fake'], 'dependsOn 必须是 string[]')
   assert.equal(created.data.issue.assigner, 'comp-alice', 'assigner 由 token 决定')
@@ -133,7 +135,7 @@ test('组合层：派活 → 创建 → 认领仲裁 → 规划 → 回填 → �
   }
 
   // ⑦ bob 拉本机待办：应当能看到这条 + unclaimed
-  const bobPending = await bob.latticeMyInstanceIssues({ status: 'pending' })
+  const bobPending = await bob.castboardMyInstanceIssues({ status: 'pending' })
   assert.equal(bobPending.ok, true, bobPending.ok ? '' : `${bobPending.code}: ${bobPending.reason}`)
   if (bobPending.ok) {
     assert.ok(bobPending.data.items.some((i) => i.issueId === issueId), '本机待办里应有这条')
@@ -207,53 +209,67 @@ test('组合层：派活 → 创建 → 认领仲裁 → 规划 → 回填 → �
   const finalized = await executor.issueFinalize(issueId, {
     status: 'success',
     assigneeMeta: { summary: '做完', changedFiles: ['a.ts'], checks: ['ok'] },
-    attachments: [{ path: outputPath, type: 'output' }],
+    attachments: [{ path: outputPath, role: 'assignee' }],
   })
   assert.equal(finalized.ok, true, finalized.ok ? '' : `${finalized.code}: ${finalized.reason}`)
   if (finalized.ok) {
     assert.equal(finalized.data.issue.status, 'success')
     assert.equal(finalized.data.attachments.length, 1)
-    assert.equal(finalized.data.attachments[0]!.type, 'output')
+    assert.equal(finalized.data.attachments[0]!.role, 'assignee')
   }
 
   // ⑪ 评论双向 + 幂等
   const commentId = `c-${issueId}`
-  const firstComments = await executor.latticeAddIssueComments(issueId, [
+  const firstComments = await executor.castboardAddIssueComments(issueId, [
     { commentId, content: '执行中，需要确认', commentRole: 'assignee', commentAuthorType: 'agent' },
   ])
   assert.equal(firstComments.ok, true, firstComments.ok ? '' : `${firstComments.code}: ${firstComments.reason}`)
   if (firstComments.ok) assert.equal(firstComments.data.written, 1)
 
-  const replayComment = await executor.latticeAddIssueComments(issueId, [
+  const replayComment = await executor.castboardAddIssueComments(issueId, [
     { commentId, content: '执行中，需要确认', commentRole: 'assignee', commentAuthorType: 'agent' },
   ])
   assert.equal(replayComment.ok, true, '同 commentId 重放必须幂等成功')
 
-  const comments = await alice.latticeIssueComments(issueId)
+  const comments = await alice.castboardIssueComments(issueId)
   assert.equal(comments.ok, true)
   if (comments.ok) assert.equal(comments.data.length, 1, '幂等后仍只有一条评论')
 
-  const cursor = await alice.latticeCommentCursor()
+  const cursor = await alice.castboardCommentCursor()
   assert.equal(cursor.ok, true)
   if (cursor.ok) assert.ok(cursor.data > 0)
 
-  const since = await alice.latticeCommentsSince({ sinceId: 0, limit: 100 })
+  const since = await alice.castboardCommentsSince({ sinceId: 0, limit: 100 })
   assert.equal(since.ok, true)
   if (since.ok) assert.ok(since.data.items.length >= 1)
 
-  // ⑫ 产物回拉（只取 output；输入件不该被当产物）
+  // ⑫ 产物回拉（只取 assignee；assigner 的输入件不该被当产物）
   const outDir = join(workdir, 'products')
   mkdirSync(outDir, { recursive: true })
-  const downloaded = await alice.latticeDownloadIssueAttachments(issueId, outDir, { type: 'output' })
+  const downloaded = await alice.castboardDownloadIssueAttachments(issueId, outDir, { role: 'assignee' })
   assert.equal(downloaded.ok, true, downloaded.ok ? '' : `${downloaded.code}: ${downloaded.reason}`)
   if (downloaded.ok) {
     assert.equal(downloaded.data.downloaded.length, 1)
     assert.equal(downloaded.data.failed.length, 0)
+    assert.equal(downloaded.data.downloaded[0]!.attachment.role, 'assignee')
     assert.equal(downloaded.data.downloaded[0]!.size, Buffer.byteLength('执行产物'))
   }
 
+  // 不传 role = 两种角色都要（assigner 的输入件 + assignee 的产物）
+  const allDir = join(workdir, 'products-all')
+  mkdirSync(allDir, { recursive: true })
+  const allDownloaded = await alice.castboardDownloadIssueAttachments(issueId, allDir)
+  assert.equal(allDownloaded.ok, true, allDownloaded.ok ? '' : `${allDownloaded.code}: ${allDownloaded.reason}`)
+  if (allDownloaded.ok) {
+    assert.equal(allDownloaded.data.downloaded.length, 2)
+    assert.deepEqual(
+      allDownloaded.data.downloaded.map((item) => item.attachment.role).sort(),
+      ['assignee', 'assigner'],
+    )
+  }
+
   // ⑬ E1：依赖门禁（存在 + 不存在 → null）
-  const statuses = await alice.latticeIssueStatuses({ issueIds: [issueId, 'does-not-exist'] })
+  const statuses = await alice.castboardIssueStatuses({ issueIds: [issueId, 'does-not-exist'] })
   assert.equal(statuses.ok, true, statuses.ok ? '' : `${statuses.code}: ${statuses.reason}`)
   if (statuses.ok) {
     assert.equal(statuses.data[issueId], 'success')
@@ -261,7 +277,7 @@ test('组合层：派活 → 创建 → 认领仲裁 → 规划 → 回填 → �
   }
 
   // ⑭ 工作区门户：上报 → 查询
-  const portal = await bob.latticeUpsertWorkspacePortal({
+  const portal = await bob.castboardUpsertWorkspacePortal({
     workspaceId: 'ws-comp',
     cwd: 'D:/proj',
     detail: '# 门户说明',
@@ -269,14 +285,14 @@ test('组合层：派活 → 创建 → 认领仲裁 → 规划 → 回填 → �
   assert.equal(portal.ok, true, portal.ok ? '' : `${portal.code}: ${portal.reason}`)
 
   // 查别人的肖像必须显式给 userId（缺省是本机账号）
-  const found = await alice.latticeWorkspacePortal({ workspaceId: 'ws-comp', instance: BOB_INSTANCE, userId: 'comp-bob' })
+  const found = await alice.castboardWorkspacePortal({ workspaceId: 'ws-comp', instance: BOB_INSTANCE, userId: 'comp-bob' })
   assert.equal(found.ok, true)
   if (found.ok) {
     assert.ok(found.data !== null, '应当查到刚上报的肖像')
     assert.equal(found.data?.cwd, 'D:/proj')
   }
 
-  const missingPortal = await alice.latticeWorkspacePortal({ workspaceId: 'ws-none', instance: BOB_INSTANCE, userId: 'comp-bob' })
+  const missingPortal = await alice.castboardWorkspacePortal({ workspaceId: 'ws-none', instance: BOB_INSTANCE, userId: 'comp-bob' })
   assert.equal(missingPortal.ok, true)
   if (missingPortal.ok) assert.equal(missingPortal.data, null)
 })
@@ -316,7 +332,7 @@ test('组合层：单条状态更新 / 放弃 / 校验前置 / 能力闸', async
   // 本地校验：非法 issueId（含空格）→ 零请求
   const gated = makeClient(baseUrl)
   await gated.auth.login({ accountId: 'comp-alice', password: 'correct horse battery' })
-  const gatedResult = await gated.latticeIssueStatuses({ issueIds: ['x'.repeat(101)] })
+  const gatedResult = await gated.castboardIssueStatuses({ issueIds: ['x'.repeat(101)] })
   assert.equal(gatedResult.ok, false, '非法 issueId 先被本地拦')
   if (!gatedResult.ok) assert.equal(gatedResult.code, 'invalid_issue_id')
 })
@@ -329,7 +345,7 @@ test('组合层：issue 列表翻页 + 本机待办的 truncated/maxPages', asyn
     assert.ok(pageResult.data.total >= 1)
   }
 
-  const capped = await bob.latticeMyInstanceIssues({ maxPages: 1, pageSize: 1 })
+  const capped = await bob.castboardMyInstanceIssues({ maxPages: 1, pageSize: 1 })
   assert.equal(capped.ok, true)
   if (capped.ok) {
     assert.ok(capped.data.pages <= 1)

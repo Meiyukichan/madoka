@@ -7,7 +7,7 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 
-const MIN_LEN = 12
+const MIN_LEN = 8
 const MAX_LEN = 128
 const MAX_ENCODED = 512
 

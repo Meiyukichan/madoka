@@ -2,7 +2,7 @@
  * SDK 饱和测试（真机）：**起本地服务 → 用 SDK 打满每个端点 + 每个组合方法 + 各类失败场景**。
  *
  * 它不是单测的替代品，而是"上线前的总验收"：
- *  1. **端点覆盖**：48 条端点表逐条命中（用 `onRequest` 钩子把真实请求反查到端点名）；
+ *  1. **端点覆盖**：49 条协议端点（端点表）逐条命中（用 `onRequest` 钩子把真实请求反查到端点名）；
  *  2. **方法覆盖**：8 个原子分组 + 24 个组合方法 + E1 全部调用；
  *  3. **场景覆盖**：成功路径 + 鉴权/校验/冲突/幂等/分页/归档/上限/降级等失败路径；
  *  4. **报告**：打印覆盖率与失败清单，有失败或未覆盖 → 进程退出码 1。
@@ -17,13 +17,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
-  LATTICE_COMPOSITES,
-  LATTICE_ENDPOINTS,
-  LATTICE_EXTENSION_COMPOSITES,
-  createLatticeClient,
-  type LatticeClient,
-  type LatticeClientOptions,
-  type LatticeIssue,
+  CASTBOARD_COMPOSITES,
+  CASTBOARD_ENDPOINTS,
+  CASTBOARD_EXTENSION_COMPOSITES,
+  createCastboardClient,
+  type CastboardClient,
+  type CastboardClientOptions,
+  type CastboardIssue,
 } from '../src/sdk/index.js'
 import { startServer } from '../src/server/main.js'
 
@@ -67,7 +67,7 @@ function fail(name: string, fail_: { code?: string; status?: number; ok?: boolea
 // 端点覆盖：把真实请求反查到端点名
 // ────────────────────────────────────────────────────────────────────────────
 
-const ENDPOINT_MATCHERS: { name: string; method: string; re: RegExp }[] = Object.entries(LATTICE_ENDPOINTS).map(
+const ENDPOINT_MATCHERS: { name: string; method: string; re: RegExp }[] = Object.entries(CASTBOARD_ENDPOINTS).map(
   ([name, endpoint]) => {
     const pattern = endpoint.path
       .split('/')
@@ -119,8 +119,8 @@ async function boot(targetUrl: string | undefined, verbose: boolean): Promise<Ha
   }
 }
 
-function client(baseUrl: string, extra: LatticeClientOptions = {}): LatticeClient {
-  return createLatticeClient({
+function client(baseUrl: string, extra: CastboardClientOptions = {}): CastboardClient {
+  return createCastboardClient({
     baseUrl,
     persist: false,
     onRequest: (info) => observe(info.method, info.path),
@@ -147,9 +147,9 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
   const harness = await boot(options.baseUrl, verbose)
   const { baseUrl } = harness
   requestPrefix = new URL(baseUrl).pathname.replace(/\/+$/, '')
-  const clients: LatticeClient[] = []
+  const clients: CastboardClient[] = []
   const files: string[] = []
-  const track = (c: LatticeClient): LatticeClient => {
+  const track = (c: CastboardClient): CastboardClient => {
     clients.push(c)
     return c
   }
@@ -198,7 +198,7 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
 
     // 未登录 client → login_required（本地，零请求）
     const anon = track(client(baseUrl))
-    const anonCall = await anon.latticeMyProjects()
+    const anonCall = await anon.castboardMyProjects()
     fail('未登录 → login_required', anonCall, 'login_required', 401)
 
     // 错密钥 → 401 unauthorized → login_required，并且内存会话被清
@@ -228,7 +228,7 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
     if (harness.server !== undefined) {
       // 凭据文件持久化：写盘 → 新 client 复用 → 换 serverKey 不复用
       home = mkdtempSync(join(tmpdir(), 'dsh-teamwork-creds-'))
-      const persisted = createLatticeClient({
+      const persisted = createCastboardClient({
         baseUrl,
         home,
         onRequest: (info) => observe(info.method, info.path),
@@ -238,12 +238,12 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
       check('凭据文件已落盘', existsSync(join(home, '.credentials.json')) && existsSync(join(home, '.credentials.key')))
       const raw = readFileSync(join(home, '.credentials.json'), 'utf8')
       check('凭据文件是 AES-GCM 信封（不含明文 token）', !raw.includes('sat-bob') && raw.includes('"alg": "aes-256-gcm"'))
-      const restored = createLatticeClient({ baseUrl, home, onRequest: (info) => observe(info.method, info.path) })
+      const restored = createCastboardClient({ baseUrl, home, onRequest: (info) => observe(info.method, info.path) })
       eq('新 client 从凭据文件恢复会话', restored.state, 'authenticated')
       const restoredMe = await restored.auth.me()
       check('恢复后的会话可用', restoredMe.ok)
       // 端口不同的 baseUrl → 不复用
-      const otherServerKey = createLatticeClient({ baseUrl: `${baseUrl}-other`, home })
+      const otherServerKey = createCastboardClient({ baseUrl: `${baseUrl}-other`, home })
       check('serverKey 不匹配 → 不复用凭据', otherServerKey.state !== 'authenticated')
       await persisted.dispose()
       await restored.dispose()
@@ -290,8 +290,8 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
 
     const members = await alice.project.members(projectId)
     check('project.members 2 人', members.ok && members.data.length === 2)
-    const managerOnly = await alice.latticeProjectMembers(projectId, { manager: true })
-    check('latticeProjectMembers({manager}) 过滤', managerOnly.ok && managerOnly.data.length === 2)
+    const managerOnly = await alice.castboardProjectMembers(projectId, { manager: true })
+    check('castboardProjectMembers({manager}) 过滤', managerOnly.ok && managerOnly.data.length === 2)
 
     // 归档 → 只读
     const archived = await alice.teamwork.project.update(projectId, { status: 'archived' })
@@ -454,16 +454,30 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
     const fileId = uploaded.ok ? uploaded.data.fileId : ''
     const emptyUpload = await alice.file.upload({ name: 'empty.txt', data: Buffer.alloc(0) })
     fail('0 字节上传 → invalid_file_name', emptyUpload, 'invalid_file_name', 400)
-    const attachIn = await alice.issue.attachment.add([{ issueId, fileId, type: 'input', description: '输入' }])
-    check('attachment.add input', attachIn.ok && attachIn.data.count === 1)
-    const attachOut = await alice.issue.attachment.add([{ issueId, fileId, type: 'assignee' }])
-    check('attachment.add 线上值透传（upsert）', attachOut.ok)
-    const attachList = await alice.issue.attachment.list(issueId)
-    check('attachment.list 映射回 input/output', attachList.ok && attachList.data.every((a) => a.type === 'input' || a.type === 'output'))
-    const attachByType = await alice.issue.attachment.list(issueId, 'output')
-    check('attachment.list(type=output)', attachByType.ok && attachByType.data.every((a) => a.type === 'output'))
-    const badAttach = await alice.issue.attachment.add([{ issueId: 'x'.repeat(101), fileId, type: 'input' }])
-    fail('附件 issueId 非法 → invalid_issue_id', badAttach, 'invalid_issue_id', 400)
+    const attachIn = await alice.issue.attachment.add([
+      { targetType: 'issue', targetId: issueId, fileId, role: 'assigner', description: '输入' },
+    ])
+    check('attachment.add（issue/assigner）', attachIn.ok && attachIn.data.count === 1)
+    const attachUpsert = await alice.issue.attachment.add([
+      { targetType: 'issue', targetId: issueId, fileId, role: 'assignee', fileName: '饱和 产物.txt' },
+    ])
+    check('attachment.add 同 target+file upsert（角色覆盖）', attachUpsert.ok)
+    const attachList = await alice.issue.attachment.list({ targetType: 'issue', targetId: issueId })
+    check('attachment.list 只有 1 行（upsert）', attachList.ok && attachList.data.length === 1)
+    if (attachList.ok) eq('attachment.list 角色已覆盖', attachList.data[0]?.role, 'assignee')
+    const attachByRole = await alice.issue.attachment.list({ targetType: 'issue', targetId: issueId, role: 'assigner' })
+    check('attachment.list(role=assigner) 为空', attachByRole.ok && attachByRole.data.length === 0)
+    // 保留路径（GET /issues/{issueId}/attachments）仍要覆盖
+    const legacyAttachList = await alice.raw(`/issues/${encodeURIComponent(issueId)}/attachments?role=assignee`)
+    check('legacy issue 附件列表仍可用', legacyAttachList.ok)
+    const badAttach = await alice.issue.attachment.add([
+      { targetType: 'issue', targetId: 'x'.repeat(101), fileId, role: 'assigner' },
+    ])
+    fail('附件 targetId 非法 → invalid_issue_id', badAttach, 'invalid_issue_id', 400)
+    const badRole = await alice.issue.attachment.add([
+      { targetType: 'issue', targetId: issueId, fileId, role: 'output' as never },
+    ])
+    fail('附件 role 非法 → invalid_role（本地）', badRole, 'invalid_role', 400)
 
     const commentId = `sat-c-${Date.now()}`
     const c1 = await alice.issue.comment.add(issueId, { content: '第一条', commentId, commentRole: 'assigner' })
@@ -524,10 +538,10 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
     const project2Id = project2.ok ? project2.data.id : 0
     await aliceC.teamwork.project.memberAdd(project2Id, { accountId: 'sat-bob', role: 'manager' })
 
-    const src = await aliceC.latticeAddIssueSource({ code: 'sat-comp-source', pluginName: 'saturate' })
-    check('latticeAddIssueSource', src.ok)
-    const srcList = await aliceC.latticeIssueSources('sat-comp-source')
-    check('latticeIssueSources', srcList.ok && srcList.data.length === 1)
+    const src = await aliceC.castboardAddIssueSource({ code: 'sat-comp-source', pluginName: 'saturate' })
+    check('castboardAddIssueSource', src.ok)
+    const srcList = await aliceC.castboardIssueSources('sat-comp-source')
+    check('castboardIssueSources', srcList.ok && srcList.data.length === 1)
 
     const compId = `sat-comp-${Date.now()}`
     const workdir = mkdtempSync(join(tmpdir(), 'dsh-teamwork-satfiles-'))
@@ -545,7 +559,7 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
       projectId: project2Id,
       source: 'sat-comp-source',
       dependsOn: ['dep-x'],
-      attachments: [{ path: inputFile, type: 'input', description: '输入件' }],
+      attachments: [{ path: inputFile, role: 'assigner', description: '输入件' }],
     })
     check('issueCreate（带附件/来源/dependsOn）', created.ok, created.ok ? '' : `${created.code}: ${created.reason}`)
     if (created.ok) {
@@ -569,34 +583,34 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
     fail('附件不存在 → invalid_attachment', missingFile, 'invalid_attachment', 400)
 
     // 派活四步
-    const myProjects = await aliceC.latticeMyProjects()
-    check('latticeMyProjects', myProjects.ok && myProjects.data.some((p) => p.id === project2Id))
+    const myProjects = await aliceC.castboardMyProjects()
+    check('castboardMyProjects', myProjects.ok && myProjects.data.some((p) => p.id === project2Id))
     const bobDeviceSync = await bobC.device.sync([{ host: '10.6.6.6', port: 3090, os: 'linux' }])
     check('bob 上报设备', bobDeviceSync.ok)
-    const bobDevices = await aliceC.latticeUserDevices('sat-bob')
-    check('latticeUserDevices', bobDevices.ok && bobDevices.data.some((d) => `${d.host}:${d.port}` === '10.6.6.6:3090'))
-    const bobIndex = await bobC.latticeUpsertWorkspaceIndex({ detail: '# bob 索引' })
-    check('latticeUpsertWorkspaceIndex', bobIndex.ok && bobIndex.data.type === 'index')
-    const bobIndexes = await aliceC.latticeWorkspaceIndexes('sat-bob')
-    check('latticeWorkspaceIndexes', bobIndexes.ok && bobIndexes.data.some((w) => w.instance === '10.6.6.6:3090'))
-    const bobPortal = await bobC.latticeUpsertWorkspacePortal({ workspaceId: 'ws-bob', cwd: 'D:/bob', detail: '# bob 门户' })
-    check('latticeUpsertWorkspacePortal', bobPortal.ok)
-    const foundPortal = await aliceC.latticeWorkspacePortal({ workspaceId: 'ws-bob', instance: '10.6.6.6:3090', userId: 'sat-bob' })
-    check('latticeWorkspacePortal 查到', foundPortal.ok && foundPortal.data !== null)
-    const noPortal = await aliceC.latticeWorkspacePortal({ workspaceId: 'ws-none', instance: '10.6.6.6:3090', userId: 'sat-bob' })
-    check('latticeWorkspacePortal 查不到 → null', noPortal.ok && noPortal.data === null)
-    const noInstance = await aliceC.latticeWorkspacePortal({ workspaceId: 'ws-bob', instance: '' })
+    const bobDevices = await aliceC.castboardUserDevices('sat-bob')
+    check('castboardUserDevices', bobDevices.ok && bobDevices.data.some((d) => `${d.host}:${d.port}` === '10.6.6.6:3090'))
+    const bobIndex = await bobC.castboardUpsertWorkspaceIndex({ detail: '# bob 索引' })
+    check('castboardUpsertWorkspaceIndex', bobIndex.ok && bobIndex.data.type === 'index')
+    const bobIndexes = await aliceC.castboardWorkspaceIndexes('sat-bob')
+    check('castboardWorkspaceIndexes', bobIndexes.ok && bobIndexes.data.some((w) => w.instance === '10.6.6.6:3090'))
+    const bobPortal = await bobC.castboardUpsertWorkspacePortal({ workspaceId: 'ws-bob', cwd: 'D:/bob', detail: '# bob 门户' })
+    check('castboardUpsertWorkspacePortal', bobPortal.ok)
+    const foundPortal = await aliceC.castboardWorkspacePortal({ workspaceId: 'ws-bob', instance: '10.6.6.6:3090', userId: 'sat-bob' })
+    check('castboardWorkspacePortal 查到', foundPortal.ok && foundPortal.data !== null)
+    const noPortal = await aliceC.castboardWorkspacePortal({ workspaceId: 'ws-none', instance: '10.6.6.6:3090', userId: 'sat-bob' })
+    check('castboardWorkspacePortal 查不到 → null', noPortal.ok && noPortal.data === null)
+    const noInstance = await aliceC.castboardWorkspacePortal({ workspaceId: 'ws-bob', instance: '' })
     fail('缺 instance → invalid_body', noInstance, 'invalid_body', 400)
 
     // 本机待办
-    const pending = await bobC.latticeMyInstanceIssues({ status: 'pending' })
-    check('latticeMyInstanceIssues 命中', pending.ok && pending.data.items.some((i) => i.issueId === compId))
+    const pending = await bobC.castboardMyInstanceIssues({ status: 'pending' })
+    check('castboardMyInstanceIssues 命中', pending.ok && pending.data.items.some((i) => i.issueId === compId))
     if (pending.ok) {
       check('unclaimed 归类', pending.data.unclaimed.some((i) => i.issueId === compId))
       eq('instance 回显', pending.data.instance, '10.6.6.6:3090')
     }
-    const truncated = await bobC.latticeMyInstanceIssues({ maxPages: 1, pageSize: 1 })
-    check('latticeMyInstanceIssues maxPages 生效', truncated.ok && truncated.data.pages <= 1)
+    const truncated = await bobC.castboardMyInstanceIssues({ maxPages: 1, pageSize: 1 })
+    check('castboardMyInstanceIssues maxPages 生效', truncated.ok && truncated.data.pages <= 1)
 
     // 认领仲裁（并发）
     const [claimA, claimB] = await Promise.all([aliceC.issueClaim([compId]), bobC.issueClaim([compId])])
@@ -631,7 +645,7 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
     const finalized = await winner.issueFinalize(compId, {
       status: 'success',
       assigneeMeta: { summary: '完成', changedFiles: ['a.ts'] },
-      attachments: [{ path: outputFile, type: 'output' }],
+      attachments: [{ path: outputFile, role: 'assignee' }],
     })
     check('issueFinalize', finalized.ok, finalized.ok ? '' : `${finalized.code}: ${finalized.reason}`)
     if (finalized.ok) {
@@ -645,35 +659,37 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
 
     // 评论（组合层）
     const cid = `sat-comp-c-${Date.now()}`
-    const added = await winner.latticeAddIssueComments(compId, [
+    const added = await winner.castboardAddIssueComments(compId, [
       { commentId: cid, content: '执行完成', commentRole: 'assignee', commentAuthorType: 'agent' },
     ])
-    check('latticeAddIssueComments', added.ok && added.data.written === 1)
-    const addedAgain = await winner.latticeAddIssueComments(compId, [
+    check('castboardAddIssueComments', added.ok && added.data.written === 1)
+    const addedAgain = await winner.castboardAddIssueComments(compId, [
       { commentId: cid, content: '执行完成', commentRole: 'assignee' },
     ])
     check('同 commentId 重放幂等', addedAgain.ok && addedAgain.data.written === 1)
-    const compComments = await aliceC.latticeIssueComments(compId)
-    check('latticeIssueComments 仍只有 1 条', compComments.ok && compComments.data.length === 1)
-    const badComments = await winner.latticeAddIssueComments(compId, [{ commentId: '', content: 'x' }])
+    const compComments = await aliceC.castboardIssueComments(compId)
+    check('castboardIssueComments 仍只有 1 条', compComments.ok && compComments.data.length === 1)
+    const badComments = await winner.castboardAddIssueComments(compId, [{ commentId: '', content: 'x' }])
     fail('缺 commentId → invalid_request', badComments, 'invalid_request', 400)
-    const sinceComp = await aliceC.latticeCommentsSince({ sinceId: 0, limit: 10 })
-    check('latticeCommentsSince', sinceComp.ok && sinceComp.data.items.length >= 1)
-    const cursorComp = await aliceC.latticeCommentCursor()
-    check('latticeCommentCursor', cursorComp.ok && cursorComp.data > 0)
+    const sinceComp = await aliceC.castboardCommentsSince({ sinceId: 0, limit: 10 })
+    check('castboardCommentsSince', sinceComp.ok && sinceComp.data.items.length >= 1)
+    const cursorComp = await aliceC.castboardCommentCursor()
+    check('castboardCommentCursor', cursorComp.ok && cursorComp.data > 0)
 
     // 产物下载（只取 output）
     const outDir = join(workdir, 'products')
     mkdirSync(outDir, { recursive: true })
-    const downloaded = await aliceC.latticeDownloadIssueAttachments(compId, outDir, { type: 'output' })
-    check('latticeDownloadIssueAttachments', downloaded.ok && downloaded.data.downloaded.length === 1)
+    const downloaded = await aliceC.castboardDownloadIssueAttachments(compId, outDir, { role: 'assignee' })
+    check('castboardDownloadIssueAttachments', downloaded.ok && downloaded.data.downloaded.length === 1)
     if (downloaded.ok) eq('下载失败列表为空', downloaded.data.failed.length, 0)
     // 部分失败：删掉文件后再下载
     // 部分失败：服务端允许挂一个"磁盘上不存在"的 fileId（死链），下载时进 failed[]
     const deadFileId = '22222222-2222-4222-8222-222222222222'
-    const deadAttach = await aliceC.issue.attachment.add([{ issueId: compId, fileId: deadFileId, type: 'output', fileName: '死链.bin' }])
+    const deadAttach = await aliceC.issue.attachment.add([
+      { targetType: 'issue', targetId: compId, fileId: deadFileId, role: 'assignee', fileName: '死链.bin' },
+    ])
     check('允许挂死链（协议取舍）', deadAttach.ok)
-    const partial = await aliceC.latticeDownloadIssueAttachments(compId, outDir, { type: 'output' })
+    const partial = await aliceC.castboardDownloadIssueAttachments(compId, outDir, { role: 'assignee' })
     check(
       '部分失败仍 ok，失败进 failed[]',
       partial.ok && partial.data.failed.length === 1 && partial.data.downloaded.length >= 1,
@@ -683,9 +699,9 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
     )
 
     // E1 依赖门禁
-    const statuses = await aliceC.latticeIssueStatuses({ issueIds: [compId, 'sat-missing', compId] })
-    check('latticeIssueStatuses 去重 + null', statuses.ok && statuses.data[compId] === 'success' && statuses.data['sat-missing'] === null)
-    const badE1 = await aliceC.latticeIssueStatuses({ issueIds: ['x'.repeat(101)] })
+    const statuses = await aliceC.castboardIssueStatuses({ issueIds: [compId, 'sat-missing', compId] })
+    check('castboardIssueStatuses 去重 + null', statuses.ok && statuses.data[compId] === 'success' && statuses.data['sat-missing'] === null)
+    const badE1 = await aliceC.castboardIssueStatuses({ issueIds: ['x'.repeat(101)] })
     fail('E1 非法 id → invalid_issue_id', badE1, 'invalid_issue_id', 400)
 
     // 单条状态更新（组合层）
@@ -722,7 +738,7 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
     gated.setCapabilities(['GET /projects/mine'])
     const gatedResult = await gated.issue.get(compId)
     fail('能力闸未声明 → unsupported', gatedResult, 'unsupported')
-    const gatedOk = await gated.latticeMyProjects()
+    const gatedOk = await gated.castboardMyProjects()
     check('能力闸放行已声明端点', gatedOk.ok)
 
     // 逃生口
@@ -768,7 +784,7 @@ export async function runSaturation(options: { baseUrl?: string; verbose?: boole
   const coveredEndpoints = [...covered].sort()
   // 外部模式不碰别人的进程：`shutdown` 不计入必须覆盖（也真的没调）
   const skippedInExternal = external ? ['shutdown'] : []
-  const uncoveredEndpoints = Object.keys(LATTICE_ENDPOINTS)
+  const uncoveredEndpoints = Object.keys(CASTBOARD_ENDPOINTS)
     .filter((name) => !covered.has(name) && !skippedInExternal.includes(name))
     .sort()
   const failed = results.filter((r) => !r.ok)
@@ -798,12 +814,12 @@ export function formatReport(report: SaturationReport, verbose = false): string 
   const total = report.checks.length
   const pass = total - report.failed.length
   lines.push('')
-  lines.push(`■ 端点覆盖：${report.coveredEndpoints.length}/${Object.keys(LATTICE_ENDPOINTS).length}`)
+  lines.push(`■ 端点覆盖：${report.coveredEndpoints.length}/${Object.keys(CASTBOARD_ENDPOINTS).length}`)
   if (report.skippedInExternal.length > 0) {
     lines.push(`   外部模式跳过：${report.skippedInExternal.join(', ')}（不碰别人的进程）`)
   }
   if (report.uncoveredEndpoints.length > 0) lines.push(`   未覆盖：${report.uncoveredEndpoints.join(', ')}`)
-  lines.push(`■ 组合方法：${LATTICE_COMPOSITES.length} 个 + E1 ${LATTICE_EXTENSION_COMPOSITES.length} 个（清单见 sdk.ts）`)
+  lines.push(`■ 组合方法：${CASTBOARD_COMPOSITES.length} 个 + E1 ${CASTBOARD_EXTENSION_COMPOSITES.length} 个（清单见 sdk.ts）`)
   lines.push(`■ 断言：${pass}/${total} 通过；失败 ${report.failed.length}`)
   lines.push('')
   lines.push(report.ok ? '✅ 饱和测试全部通过' : '❌ 饱和测试未通过')
@@ -811,6 +827,6 @@ export function formatReport(report: SaturationReport, verbose = false): string 
 }
 
 /** 判断一条 issue 是否终态（内部用，避免未使用告警） */
-export function isTerminal(issue: LatticeIssue): boolean {
+export function isTerminal(issue: CastboardIssue): boolean {
   return issue.status === 'success' || issue.status === 'failed' || issue.status === 'abandoned'
 }

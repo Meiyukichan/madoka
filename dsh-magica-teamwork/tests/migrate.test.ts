@@ -1,4 +1,4 @@
-﻿/** 数据库迁移：自动建库 / 幂等 / 回滚 / 版本护栏 / 预置数据 */
+/** 数据库迁移：自动建库 / 幂等 / 回滚 / 版本护栏 / 预置数据 */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, existsSync, rmSync } from 'node:fs'
@@ -25,6 +25,13 @@ test('迁移：全新目录自动建库 + 9 表 / 30 索引 / 预置 3 条', (t)
       .all() as Array<{ name: string }>
     assert.equal(tables.length, 9)
 
+    const attachmentCols = (handle.db.prepare('PRAGMA table_info(dsh_teamwork_issue_attachment)').all() as Array<{ name: string }>).map(
+      (c) => c.name,
+    )
+    assert.deepEqual(attachmentCols, [
+      'id', 'target_type', 'target_id', 'file_id', 'file_name', 'role', 'description', 'created_at', 'updated_at',
+    ])
+
     const idx = handle.db
       .prepare("SELECT count(*) AS c FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'")
       .get() as { c: number }
@@ -34,7 +41,7 @@ test('迁移：全新目录自动建库 + 9 表 / 30 索引 / 预置 3 条', (t)
       (n, r) => n + ((r.sql.match(/CHECK \(/g) ?? []).length),
       0,
     )
-    assert.equal(checks, 19)
+    assert.equal(checks, 20)
 
     const fks = (handle.db.prepare("SELECT sql FROM sqlite_master WHERE type='table'").all() as Array<{ sql: string }>).reduce(
       (n, r) => n + ((r.sql.match(/FOREIGN KEY/g) ?? []).length),

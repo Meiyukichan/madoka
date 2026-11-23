@@ -6,32 +6,32 @@
  * 不会在业务路径上炸，而是在这里被明确识别。
  */
 
-import type { LatticeTransport } from './transport.js'
-import { latticeFail, latticeOk, type LatticeResult } from './result.js'
-import type { LatticeHealth, LatticeVersion } from './types.js'
+import type { CastboardTransport } from './transport.js'
+import { castboardFail, castboardOk, type CastboardResult } from './result.js'
+import type { CastboardHealth, CastboardVersion } from './types.js'
 
 /** 协议名（服务端 `/version.protocol`） */
-export const LATTICE_PROTOCOL = 'dsh-teamwork/1'
+export const CASTBOARD_PROTOCOL = 'dsh-teamwork/1'
 
-export interface LatticeProbeResult {
+export interface CastboardProbeResult {
   protocol: string
   endpoints: string[]
 }
 
-export class LatticeOpsApi {
+export class CastboardOpsApi {
   constructor(
-    private readonly transport: LatticeTransport,
+    private readonly transport: CastboardTransport,
     private readonly options: { strictProtocol?: boolean } = {},
   ) {}
 
   /** M1 `GET /health`：健康 + 版本 + 时钟（停机中服务端回 503） */
-  async health(): Promise<LatticeResult<LatticeHealth>> {
-    return this.transport.call<LatticeHealth>('health')
+  async health(): Promise<CastboardResult<CastboardHealth>> {
+    return this.transport.call<CastboardHealth>('health')
   }
 
   /** M2 `GET /version`：协议与能力清单 */
-  async version(): Promise<LatticeResult<LatticeVersion>> {
-    return this.transport.call<LatticeVersion>('version')
+  async version(): Promise<CastboardResult<CastboardVersion>> {
+    return this.transport.call<CastboardVersion>('version')
   }
 
   /**
@@ -39,22 +39,22 @@ export class LatticeOpsApi {
    *
    * `strictProtocol: true` 时协议不匹配直接失败（默认只提示不拦，方便灰度）。
    */
-  async probe(): Promise<LatticeResult<LatticeProbeResult>> {
+  async probe(): Promise<CastboardResult<CastboardProbeResult>> {
     const result = await this.version()
     if (!result.ok) return result
     const protocol = typeof result.data?.protocol === 'string' ? result.data.protocol : ''
     const endpoints = Array.isArray(result.data?.endpoints) ? result.data.endpoints : []
-    if (protocol !== LATTICE_PROTOCOL) {
-      const fail = latticeFail({
+    if (protocol !== CASTBOARD_PROTOCOL) {
+      const fail = castboardFail({
         status: result.status,
         code: 'incompatible_server',
-        reason: `协议不匹配：期望 ${LATTICE_PROTOCOL}，服务端是 ${protocol === '' ? '(空)' : protocol}`,
+        reason: `协议不匹配：期望 ${CASTBOARD_PROTOCOL}，服务端是 ${protocol === '' ? '(空)' : protocol}`,
       })
       if (this.options.strictProtocol === true) return fail
       // 非严格模式：不装能力表（不能拿别人的清单当我们的），但仍把协议问题说出来
       return fail
     }
     this.transport.setCapabilities(endpoints)
-    return latticeOk(result.status, { protocol, endpoints })
+    return castboardOk(result.status, { protocol, endpoints })
   }
 }

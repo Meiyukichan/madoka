@@ -1,9 +1,9 @@
 /**
  * 原子层对真服务：8 个分组的公开方法逐条打真 HTTP。
  *
- * 重点验证两处"必须由分组层做"的映射（设计文档 §16.8 的两行）：
+ * 重点验证两处"必须由分组层做"的加工（设计文档 §16.8 的两行）：
  *  1. `issue.comment.cursor()` 把协议 `{ maxId }` 折成 `number`；
- *  2. 附件类型门面 `input|output` ↔ 线上 `assigner|assignee`。
+ *  2. 附件按 `targetType + targetId + role` 存取，行原样返回（没有门面翻译）。
  */
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -11,12 +11,12 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { LatticeClient, LatticeProjectDetail } from '../src/sdk/index.js'
+import type { CastboardClient, CastboardProjectDetail } from '../src/sdk/index.js'
 import { bootServer, makeClient, registeredClient } from './sdk-helpers.js'
 
 let baseUrl = ''
 let cleanup: () => Promise<void>
-let alice: LatticeClient
+let alice: CastboardClient
 let projectId = 0
 
 before(async () => {
@@ -35,7 +35,7 @@ test('原子层：账号 / 项目 / issue / 评论 / 来源 / 附件 / 工作区
   // ── ops：协议 + 能力探测 ──────────────────────────────────────────────
   const version = await alice.ops.version()
   assert.equal(version.ok, true)
-  if (version.ok) assert.equal(version.data.endpoints.length, 47)
+  if (version.ok) assert.equal(version.data.endpoints.length, 49)
 
   const probed = await alice.ops.probe()
   assert.equal(probed.ok, true)
@@ -56,7 +56,7 @@ test('原子层：账号 / 项目 / issue / 评论 / 来源 / 附件 / 工作区
   const created = await alice.teamwork.project.create({ name: '原子层项目', visibility: 'private' })
   assert.equal(created.ok, true, created.ok ? '' : `${created.code}: ${created.reason}`)
   if (!created.ok) return
-  const project: LatticeProjectDetail = created.data
+  const project: CastboardProjectDetail = created.data
   projectId = project.id
   assert.equal(project.members.length, 1)
 
@@ -135,26 +135,34 @@ test('原子层：账号 / 项目 / issue / 评论 / 来源 / 附件 / 工作区
     assert.equal(conflict.data.failed[0]!.reason, 'status_conflict')
   }
 
-  // ── attachment：**门面 output → 线上 assignee → 读回仍是 output** ──────
+  // ── attachment：目标 issue / 角色 assigner|assignee，行原样返回 ──────
   const attached = await alice.issue.attachment.add([
-    { issueId, fileId, type: 'output', fileName: '原子.txt', description: '产物' },
+    { targetType: 'issue', targetId: issueId, fileId, role: 'assignee', fileName: '原子.txt', description: '产物' },
   ])
   assert.equal(attached.ok, true, attached.ok ? '' : `${attached.code}: ${attached.reason}`)
   if (attached.ok) assert.equal(attached.data.count, 1)
 
-  const attachments = await alice.issue.attachment.list(issueId)
+  const attachments = await alice.issue.attachment.list({ targetType: 'issue', targetId: issueId })
   assert.equal(attachments.ok, true)
   if (attachments.ok) {
     assert.equal(attachments.data.length, 1)
-    assert.equal(attachments.data[0]!.type, 'output', '线上 assignee 必须映射回 output')
+    assert.equal(attachments.data[0]!.role, 'assignee')
+    assert.equal(attachments.data[0]!.targetType, 'issue')
+    assert.equal(attachments.data[0]!.targetId, issueId)
   }
 
-  // 直接看原始响应，证明线上确实是 assignee（映射不是"编"的）
-  const rawList = await alice.raw(`/issues/${encodeURIComponent(issueId)}/attachments`)
+  const assignerOnly = await alice.issue.attachment.list({ targetType: 'issue', targetId: issueId, role: 'assigner' })
+  assert.equal(assignerOnly.ok, true)
+  if (assignerOnly.ok) assert.equal(assignerOnly.data.length, 0, 'role 过滤必须生效')
+
+  // 直接看原始响应，证明线上就是同名字段（没有门面翻译）
+  const rawList = await alice.raw(`/attachments?targetType=issue&targetId=${encodeURIComponent(issueId)}`)
   assert.equal(rawList.ok, true)
   if (rawList.ok) {
-    const raw = (await rawList.data.json()) as Array<{ type: string }>
-    assert.equal(raw[0]!.type, 'assignee')
+    const raw = (await rawList.data.json()) as Array<{ role: string; targetType: string; targetId: string }>
+    assert.equal(raw[0]!.role, 'assignee')
+    assert.equal(raw[0]!.targetType, 'issue')
+    assert.equal(raw[0]!.targetId, issueId)
   }
 
   // ── comment：cursor 折 number + 幂等 + 增量 ───────────────────────────
@@ -250,7 +258,7 @@ test('原子层：账号 / 项目 / issue / 评论 / 来源 / 附件 / 工作区
 
 test('原子层：未登录 client 的 signed 端点 → login_required（零请求）', async () => {
   const anonymous = makeClient(baseUrl)
-  const result = await anonymous.latticeMyProjects()
+  const result = await anonymous.castboardMyProjects()
   assert.equal(result.ok, false)
   if (!result.ok) {
     assert.equal(result.code, 'login_required')

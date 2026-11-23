@@ -20,8 +20,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     const body = (req.body ?? {}) as Record<string, unknown>
     assertNoUnknownFields(body, ['accountId', 'password', 'displayName'])
     limited(req, typeof body.accountId === 'string' ? body.accountId : undefined)
-    const code = req.headers['x-registration-code']
-    const session = await ctx.accounts.register(body, Array.isArray(code) ? String(code[0]) : code === undefined ? undefined : String(code))
+    const session = await ctx.accounts.register(body)
     return reply.code(201).send(session)
   })
 

@@ -10,12 +10,13 @@
  * 缓存策略：身份文件用 `path + mtimeMs` 双键失效；同一份坏文件只 parse 一次
  * （这是热路径上的 🟡 情形，正确处置是缓存而不是机械改 async）。
  *
- * 文档：`docs/design/lattice-sdk-design.zh.md` §4 / §12
+ * 文档：`docs/design/castboard-sdk-design.zh.md` §4 / §12
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir, networkInterfaces } from 'node:os'
 import { join, resolve } from 'node:path'
+import { parseDomain } from '../shared/domain.js'
 
 /** 协议前缀（服务端写死；可由构造参数覆盖） */
 export const DEFAULT_PREFIX = '/dsh-teamwork/v1'
@@ -24,7 +25,7 @@ export const DEFAULT_SERVER_PORT = 3939
 /** 服务端默认 host */
 export const DEFAULT_SERVER_HOST = '127.0.0.1'
 
-export interface LatticeDeviceIdentity {
+export interface CastboardDeviceIdentity {
   ip: string
   port?: number
   source: 'identity-file' | 'local-ip'
@@ -47,7 +48,7 @@ export function teamworkHome(): string {
 
 /** 服务端数据目录（`DSH_TEAMWORK_DATA` 优先，与 `src/server/config.ts` 一致） */
 export function teamworkDataDir(): string {
-  return process.env['DSH_TEAMWORK_DATA'] ?? join(teamworkHome(), 'server')
+  return process.env['DSH_TEAMWORK_DATA'] ?? teamworkHome()
 }
 
 /** 剥掉 `//` 与 `/* *\/` 注释再 JSON.parse（配置文件允许注释；与服务端同算法） */
@@ -71,33 +72,50 @@ function parseJsonc(text: string): unknown {
 interface ConfigCacheEntry {
   path: string
   mtimeMs: number
-  value: { host: string | null; port: number | null }
+  value: {
+    domain: string | null
+    host: string | null
+    port: number | null
+    localServiceRestart: boolean
+  }
 }
 
 let configCache: ConfigCacheEntry | null = null
 
-/** 读 `<dataDir>/config.json` 的 `host` / `port`（失败一律当"没有"，不抛） */
-export function readServerConfig(): { host: string | null; port: number | null } {
+/** 读 `<dataDir>/config.json` 的 `domain`（兼容旧 `host`/`port`；失败一律当"没有"，不抛） */
+export function readServerConfig(): { domain: string | null; host: string | null; port: number | null; localServiceRestart: boolean } {
   const path = resolve(join(teamworkDataDir(), 'config.json'))
   let mtimeMs: number
   try {
     mtimeMs = statSync(path).mtimeMs
   } catch {
     configCache = null
-    return { host: null, port: null }
+    return { domain: null, host: null, port: null, localServiceRestart: false }
   }
   if (configCache !== null && configCache.path === path && configCache.mtimeMs === mtimeMs) {
     return configCache.value
   }
-  let value: { host: string | null; port: number | null } = { host: null, port: null }
+  let value: { domain: string | null; host: string | null; port: number | null; localServiceRestart: boolean } = {
+    domain: null,
+    host: null,
+    port: null,
+    localServiceRestart: false,
+  }
   try {
     const parsed = parseJsonc(readFileSync(path, 'utf8'))
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const raw = parsed as Record<string, unknown>
+      const domainText = typeof raw['domain'] === 'string' && raw['domain'].trim() !== '' ? raw['domain'].trim() : null
+      const domainParts = domainText === null ? null : parseDomain(domainText)
       const host = typeof raw['host'] === 'string' && raw['host'].trim() !== '' ? raw['host'].trim() : null
       const portNumber = typeof raw['port'] === 'number' ? raw['port'] : Number(raw['port'])
       const port = Number.isInteger(portNumber) && portNumber >= 0 && portNumber <= 65535 ? portNumber : null
-      value = { host, port }
+      value = {
+        domain: domainParts === null ? null : domainText,
+        host: domainParts?.host ?? host,
+        port: domainParts?.port ?? port,
+        localServiceRestart: raw['localServiceRestart'] === true,
+      }
     }
   } catch {
     /* 坏文件当"没有"；同一份坏文件由 mtime 缓存兜住，不会反复 parse */
@@ -142,6 +160,13 @@ function withProtocol(raw: string): string {
   return /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
 }
 
+/** `domain` 不带 scheme 时：本机走 http，线上走 https（线上不展示端口）。 */
+function withDomainProtocol(raw: string): string {
+  if (/^https?:\/\//i.test(raw)) return raw
+  const parts = parseDomain(raw)
+  return parts === null ? raw : `${parts.scheme}://${raw}`
+}
+
 /** 补齐前缀与默认端口，并校验前缀（前缀是契约的一部分，不猜） */
 export function normalizeBaseUrl(raw: string, prefix: string = DEFAULT_PREFIX): BaseUrlResolution {
   const trimmed = raw.trim().replace(/\/+$/, '')
@@ -152,6 +177,10 @@ export function normalizeBaseUrl(raw: string, prefix: string = DEFAULT_PREFIX): 
     return { ok: false, reason: `baseUrl 不是合法 URL：${raw}`, value: raw }
   }
   const normalizedPrefix = `/${prefix.replace(/^\/+/, '').replace(/\/+$/, '')}`
+  const forbidden = new Set(['0.0.0.0', '::', '[::]'])
+  if (forbidden.has(url.hostname.toLowerCase())) {
+    return { ok: false, reason: `domain 不能是 ${url.hostname}：请写 127.0.0.1:端口，或线上域名`, value: raw }
+  }
   const path = url.pathname.replace(/\/+$/, '')
   if (path === '' || path === '/') {
     url.pathname = normalizedPrefix
@@ -195,10 +224,12 @@ export function teamworkBaseUrl(options: BaseUrlOptions = {}): BaseUrlResolution
     return normalizeBaseUrl(`${host}:${port}`, prefix)
   }
 
-  const configHost = hostFromConfig()
-  const configPort = portFromConfig()
-  if (configHost !== null || configPort !== null) {
-    return normalizeBaseUrl(`${configHost ?? DEFAULT_SERVER_HOST}:${configPort ?? DEFAULT_SERVER_PORT}`, prefix)
+  const config = readServerConfig()
+  if (config.domain !== null) {
+    return normalizeBaseUrl(withDomainProtocol(config.domain), prefix)
+  }
+  if (config.host !== null || config.port !== null) {
+    return normalizeBaseUrl(`${config.host ?? DEFAULT_SERVER_HOST}:${config.port ?? DEFAULT_SERVER_PORT}`, prefix)
   }
   return normalizeBaseUrl(`${DEFAULT_SERVER_HOST}:${DEFAULT_SERVER_PORT}`, prefix)
 }
@@ -220,7 +251,7 @@ const PORT_PATTERN = /^\d{1,5}$/
 interface IdentityCacheEntry {
   path: string
   mtimeMs: number
-  value: LatticeDeviceIdentity | null
+  value: CastboardDeviceIdentity | null
 }
 
 let identityCache: IdentityCacheEntry | null = null
@@ -240,7 +271,7 @@ function readDeviceIdentityFile(): DeviceIdentityFile | null {
     return { host: cached.ip, ...(cached.port === undefined ? {} : { port: cached.port }) }
   }
 
-  let identity: LatticeDeviceIdentity | null = null
+  let identity: CastboardDeviceIdentity | null = null
   try {
     const text = readFileSync(path, 'utf8').replace(/^\uFEFF/, '')
     const parsed = JSON.parse(text) as Record<string, unknown>
@@ -292,11 +323,11 @@ export function teamworkPort(): number | undefined {
   return readDeviceIdentityFile()?.port
 }
 
-/** 本机对外身份：`LATTICE_*`-style 环境变量 > 身份文件 > 本机网卡 */
-export function teamworkDeviceIdentity(): LatticeDeviceIdentity {
-  const overrides = (): LatticeDeviceIdentity | null => {
-    const ip = envFirst(['DSH_TEAMWORK_IP', 'LATTICE_IP'])
-    const portText = envFirst(['DSH_TEAMWORK_PORT', 'LATTICE_PORT'])
+/** 本机对外身份：`CASTBOARD_*`-style 环境变量 > 身份文件 > 本机网卡 */
+export function teamworkDeviceIdentity(): CastboardDeviceIdentity {
+  const overrides = (): CastboardDeviceIdentity | null => {
+    const ip = envFirst(['DSH_TEAMWORK_IP', 'CASTBOARD_IP'])
+    const portText = envFirst(['DSH_TEAMWORK_PORT', 'CASTBOARD_PORT'])
     const port = portText === null ? undefined : Number(portText)
     if (ip === null && port === undefined) return null
     return {
@@ -321,9 +352,14 @@ export function teamworkIp(): string {
   return teamworkDeviceIdentity().ip
 }
 
+/** 当前设备实例：`getLocalIp():3080`（本机 IPv4 + 固定端口）。 */
+export function mineInstance(): string {
+  return `${getLocalIp()}:3080`
+}
+
 /** 实例标识：`DSH_TEAMWORK_INSTANCE` > `ip:port` > `ip` */
 export function teamworkInstanceName(): string {
-  const explicit = envFirst(['DSH_TEAMWORK_INSTANCE', 'LATTICE_INSTANCE'])
+  const explicit = envFirst(['DSH_TEAMWORK_INSTANCE', 'CASTBOARD_INSTANCE'])
   if (explicit !== null) return explicit
   const { ip, port } = teamworkDeviceIdentity()
   return port === undefined ? ip : `${ip}:${port}`
@@ -349,27 +385,27 @@ export function resetEnvCache(): void {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// 旧 lattice 名字的别名（保证 raw 文档里的调用能编译；新代码用 teamwork*）
+// 旧 castboard 名字的别名（保证 raw 文档里的调用能编译；新代码用 teamwork*）
 // ────────────────────────────────────────────────────────────────────────────
 
 /** @deprecated 用 `teamworkBaseUrl()` */
-export function latticeBaseUrl(): string {
+export function castboardBaseUrl(): string {
   const resolved = teamworkBaseUrl()
   return resolved.ok ? resolved.value : ''
 }
 
 /** @deprecated 用 `teamworkDeviceFile()` */
-export const latticeDeviceFile = teamworkDeviceFile
+export const castboardDeviceFile = teamworkDeviceFile
 /** @deprecated 用 `teamworkDeviceIdentity()` */
-export const latticeDeviceIdentity = teamworkDeviceIdentity
+export const castboardDeviceIdentity = teamworkDeviceIdentity
 /** @deprecated 用 `teamworkIp()` */
-export const latticeIp = teamworkIp
+export const castboardIp = teamworkIp
 /** @deprecated 用 `teamworkInstanceName()` */
-export const latticeInstanceName = teamworkInstanceName
+export const castboardInstanceName = teamworkInstanceName
 /** @deprecated 用 `teamworkUserId()` */
-export const latticeUserId = teamworkUserId
+export const castboardUserId = teamworkUserId
 /** @deprecated 用 `teamworkDefaultDevice()` */
-export const latticeDefaultDevice = teamworkDefaultDevice
+export const castboardDefaultDevice = teamworkDefaultDevice
 
 /** 判断某个路径是否存在（`resolve` 过的绝对路径；测试与诊断用） */
 export function existsResolved(path: string): boolean {

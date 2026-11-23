@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { startServer } from '../src/server/main.js'
-import { createLatticeClient, type LatticeClient } from '../src/sdk/index.js'
+import { createCastboardClient, type CastboardClient } from '../src/sdk/index.js'
 
 export const PASSWORD = 'correct horse battery'
 
@@ -31,12 +31,12 @@ export async function bootServer(): Promise<{
 }
 
 /** 造一个内存态 client（不写凭据文件） */
-export function makeClient(baseUrl: string, extra: Parameters<typeof createLatticeClient>[0] = {}): LatticeClient {
-  return createLatticeClient({ baseUrl, persist: false, ...extra })
+export function makeClient(baseUrl: string, extra: Parameters<typeof createCastboardClient>[0] = {}): CastboardClient {
+  return createCastboardClient({ baseUrl, persist: false, ...extra })
 }
 
 /** 注册并返回已登录 client（首个账号自动 administrator） */
-export async function registeredClient(baseUrl: string, accountId: string): Promise<LatticeClient> {
+export async function registeredClient(baseUrl: string, accountId: string): Promise<CastboardClient> {
   const client = makeClient(baseUrl)
   const registered = await client.auth.register({ accountId, password: PASSWORD, displayName: accountId })
   if (!registered.ok) throw new Error(`注册失败：${registered.code}: ${registered.reason}`)

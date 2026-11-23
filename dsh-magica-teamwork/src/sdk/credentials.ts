@@ -12,14 +12,12 @@ import { chmodSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, re
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { GlobalRole } from './legacy/types.js'
 
 export interface StoredCredential {
   v: 1
   server: string
   accountId: string
   displayName: string | null
-  globalRole: GlobalRole
   accountToken: string
   ttlSeconds: number
   savedAt: string

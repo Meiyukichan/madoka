@@ -1,0 +1,116 @@
+{
+  "name": "@meiyukichan/dsh-magica-castboard",
+  "version": "0.2.0-alpha.3",
+  "type": "module",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "DSH 协同插件：任务台账 + 看板 + 派活中枢。host 半侧管台账/执行/调度/工具/HTTP，client 半侧把看板与项目管理注册进 dsh web（会话能力来自 dsh-magica-spellbook，共享库数据来自 dsh-magica-teamwork SDK）。",
+  "engines": {
+    "node": ">=22.5",
+    "pnpm": ">=11",
+    "dsh": ">=0.2.0-rc.2 <0.3.0-0"
+  },
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "locale",
+    "resources",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "test": "node --test --test-isolation=none \"tests/**/*.test.ts\"",
+    "e2e": "node e2e/run.mjs",
+    "e2e:dsh": "node e2e/real-dsh.mjs",
+    "e2e:accept": "node e2e/acceptance.mjs",
+    "clean": "node scripts/clean.mjs",
+    "prepare": "node -e \"process.exit(0)\"",
+    "e2e:reinstall": "node e2e/reinstall.mjs",
+    "lint:tokens": "node ./scripts/lint-tokens.mjs"
+  },
+  "dependencies": {
+    "@meiyukichan/dsh-magica-spellbook": "link:../dsh-magica-spellbook",
+    "@meiyukichan/dsh-magica-teamwork": "link:../dsh-magica-teamwork",
+    "cron-schedule": "^5.0.4"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.4",
+    "@deepseek-ai/dsh-agent": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-api-session-controller": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-api-workspace-controller": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-locale": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-session": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-store": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-scope": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-workspace": ">=0.2.0-rc.2 <0.3.0-0",
+    "@deepseek-ai/schemastery": ">=3.18.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.25.10",
+    "playwright": "1.61.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "~5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Meiyukichan/madoka.git",
+    "directory": "dsh-magica-castboard"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "castboard",
+    "kanban",
+    "teamwork"
+  ]
+}

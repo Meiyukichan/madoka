@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.client.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": false,
+    "outDir": ".dts-client",
+    "rootDir": "src/client"
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]
+}

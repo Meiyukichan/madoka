@@ -1,7 +1,7 @@
-﻿/** 项目与成员：可见性 / owner 唯一 / private 上限 / 归档只读 / 角色矩阵 */
+/** 项目与成员：可见性 / owner 唯一 / private 上限 / 归档只读 / 角色矩阵 */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bootHarness, isCode } from './helpers.js'
+import { bootHarness, isCode, signToken } from './helpers.js'
 
 test('创建：public 需要 leader/administrator；private 任何人可建且创建人即 owner', async (t) => {
   const h = await bootHarness()
@@ -229,6 +229,31 @@ test('移除成员：不能移除 owner；manager 只能移除 member', async (t
   // 但能移除 member
   await mgr.projects.removeMember(p.id, 'mem1')
   await assert.rejects(() => mgr.projects.removeMember(p.id, 'mem1'), isCode('member_not_found'))
+})
+
+test('成员搜索：owner 可按关键字查账号，非成员被拒', async (t) => {
+  const h = await bootHarness()
+  t.after(() => h.close())
+  const owner = await h.register('search-owner')
+  await h.register('search-target')
+  const outsider = await h.register('search-outsider')
+  const p = await owner.projects.create({ name: 'search-project', visibility: 'private' })
+
+  const found = await h.raw('GET', `/projects/${String(p.id)}/accounts?q=search-tar`, {
+    token: signToken(owner.accountToken!, owner.accountId),
+    account: owner.accountId,
+  })
+  assert.equal(found.status, 200)
+  const rows = found.body as Array<{ accountId: string; displayName: string | null }>
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0]?.accountId, 'search-target')
+  assert.equal(rows[0]?.displayName, null)
+
+  const denied = await h.raw('GET', `/projects/${String(p.id)}/accounts?q=search`, {
+    token: signToken(outsider.accountToken!, outsider.accountId),
+    account: outsider.accountId,
+  })
+  assert.equal(denied.status, 403)
 })
 
 

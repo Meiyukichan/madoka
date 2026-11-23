@@ -14,6 +14,7 @@ import {
   extractAssistantText,
   isTurnCompleted,
   mintMessageId,
+  mintSessionId,
   pickModel,
   resolveAgents,
   resolvePermission,
@@ -256,6 +257,13 @@ describe('续跑分派', () => {
     assert.equal(target.resumed, true)
     assert.equal(target.sessionId, 'x')
     assert.equal(target.record?.sessionId, 'x')
+  })
+
+  it('mintSessionId 返回标准 dsh session-uuid（不再自造 magica- 前缀）', () => {
+    const id = mintSessionId('magica-ws')
+    assert.match(id, /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+    assert.equal(SESSION_ID_SAFE.test(id), true)
+    assert.notEqual(mintSessionId('magica-ws'), id)
   })
 
   it('自定义铸造器要过 SESSION_ID_SAFE', () => {

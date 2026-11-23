@@ -7,25 +7,25 @@
  * 这两个差别是刻意的，别合并。
  */
 
-import type { LatticeTransport } from '../transport.js'
-import { latticeOk, type LatticeResult } from '../result.js'
-import type { LatticeDevice, LatticeDevicePageQuery, LatticeTeamworkPage } from '../types.js'
+import type { CastboardTransport } from '../transport.js'
+import { castboardOk, type CastboardResult } from '../result.js'
+import type { CastboardDevice, CastboardDevicePageQuery, CastboardTeamworkPage } from '../types.js'
 import { toDeviceId } from '../wire.js'
 import { mapFailure, normalizePage, pageParams } from './shared.js'
 
-export class LatticeTeamworkDeviceApi {
-  constructor(private readonly transport: LatticeTransport) {}
+export class CastboardTeamworkDeviceApi {
+  constructor(private readonly transport: CastboardTransport) {}
 
   /** B13 `GET /devices/mine`：我的设备（分页，含 `inactive`） */
-  async mine(query: LatticeDevicePageQuery = {}): Promise<LatticeResult<LatticeTeamworkPage<LatticeDevice>>> {
+  async mine(query: CastboardDevicePageQuery = {}): Promise<CastboardResult<CastboardTeamworkPage<CastboardDevice>>> {
     const { pageNum, pageSize } = pageParams(query)
     const result = await this.transport.call<unknown>('teamworkDeviceMine', {}, { query: { pageNum, pageSize } })
     if (!result.ok) return result
-    return latticeOk(result.status, normalizePage<LatticeDevice>(result.data, { pageNum, pageSize }))
+    return castboardOk(result.status, normalizePage<CastboardDevice>(result.data, { pageNum, pageSize }))
   }
 
   /** B14 `DELETE /devices/{id}`：删设备（删别人的设备服务端也返回 204，不做资源级鉴权） */
-  async remove(deviceId: number | string): Promise<LatticeResult<void>> {
+  async remove(deviceId: number | string): Promise<CastboardResult<void>> {
     const id = toDeviceId(deviceId)
     if (!id.ok) return id.fail
     const result = await this.transport.call<void>('teamworkDeviceDelete', { id: id.value })

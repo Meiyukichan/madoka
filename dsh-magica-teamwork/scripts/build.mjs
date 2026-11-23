@@ -60,6 +60,49 @@ async function bundle() {
   if (result.errors.length) throw new Error('esbuild 打包失败')
 }
 
+/**
+ * 组件库产物：`lib/client.js`（ESM）+ 声明。
+ *
+ * 为什么必须单独产：`exports["./client"]` 指向它；只发 `src/client` 源码时，
+ * 消费方的构建器不一定能编译 node_modules 里的 TSX（本仓就踩过）。
+ */
+async function bundleClient() {
+  const result = await build({
+    entryPoints: [join(ROOT, 'src/client/index.ts')],
+    outfile: join(ROOT, 'lib/client.js'),
+    bundle: true,
+    platform: 'browser',
+    format: 'esm',
+    target: 'es2022',
+    minify: true,
+    sourcemap: false,
+    legalComments: 'none',
+    jsx: 'automatic',
+    // react / DSH 基线组件由宿主提供（peerDependencies），不打进产物
+    external: ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/dsh-client-ui-primitives'],
+    logLevel: 'info',
+  })
+  if (result.errors.length) throw new Error('esbuild 打包 client 失败')
+}
+
+function clientDeclarations() {
+  const out = join(ROOT, '.dts-client')
+  rmSync(out, { recursive: true, force: true })
+  execFileSync(process.execPath, [
+    join(ROOT, 'node_modules/typescript/bin/tsc'),
+    '-p', 'tsconfig.client-dts.json',
+  ], { cwd: ROOT, stdio: 'inherit' })
+  const built = join(out, 'index.d.ts')
+  if (!existsSync(built)) throw new Error('没生成 .dts-client/index.d.ts')
+  // 打成一个自包含的 .d.ts（否则 re-export 指向不存在的相对路径）
+  execFileSync(
+    process.execPath,
+    [join(ROOT, 'node_modules/dts-bundle-generator/dist/bin/dts-bundle-generator.js'), '-o', 'lib/client.d.ts', '.dts-client/index.d.ts', '--no-check', '--no-banner'],
+    { cwd: ROOT, stdio: 'inherit' },
+  )
+  rmSync(out, { recursive: true, force: true })
+}
+
 function declarations() {
   const dtsDir = join(ROOT, '.dts')
   rmSync(dtsDir, { recursive: true, force: true })
@@ -81,5 +124,7 @@ console.log('构建 dsh-magica-teamwork')
 inlineMigrations()
 mkdirSync(join(ROOT, 'lib'), { recursive: true })
 await bundle()
+await bundleClient()
+clientDeclarations()
 declarations()
-console.log('产物：lib/index.js（压缩） + lib/index.d.ts')
+console.log('产物：lib/index.js + lib/index.d.ts + lib/client.js + lib/client.d.ts')

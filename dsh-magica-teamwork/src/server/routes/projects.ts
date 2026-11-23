@@ -13,6 +13,11 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: AppContext): vo
 
   app.get(`${base}/mine`, signed, async (req) => ctx.projects.mine(userOf(req), (req.query ?? {}) as Record<string, unknown>))
 
+  app.get<{ Params: { id: string } }>(`${base}/:id/accounts`, signed, async (req) => {
+    const q = (req.query ?? {}) as Record<string, unknown>
+    return ctx.projects.searchAccounts(userOf(req), parseId(req.params.id), typeof q.q === 'string' ? q.q : '')
+  })
+
   app.get<{ Params: { id: string } }>(`${base}/:id`, signed, async (req) =>
     ctx.projects.detail(userOf(req), parseId(req.params.id)),
   )

@@ -58,16 +58,22 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: AppContext): void
     ctx.issues.listComments(req.params.issueId),
   )
 
-  /** C11 批量挂附件 */
+  /** C11 批量挂附件（目标 = issue / comment，角色 = assigner / assignee） */
   app.post(`${v1}/issues/attachments/batch`, signed, async (req) => {
     const items = assertArrayBody(req.body, 50, 'attachments')
     return ctx.issues.addAttachments(items)
   })
 
-  /** C12 查附件 */
+  /** C12 查某个 issue 的附件（targetType 固定 issue；`role` 可选） */
   app.get<{ Params: { issueId: string } }>(`${v1}/issues/:issueId/attachments`, signed, async (req) => {
     const q = (req.query ?? {}) as Record<string, unknown>
-    return ctx.issues.listAttachments(req.params.issueId, q.type)
+    return ctx.issues.listAttachments('issue', req.params.issueId, q.role)
+  })
+
+  /** C12b 通用查附件（targetType=issue|comment + targetId；`role` 可选） */
+  app.get(`${v1}/attachments`, signed, async (req) => {
+    const q = (req.query ?? {}) as Record<string, unknown>
+    return ctx.issues.listAttachments(q.targetType, q.targetId, q.role)
   })
 
   /** C13 来源列表 */

@@ -117,6 +117,8 @@ export interface WorkspaceSessionHandle {
   firstTurn: Promise<TurnSettlement>
   getState(): WorkspaceSessionState
   followup(message: string | string[]): Promise<TurnSettlement>
+  /** 用具名插件上下文唤醒一轮，并返回该轮结算（不产生用户消息）。 */
+  followupNamedContext(entries: PluginContextEntry | readonly PluginContextEntry[]): Promise<TurnSettlement>
   injectContext(entries: PluginContextEntry | readonly PluginContextEntry[]): boolean
   /** 三档投递：idle→followup / running→steer / 其余 inject（S2）。 */
   pushNamedContext(entries: PluginContextEntry | readonly PluginContextEntry[], options?: { wake?: 'idle' | 'always' }): PushMode
@@ -560,6 +562,24 @@ function steerImpl(message: string | string[]): boolean {
   }
 
   function followup(message: string | string[]): Promise<TurnSettlement> {
+    return enqueueTurn(() => buildUserMessage(message))
+  }
+
+  /**
+   * 与 {@link followup} 相同的轮次排队/结算语义，但投递的是**具名插件上下文**
+   * （`source.kind = section`），因此 GUI 显示为上下文卡而不是用户消息。
+   * 用于验收轮这类“上下文本身就是唤醒语”的场景。
+   */
+  function followupNamedContext(
+    entries: PluginContextEntry | readonly PluginContextEntry[],
+  ): Promise<TurnSettlement> {
+    const messages = toMessages(contextPlugin, entries)
+    if (messages.length === 0) return Promise.reject(new Error('followupNamedContext requires at least one entry'))
+    return enqueueTurn(() => messages)
+  }
+
+  /** 排队并跑一轮：`makeMessages` 决定这一轮以什么消息唤醒。 */
+  function enqueueTurn(makeMessages: () => DshUserMessageLike | readonly DshUserMessageLike[]): Promise<TurnSettlement> {
     // 首轮必须先落定（D13）：早前 `turnDone` 初值是已 resolve 的空 Promise，
     // firstTurn 又从不接进来 → "建会话后不 await 直接 followup" 会并发跑两个 turn。
     // 旧实现 `workspace.ts:767` 是把 turnDone 挂在 firstTurn 之后，这里等价地先等首轮。
@@ -571,7 +591,11 @@ function steerImpl(message: string | string[]): boolean {
       state.running = true
       state.done = false
       try {
-        return await runOneTurn(buildUserMessage(message), false)
+        const messages = makeMessages()
+        const list = Array.isArray(messages) ? messages : [messages]
+        // Delivered here, then wait for idle: runTurnVerified(undefined, true) only observes.
+        for (const message of list) handle!.agent.followup(message)
+        return await runOneTurn(undefined, true)
       } catch (error) {
         if (!disposed) {
           state.running = false
@@ -629,6 +653,7 @@ function steerImpl(message: string | string[]): boolean {
       }
     },
     followup,
+    followupNamedContext,
     injectContext(entries) {
       const messages = toMessages(contextPlugin, entries)
       if (delivery === null || messages.length === 0) return false

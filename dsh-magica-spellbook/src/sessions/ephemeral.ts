@@ -85,7 +85,8 @@ export interface RunEphemeralSessionOptions {
   newSessionId?: () => string
   contextPlugin?: string
   cwd: string
-  prompt: string | string[]
+  /** 首轮 user 文本；省略时用 `context` 的第一条具名上下文直接唤醒（不产生 user bubble）。 */
+  prompt?: string | string[]
   context?: PluginContextEntry | readonly PluginContextEntry[]
   agentPresetId?: string | false
   setup?: DshAgentSetup
@@ -126,17 +127,33 @@ export interface EphemeralSessionState {
 /** 对外句柄。 */
 export type PushMode = 'followup' | 'steer' | 'inject' | 'skipped'
 
+export interface SessionQuiescenceOptions {
+  /** Hard cap for the whole wait; default 10 minutes. */
+  timeoutMs?: number
+  /** Polling interval; default 5 seconds. */
+  pollMs?: number
+  /** How long parent and descendants must stay idle before declaring quiescence; default 10 seconds (two 5s polls). */
+  quietMs?: number
+}
+
 export interface EphemeralSessionHandle {
   id: string
   resumed: boolean
   firstTurn: Promise<TurnSettlement>
   getState(): EphemeralSessionState
   followup(message: string | string[]): Promise<TurnSettlement>
+  /** 直接用具名上下文唤醒一轮（不产生 user followup 文本）。 */
+  followupNamedContext(entries: PluginContextEntry | readonly PluginContextEntry[]): Promise<TurnSettlement>
   injectContext(entries: PluginContextEntry | readonly PluginContextEntry[]): boolean
   /** 三档投递：idle→followup / running→steer / 其余 inject（S2）。 */
   pushNamedContext(entries: PluginContextEntry | readonly PluginContextEntry[], options?: { wake?: 'idle' | 'always' }): PushMode
   /** 直接插话（不等下一轮，S1）。 */
   steer(message: string | string[]): boolean
+  /**
+   * Wait until the parent agent and every live descendant are idle for a short quiet
+   * window. Used by callers whose main turn may settle before its subagents finish.
+   */
+  waitForQuiescence?(options?: SessionQuiescenceOptions): Promise<boolean>
   cancel(cause?: DshCancelCause): void
   dispose(): Promise<void>
   wake(): Promise<void>
@@ -144,6 +161,14 @@ export interface EphemeralSessionHandle {
 
 function emptySettlement(): TurnSettlement {
   return { completed: false, texts: [], externallyDisposed: true }
+}
+
+/** Unref'd delay: quiescence polling must not hold the host open. */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, ms)
+    timer.unref?.()
+  })
 }
 
 function lastSettlement(state: SessionRunState): TurnSettlement {
@@ -257,7 +282,10 @@ function steerImpl(message: string | string[]): boolean {
       // `injectContext` 还要能用。早前用 `if (!reattached)` 跳过安装，结果 wake 过的
       // 临时会话 injectContext 恒 false。续跑/wake 时初始队列传空（context 已消费过）。
       if (delivery === null) {
-        delivery = installContextDelivery(agentCtx, resumed || reattached ? [] : contexts)
+        // No `prompt` means the initial named contexts are the first-turn messages;
+        // delivering them through the pre-step queue as well would duplicate them.
+        const initialContexts = options.prompt === undefined ? [] : contexts
+        delivery = installContextDelivery(agentCtx, resumed || reattached ? [] : initialContexts)
       }
       return composition.commit
     }
@@ -404,7 +432,16 @@ function steerImpl(message: string | string[]): boolean {
       }
     }
     writeRecord(mountedPresetId)
-    const settlement = await runOneTurn(buildUserMessage(options.prompt), false)
+    let settlement: TurnSettlement
+    if (options.prompt === undefined) {
+      if (contexts.length === 0) throw new Error('runEphemeralSession: prompt omitted and no context to wake the first turn')
+      state.running = true
+      state.done = false
+      for (const message of contexts) handle.agent.followup(message)
+      settlement = await runOneTurn(undefined, true)
+    } else {
+      settlement = await runOneTurn(buildUserMessage(options.prompt), false)
+    }
     if (!disposed) {
       state.running = false
       state.done = true
@@ -468,6 +505,53 @@ function steerImpl(message: string | string[]): boolean {
     }
   }
 
+  /**
+   * Wait until both the parent agent and every live descendant are idle for a short
+   * quiet window. `listDescendants` reads the durable subagent catalog without
+   * loading or resuming any agent; `activity` is the host's live-session check.
+   */
+  async function waitForQuiescence(options: SessionQuiescenceOptions = {}): Promise<boolean> {
+    const timeoutMs = options.timeoutMs ?? 600_000
+    const pollMs = options.pollMs ?? 5_000
+    const quietMs = options.quietMs ?? 10_000
+    const deadline = Date.now() + timeoutMs
+    let calmSince: number | undefined
+    let sawDescendant = false
+    while (Date.now() < deadline) {
+      if (disposed) return false
+      const parentRunning = handle?.agent.status === 'running'
+      let childRunning = false
+      try {
+        const scope = ctx as { get?: (name: string) => unknown }
+        const runtime = scope.get?.('subagents') as
+          | { listDescendants?: (root: string) => Promise<readonly { kind?: string; activity?: string }[]> }
+          | undefined
+        if (runtime?.listDescendants !== undefined) {
+          const rows = await runtime.listDescendants(sessionId)
+          if (rows.length > 0) sawDescendant = true
+          childRunning = rows.some(row => row.kind === 'child' && row.activity === 'running')
+        }
+      } catch {
+        // Subagent inspection is optional; without it the parent state is the only signal.
+      }
+      // No descendant ever existed: there is nothing that could still be running,
+      // so avoid paying one polling interval on ordinary turns.
+      if (!parentRunning && !childRunning && !sawDescendant) return true
+      if (parentRunning || childRunning) {
+        calmSince = undefined
+      } else if (calmSince === undefined) {
+        calmSince = Date.now()
+      } else if (Date.now() - calmSince >= quietMs) {
+        // Re-read after the quiet window: a subagent settlement may have queued a
+        // parent continuation turn after the previous sample.
+        if (handle?.agent.status !== 'running') return true
+        calmSince = undefined
+      }
+      await delay(pollMs)
+    }
+    return false
+  }
+
   async function wake(): Promise<void> {
     if (!disposed) return
     if (disposing !== undefined) await disposing
@@ -528,6 +612,50 @@ function steerImpl(message: string | string[]): boolean {
     return mine
   }
 
+  /**
+   * Wake one turn with named contexts only: no user bubble, one settlement.
+   *
+   * Mirrors the workspace-session implementation, but runs on the ephemeral queue so
+   * the first turn and all later turns stay serialized.
+   */
+  function followupNamedContext(
+    entries: PluginContextEntry | readonly PluginContextEntry[],
+  ): Promise<TurnSettlement> {
+    const messages = toMessages(contextPlugin, entries)
+    if (messages.length === 0) {
+      return Promise.reject(new Error('followupNamedContext requires at least one entry'))
+    }
+    const previous = turnDone
+    const mine = previous.then(async () => {
+      if (disposed) throw new Error('session disposed')
+      if (handle === null) throw new Error('agent handle not created yet')
+      if (state.error !== null) throw new Error(`previous turn errored: ${state.error}`)
+      state.running = true
+      state.done = false
+      try {
+        for (const message of messages) handle.agent.followup(message)
+        return await runOneTurn(undefined, true)
+      } catch (error) {
+        if (!disposed) {
+          state.running = false
+          state.done = true
+          state.error = errorMessage(error)
+        }
+        throw error
+      } finally {
+        if (!disposed) {
+          state.running = false
+          state.done = true
+        }
+      }
+    })
+    turnDone = mine.then(
+      () => undefined,
+      () => undefined,
+    )
+    return mine
+  }
+
   const firstTurn = ensureFirstTurn()
 
   // 插件卸载（fiber inactive）时自动 dispose：否则 agent handle / observers / 上下文投递器会泄漏。
@@ -563,6 +691,7 @@ function steerImpl(message: string | string[]): boolean {
       }
     },
     followup,
+    followupNamedContext,
     injectContext(entries) {
       const messages = toMessages(contextPlugin, entries)
       if (delivery === null || messages.length === 0) return false
@@ -575,6 +704,7 @@ function steerImpl(message: string | string[]): boolean {
     steer(message) {
       return steerImpl(message)
     },
+    waitForQuiescence,
     cancel(cause: DshCancelCause = { kind: 'hook', reason: 'magica:cancel' }) {
       if (disposed || handle === null) return
       try {

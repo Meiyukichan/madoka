@@ -16,7 +16,7 @@
  *
  * 其余一切（代理分档、`AbortSignal.any` 合并、未消费 body、并发闸语义）**完全由发布包负责**。
  *
- * 文档：`docs/design/lattice-sdk-design.zh.md` §11.2
+ * 文档：`docs/design/castboard-sdk-design.zh.md` §11.2
  */
 
 import {
@@ -25,7 +25,7 @@ import {
 } from '@meiyukichan/dsh-magica-spellbook'
 
 /** 请求选项（undici `fetch` 的子集；不给 redirect / dispatcher / duplex） */
-export interface LatticeFetchInit {
+export interface CastboardFetchInit {
   method?: string
   headers?: Record<string, string>
   body?: string | Uint8Array
@@ -34,14 +34,14 @@ export interface LatticeFetchInit {
   timeoutMs?: number
 }
 
-export type LatticeFetch = (url: string, init?: LatticeFetchInit) => Promise<Response>
+export type CastboardFetch = (url: string, init?: CastboardFetchInit) => Promise<Response>
 
-export interface LatticeProxyConfig {
+export interface CastboardProxyConfig {
   http?: string
   https?: string
 }
 
-export interface LatticeFetchOptions {
+export interface CastboardFetchOptions {
   /** 默认超时；缺省 15 000 ms */
   defaultTimeoutMs?: number
   /**
@@ -50,18 +50,18 @@ export interface LatticeFetchOptions {
    */
   rejectUnauthorized?: boolean
   /** 显式代理；`false` = 强制直连（忽略 `http_proxy`/`https_proxy`）；缺省读环境变量 */
-  proxy?: LatticeProxyConfig | false
+  proxy?: CastboardProxyConfig | false
 }
 
 /** `global` = 运行时全局 fetch（零依赖）；`undici` = spellbook 的 Agent/代理句柄 */
-export type LatticeFetchMode = 'global' | 'undici'
+export type CastboardFetchMode = 'global' | 'undici'
 
-export interface LatticeFetchHandle {
-  fetch: LatticeFetch
+export interface CastboardFetchHandle {
+  fetch: CastboardFetch
   /** 无默认超时 + **始终直连**（大文件 / 流式响应） */
-  fetchDirect: LatticeFetch
+  fetchDirect: CastboardFetch
   configuredProxy(): string | null
-  readonly mode: LatticeFetchMode
+  readonly mode: CastboardFetchMode
   dispose(): Promise<void>
 }
 
@@ -88,7 +88,7 @@ function mergeSignals(signals: readonly (AbortSignal | undefined)[]): AbortSigna
 }
 
 /** 判定这条配置该走哪条路（不构造任何 Agent，纯计算） */
-export function netModeOf(options: LatticeFetchOptions = {}): LatticeFetchMode {
+export function netModeOf(options: CastboardFetchOptions = {}): CastboardFetchMode {
   const rejectUnauthorized = options.rejectUnauthorized ?? true
   const explicit = options.proxy
   const env = explicit === false ? { http: null, https: null } : proxyFromEnv()
@@ -99,12 +99,12 @@ export function netModeOf(options: LatticeFetchOptions = {}): LatticeFetchMode {
 }
 
 /** 走全局 fetch 的直连实现（严格 TLS + 无代理时用；零依赖） */
-function globalHandle(options: LatticeFetchOptions): LatticeFetchHandle {
+function globalHandle(options: CastboardFetchOptions): CastboardFetchHandle {
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 15_000
 
   const run = async (
     url: string,
-    init: LatticeFetchInit | undefined,
+    init: CastboardFetchInit | undefined,
     useTimeout: boolean,
   ): Promise<Response> => {
     const request: RequestInit = {}
@@ -131,7 +131,7 @@ function globalHandle(options: LatticeFetchOptions): LatticeFetchHandle {
 }
 
 /** 走 spellbook 句柄（放宽 TLS 或存在代理时用；**首次调用**才加载 undici） */
-function undiciHandle(options: LatticeFetchOptions): LatticeFetchHandle {
+function undiciHandle(options: CastboardFetchOptions): CastboardFetchHandle {
   let handle: ReturnType<typeof createProxyFetch> | null = null
   let configuredProxy: string | null = null
   let disposed = false
@@ -148,7 +148,7 @@ function undiciHandle(options: LatticeFetchOptions): LatticeFetchHandle {
   }
 
   const toSpellbookInit = (
-    init: LatticeFetchInit | undefined,
+    init: CastboardFetchInit | undefined,
   ): { method?: string; headers?: Record<string, string>; body?: string | Buffer; signal?: AbortSignal; timeoutMs?: number } => {
     const out: {
       method?: string
@@ -168,11 +168,11 @@ function undiciHandle(options: LatticeFetchOptions): LatticeFetchHandle {
   return {
     mode: 'undici',
     fetch: (url, init) => {
-      if (disposed) return Promise.reject(new Error('lattice-fetch: handle already disposed'))
+      if (disposed) return Promise.reject(new Error('castboard-fetch: handle already disposed'))
       return ensure().fetch(url, toSpellbookInit(init))
     },
     fetchDirect: (url, init) => {
-      if (disposed) return Promise.reject(new Error('lattice-fetch: handle already disposed'))
+      if (disposed) return Promise.reject(new Error('castboard-fetch: handle already disposed'))
       return ensure().insecureFetch(url, toSpellbookInit(init))
     },
     configuredProxy: () => {
@@ -200,7 +200,7 @@ function undiciHandle(options: LatticeFetchOptions): LatticeFetchHandle {
  *
  * 模式见 `netModeOf()`：严格 TLS 且无代理 → `global`；否则 → `undici`（spellbook 实现）。
  */
-export function createLatticeFetch(options: LatticeFetchOptions = {}): LatticeFetchHandle {
+export function createCastboardFetch(options: CastboardFetchOptions = {}): CastboardFetchHandle {
   return netModeOf(options) === 'global' ? globalHandle(options) : undiciHandle(options)
 }
 
@@ -208,7 +208,7 @@ export function createLatticeFetch(options: LatticeFetchOptions = {}): LatticeFe
  * 并发闸：**直接用发布包的实现**（与是否注入自定义 fetch 无关，
  * 闸在 fetch 层加，调用方 `Promise.all` 也压得住）。
  */
-export function createLimitedFetch<TInit extends LatticeFetchInit | undefined>(
+export function createLimitedFetch<TInit extends CastboardFetchInit | undefined>(
   fetcher: (url: string, init?: TInit) => Promise<Response>,
   concurrency: number,
 ): (url: string, init?: TInit) => Promise<Response> {

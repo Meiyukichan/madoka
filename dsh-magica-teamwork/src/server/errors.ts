@@ -41,7 +41,6 @@ export const errors = {
   tokenExpTooLong: () => new BusinessError('token_exp_too_long', 401, 'token 有效期超过服务端上限'),
   accountDisabled: () => new BusinessError('account_disabled', 403, '账号已被禁用'),
   registrationClosed: () => new BusinessError('registration_closed', 403, '当前不对外开放注册'),
-  invalidRegistrationCode: () => new BusinessError('invalid_registration_code', 403, '注册码缺失或错误'),
   accountExists: () => new BusinessError('account_exists', 409, '账号已存在'),
   accountNotFound: (accountId: string) => new BusinessError('account_not_found', 404, '账号不存在', { accountId }),
   lastAdministrator: () => new BusinessError('last_administrator', 409, '不能降级最后一个 administrator'),

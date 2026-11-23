@@ -1,4 +1,4 @@
-﻿/** 账号模块：注册 / 登录 / 鉴权 / 改密 / 账号管控 */
+/** 账号模块：注册 / 登录 / 鉴权 / 改密 / 账号管控 */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { bootHarness, isCode, PASSWORD, PASSWORD2, signToken } from './helpers.js'
@@ -163,7 +163,7 @@ test('A6 查账号：只有 administrator 能调', async (t) => {
   await assert.rejects(() => bob.lookupAccount('alice'), isCode('forbidden'))
 })
 
-test('注册闸门：code 模式需要正确注册码', async (t) => {
+test('注册闸门：closed 模式拒绝注册', async (t) => {
   const { mkdtempSync, rmSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
@@ -175,20 +175,14 @@ test('注册闸门：code 模式需要正确注册码', async (t) => {
     port: 0,
     log: () => {},
     rateLimit: false,
-    argv: ['--registration', 'code', '--registration-code', 's3cr3t'],
+    argv: ['--registration', 'closed'],
   })
   t.after(async () => {
     await server.close()
     rmSync(dir, { recursive: true, force: true })
   })
   const c = new TeamworkClient({ host: `http://127.0.0.1:${server.port}`, persist: false })
-  await assert.rejects(() => c.register({ accountId: 'noCode', password: PASSWORD }), isCode('invalid_registration_code'))
-  await assert.rejects(
-    () => c.register({ accountId: 'badCode', password: PASSWORD }, { registrationCode: 'wrong' }),
-    isCode('invalid_registration_code'),
-  )
-  const ok = await c.register({ accountId: 'withCode', password: PASSWORD }, { registrationCode: 's3cr3t' })
-  assert.equal(ok.account.accountId, 'withCode')
+  await assert.rejects(() => c.register({ accountId: 'noEntry', password: PASSWORD }), isCode('registration_closed'))
 })
 
 test('SDK：凭据加密落盘 + 重新载入 + 重置', async (t) => {

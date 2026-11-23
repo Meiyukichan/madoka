@@ -1,4 +1,4 @@
-﻿/**
+/**
  * bin 入口：解析配置 → 打开/迁移数据库 → 抢单实例锁 → 监听 → 优雅停机。
  *
  * 用户侧零手工步骤：目录、数据库、表结构都在这里自动就绪。
@@ -12,6 +12,7 @@ import { createContext, PROTOCOL, SERVICE_VERSION, type AppContext } from './con
 import { buildApp } from './app.js'
 import { pathToFileURL } from 'node:url'
 import { isLoopback } from './http/auth-hook.js'
+import { formatDomain } from '../shared/domain.js'
 
 interface LockFile {
   pid: number
@@ -52,7 +53,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<{
   close: () => Promise<void>
 }> {
   const log = options.log ?? ((m: string) => process.stdout.write(`${m}\n`))
-  const { config, action } = resolveConfig({ argv: options.argv ?? [] })
+  const argv = [...(options.argv ?? [])]
+  if (options.dataDir !== undefined && !argv.includes('--data-dir')) argv.push('--data-dir', options.dataDir)
+  if (options.port !== undefined && !argv.includes('--port')) argv.push('--port', String(options.port))
+  const { config, action } = resolveConfig({ argv })
   if (action === 'help') {
     process.stdout.write(HELP)
     throw new Error('help')
@@ -144,7 +148,48 @@ export async function startServer(options: StartServerOptions = {}): Promise<{
   }
   const address = app.server.address()
   const actualPort = typeof address === 'object' && address !== null ? address.port : finalConfig.port
-  writeFileSync(lockPath, JSON.stringify({ ...lock, pid: process.pid, port: actualPort }, null, 2), { mode: 0o600 })
+  const configPath = join(finalConfig.dataDir, 'config.json')
+  const template = {
+    domain: finalConfig.port === 0 ? formatDomain(finalConfig.host, actualPort) : finalConfig.domain,
+    tokenTtlDays: Math.round(finalConfig.tokenTtlSeconds / 86_400),
+    maxUploadMb: Math.round(finalConfig.maxUploadBytes / (1024 * 1024)),
+    shutdownGraceMs: finalConfig.shutdownGraceMs,
+    startTimeoutMs: finalConfig.startTimeoutMs,
+    registration: finalConfig.registration,
+    privateMemberLimit: finalConfig.privateMemberLimit,
+    authCacheTtlMs: finalConfig.authCacheTtlMs,
+    rateLimit: finalConfig.rateLimit,
+    localServiceRestart: false,
+    logLevel: finalConfig.logLevel,
+    logFile: finalConfig.logFile,
+  }
+  const lockBody = JSON.stringify({ ...lock, pid: process.pid, port: actualPort }, null, 2)
+
+  // A fresh install should leave a visible, editable file with every effective setting.
+  // Never overwrite a user file. Re-check periodically so a deleted file self-heals while
+  // the service is already running (dsh dev then sees the same state on every restart).
+  const ensureRuntimeFiles = (): void => {
+    if (closing) return
+    if (!existsSync(lockPath)) {
+      try {
+        writeFileSync(lockPath, lockBody, { mode: 0o600 })
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (!existsSync(configPath)) {
+      try {
+        writeFileSync(configPath, `${JSON.stringify(template, null, 2)}\n`, {
+          encoding: 'utf8',
+          flag: 'wx',
+        })
+      } catch {
+        /* another process may have won the race; its file is equally valid */
+      }
+    }
+  }
+  ctx.ensureRuntimeFiles = ensureRuntimeFiles
+  ensureRuntimeFiles()
   log(`[server] listening on http://${finalConfig.host}:${actualPort}${''}`)
   log(`[server] data: ${finalConfig.dataDir}`)
 

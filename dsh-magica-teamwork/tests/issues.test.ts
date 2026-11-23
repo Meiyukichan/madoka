@@ -1,4 +1,4 @@
-﻿/** Issue：提交 / upsert / 查询 / 覆盖 / 遗弃 / 状态批量 / 评论 / 附件 / 来源 */
+/** Issue：提交 / upsert / 查询 / 覆盖 / 遗弃 / 状态批量 / 评论 / 附件 / 来源 */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { bootHarness, isCode, PASSWORD, signToken } from './helpers.js'
@@ -203,31 +203,125 @@ test('评论：内容校验 + 不存在的 issue', async (t) => {
   await assert.rejects(() => alice.comments.add('ghost', { content: 'x' }), isCode('issue_not_found'))
 })
 
-test('附件：挂载 upsert + 按类型过滤 + invalid fileId / type', async (t) => {
+test('附件：目标 issue + 角色 assigner/assignee；按 target/role 过滤', async (t) => {
   const h = await bootHarness()
   t.after(() => h.close())
   const alice = await h.register('alice')
   const [id] = await alice.issues.create([{ title: 't', assignee: 'alice' }])
 
-  const file = await alice.files.upload(Buffer.from('hello'), { fileName: 'a.txt' })
-  const r = await alice.attachments.add([{ issueId: id!, fileId: file.fileId, type: 'assigner', description: '输入' }])
+  const a = await alice.files.upload(Buffer.from('hello'), { fileName: 'a.txt' })
+  const b = await alice.files.upload(Buffer.from('world'), { fileName: 'b.txt' })
+  const r = await alice.attachments.add([
+    { targetType: 'issue', targetId: id!, fileId: a.fileId, role: 'assigner', fileName: 'a.txt', description: '输入' },
+    { targetType: 'issue', targetId: id!, fileId: b.fileId, role: 'assignee' },
+  ])
+  assert.equal(r.count, 2)
+
+  const all = await alice.attachments.list('issue', id!)
+  assert.equal(all.length, 2)
+  const assigners = await alice.attachments.list('issue', id!, 'assigner')
+  assert.equal(assigners.length, 1)
+  assert.equal(assigners[0]?.fileId, a.fileId)
+  assert.equal(assigners[0]?.role, 'assigner')
+  assert.equal(assigners[0]?.targetType, 'issue')
+  assert.equal(assigners[0]?.targetId, id)
+  assert.equal(assigners[0]?.fileName, 'a.txt')
+  assert.equal((await alice.attachments.list('issue', id!, 'assignee')).length, 1)
+
+  // 保留下来的 issue 专用路径：targetType 固定 issue，role 可选
+  const token = signToken(alice.accountToken, 'alice')
+  const legacy = await h.raw('GET', `/issues/${encodeURIComponent(id!)}/attachments?role=assignee`, { token, account: 'alice' })
+  assert.equal(legacy.status, 200)
+  assert.equal((legacy.body as Array<{ role: string }>).length, 1)
+  assert.equal((legacy.body as Array<{ role: string }>)[0]?.role, 'assignee')
+})
+
+test('附件：目标 comment 允许先于评论行存在（弱引用），评论落库后仍可查', async (t) => {
+  const h = await bootHarness()
+  t.after(() => h.close())
+  const alice = await h.register('alice')
+  const [id] = await alice.issues.create([{ title: 't', assignee: 'alice' }])
+  const file = await alice.files.upload(Buffer.from('hello'), { fileName: 'c.txt' })
+  const commentId = 'c-att-before-row'
+
+  // 云端评论行还不存在：附件可以先挂（本地评论异步发布）
+  const r = await alice.attachments.add([{ targetType: 'comment', targetId: commentId, fileId: file.fileId, role: 'assignee' }])
   assert.equal(r.count, 1)
 
-  const list = await alice.attachments.list(id!)
-  assert.equal(list.length, 1)
-  assert.equal(list[0]?.type, 'assigner')
-  assert.equal((await alice.attachments.list(id!, 'assignee')).length, 0)
+  const before = await alice.attachments.list('comment', commentId)
+  assert.equal(before.length, 1, '评论行不存在也照样列出附件')
+  assert.equal(before[0]?.targetType, 'comment')
+  assert.equal(before[0]?.targetId, commentId)
+  assert.equal(before[0]?.role, 'assignee')
+
+  // 评论落库后，同一附件行仍在
+  await alice.comments.add(id!, { content: '带附件', commentId })
+  const after = await alice.attachments.list('comment', commentId)
+  assert.equal(after.length, 1)
+  assert.equal(after[0]?.fileId, file.fileId)
+
+  // targetId 只要形状合法（1..100）即可，不做存在性校验
+  const orphan = await alice.attachments.add([
+    { targetType: 'comment', targetId: 'no-such-comment', fileId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', role: 'assigner' },
+  ])
+  assert.equal(orphan.count, 1)
+})
+
+test('附件：同 target + file 重复挂载 upsert，不新增行', async (t) => {
+  const h = await bootHarness()
+  t.after(() => h.close())
+  const alice = await h.register('alice')
+  const [id] = await alice.issues.create([{ title: 't', assignee: 'alice' }])
+  const file = await alice.files.upload(Buffer.from('hello'), { fileName: 'u.txt' })
+
+  await alice.attachments.add([
+    { targetType: 'issue', targetId: id!, fileId: file.fileId, role: 'assigner', description: '第一次' },
+  ])
+  await alice.attachments.add([
+    { targetType: 'issue', targetId: id!, fileId: file.fileId, role: 'assignee', fileName: '改名.txt' },
+  ])
+  const rows = await alice.attachments.list('issue', id!)
+  assert.equal(rows.length, 1, '同 target + file 只能有一行')
+  assert.equal(rows[0]?.role, 'assignee')
+  assert.equal(rows[0]?.fileName, '改名.txt')
+  assert.equal(rows[0]?.description, '第一次', '描述缺省时保留原值（COALESCE）')
+})
+
+test('附件：枚举 / fileId / 目标校验', async (t) => {
+  const h = await bootHarness()
+  t.after(() => h.close())
+  const alice = await h.register('alice')
+  const [id] = await alice.issues.create([{ title: 't', assignee: 'alice' }])
+  const file = await alice.files.upload(Buffer.from('hello'), { fileName: 'v.txt' })
 
   await assert.rejects(
-    () => alice.attachments.add([{ issueId: id!, fileId: 'not-a-uuid', type: 'assigner' }]),
+    () => alice.attachments.add([{ targetType: 'issue', targetId: id!, fileId: 'not-a-uuid', role: 'assigner' }]),
     isCode('invalid_file_id'),
   )
   await assert.rejects(
-    () => alice.attachments.add([{ issueId: id!, fileId: file.fileId, type: 'input' as never }]),
-    isCode('invalid_type'),
+    () => alice.attachments.add([{ targetType: 'input' as never, targetId: id!, fileId: file.fileId, role: 'assigner' }]),
+    isCode('invalid_request'),
+  )
+  await assert.rejects(
+    () => alice.attachments.add([{ targetType: 'issue', targetId: id!, fileId: file.fileId, role: 'output' as never }]),
+    isCode('invalid_request'),
+  )
+  await assert.rejects(
+    () => alice.attachments.add([{ targetType: 'issue', targetId: '', fileId: file.fileId, role: 'assigner' }]),
+    isCode('invalid_request'),
+  )
+  await assert.rejects(
+    () => alice.attachments.add([{ targetType: 'issue', targetId: 'x'.repeat(101), fileId: file.fileId, role: 'assigner' }]),
+    isCode('invalid_request'),
+  )
+  await assert.rejects(
+    () => alice.attachments.add([{ targetType: 'issue', targetId: 'ghost', fileId: file.fileId, role: 'assigner' }]),
+    isCode('issue_not_found'),
   )
   // 不校验 fileId 是否存在（与契约一致）
-  const ghost = await alice.attachments.add([{ issueId: id!, fileId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', type: 'assignee' }])
+  const ghost = await alice.attachments.add([
+    { targetType: 'issue', targetId: id!, fileId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', role: 'assignee' },
+  ])
   assert.equal(ghost.count, 1)
 })
 

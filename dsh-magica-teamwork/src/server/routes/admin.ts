@@ -39,8 +39,14 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     endpoints: ENDPOINTS,
   }))
 
-  /** M3 停机：锁文件 token + 回环，或 administrator JWT */
-  app.post(`${v1}/admin/shutdown`, async (req, reply) => {
+  /** 运维补写运行期文件：SDK 在 already-running 时按需调用，不轮询。 */
+  app.post(`${v1}/admin/runtime-files`, async (req, reply) => {
+    if (!isLoopback(ipOf(req))) throw errors.forbidden('只接受回环来源')
+    ctx.ensureRuntimeFiles?.()
+    return reply.code(200).send({ ok: true })
+  })
+
+  /** M3 停机：锁文件 token + 回环，或 administrator JWT */  app.post(`${v1}/admin/shutdown`, async (req, reply) => {
     const ip = ipOf(req)
     if (!isLoopback(ip)) throw errors.forbidden('只接受回环来源')
 

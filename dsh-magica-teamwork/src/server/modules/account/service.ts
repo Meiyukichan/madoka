@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 账号业务层（A1–A6）。
  *
  * 硬要求（写错就是安全洞）：
@@ -31,8 +31,7 @@ export interface AuthSessionVo {
 export interface AccountServiceDeps {
   db: DatabaseSync
   ttlSeconds: number
-  registration: 'open' | 'code' | 'closed'
-  registrationCode: string | null
+  registration: 'open' | 'closed'
   authCache: AuthCache
   /** 失败延迟（测试里设为 0） */
   failureDelayMs?: number
@@ -53,13 +52,8 @@ export class AccountService {
   }
 
   /** A1 注册（注册即登录） */
-  async register(input: Record<string, unknown>, registrationCode: string | undefined): Promise<AuthSessionVo> {
+  async register(input: Record<string, unknown>): Promise<AuthSessionVo> {
     if (this.deps.registration === 'closed') throw errors.registrationClosed()
-    if (this.deps.registration === 'code') {
-      if (!this.deps.registrationCode || registrationCode !== this.deps.registrationCode) {
-        throw errors.invalidRegistrationCode()
-      }
-    }
 
     const accountId = this.requireAccountId(input.accountId)
     const plain = this.requirePassword(input.password)

@@ -1,4 +1,4 @@
-﻿/** 应用上下文：一次启动里所有模块共享的东西 */
+/** 应用上下文：一次启动里所有模块共享的东西 */
 import type { DatabaseSync } from 'node:sqlite'
 import type { Config } from './config.js'
 import { AuthCache } from './auth/cache.js'
@@ -12,11 +12,11 @@ import { FileService } from './modules/file/service.js'
 export const PROTOCOL = 'dsh-teamwork/1' as const
 export const SERVICE_VERSION = '0.2.0-alpha.1' as const
 
-/** 已实现的端点清单（`/version` 的能力探测，也是「47 个是否齐了」的自检） */
+/** 已实现的端点清单（`/version` 的能力探测，也是「49 个是否齐了」的自检） */
 export const ENDPOINTS: readonly string[] = [
   'POST /auth/register', 'POST /auth/login', 'GET /auth/me', 'POST /auth/logout',
   'PUT /auth/password', 'GET /auth/accounts',
-  'GET /projects', 'GET /projects/mine', 'GET /projects/:id', 'POST /projects',
+  'GET /projects', 'GET /projects/mine', 'GET /projects/:id', 'GET /projects/:id/accounts', 'POST /projects',
   'PUT /projects/:id', 'DELETE /projects/:id', 'GET /projects/:id/members',
   'POST /projects/:id/members', 'DELETE /projects/:id/members/:accountId',
   'PUT /projects/:id/owner',
@@ -25,7 +25,7 @@ export const ENDPOINTS: readonly string[] = [
   'POST /issues/batch', 'GET /issues', 'GET /issues/:issueId', 'PUT /issues/:issueId',
   'DELETE /issues/:issueId', 'POST /issues/status/batch', 'GET /issues/comments',
   'GET /issues/comments/cursor', 'POST /issues/:issueId/comments', 'GET /issues/:issueId/comments',
-  'POST /issues/attachments/batch', 'GET /issues/:issueId/attachments',
+  'POST /issues/attachments/batch', 'GET /issues/:issueId/attachments', 'GET /attachments',
   'GET /issue-sources', 'POST /issue-sources/batch', 'PUT /issue-sources/:id', 'DELETE /issue-sources/:id',
   'POST /files', 'GET /files/:fileId', 'DELETE /files/:fileId',
   'GET /health', 'GET /version', 'POST /admin/shutdown',
@@ -49,6 +49,8 @@ export interface AppContext {
   shutdownToken: string | null
   /** 当前是否正在停机（M1 返回 503） */
   stopping: boolean
+  /** 运维入口：按需补写 config.json / run/server.json（不轮询）。 */
+  ensureRuntimeFiles?: () => void
 }
 
 export interface CreateContextArgs {
@@ -77,11 +79,10 @@ export function createContext(args: CreateContextArgs): AppContext {
     db,
     ttlSeconds: config.tokenTtlSeconds,
     registration: config.registration,
-    registrationCode: config.registrationCode,
     authCache,
     failureDelayMs: args.failureDelayMs ?? 300,
   })
-  const projects = new ProjectService({ db, privateMemberLimit: config.privateMemberLimit })
+  const projects = new ProjectService({ db, privateMemberLimit: config.privateMemberLimit, accounts })
   const devices = new DeviceService({ db })
   const issues = new IssueService({ db, privateMemberLimit: config.privateMemberLimit })
   const files = new FileService({ db, dataDir: config.dataDir, maxUploadBytes: config.maxUploadBytes })

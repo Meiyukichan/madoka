@@ -14,65 +14,66 @@
  */
 
 import {
-  LATTICE_ENDPOINTS,
+  CASTBOARD_ENDPOINTS,
   endpointCapabilityKey,
-  type LatticeAuthMode,
-  type LatticeEndpointName,
-  type LatticeHttpMethod,
+  type CastboardAuthMode,
+  type CastboardEndpointName,
+  type CastboardHttpMethod,
 } from './endpoints.js'
 import {
-  createLatticeFetch,
+  createCastboardFetch,
   createLimitedFetch,
-  type LatticeFetch,
-  type LatticeFetchInit,
-  type LatticeFetchOptions,
+  type CastboardFetch,
+  type CastboardFetchInit,
+  type CastboardFetchOptions,
 } from './net.js'
-import { latticeFail, latticeOk, type LatticeErrorCode, type LatticeFail, type LatticeResult } from './result.js'
-import type { LatticeAuthLike } from './auth.js'
-import { LATTICE_BODY_LIMIT, describeHttpFailure, safeText, seg } from './wire.js'
+import { castboardFail, castboardOk, type CastboardErrorCode, type CastboardFail, type CastboardResult } from './result.js'
+import { castboardLog } from './log.js'
+import type { CastboardAuthLike } from './auth.js'
+import { CASTBOARD_BODY_LIMIT, describeHttpFailure, safeText, seg } from './wire.js'
 
-/** 默认超时（与 `LatticeOptions.timeoutMs` 一致） */
-export const LATTICE_DEFAULT_TIMEOUT_MS = 15_000
+/** 默认超时（与 `CastboardOptions.timeoutMs` 一致） */
+export const CASTBOARD_DEFAULT_TIMEOUT_MS = 15_000
 /** 出站并发上限：单 Node 进程 libuv 只有 4 个线程池槽 */
-export const LATTICE_DEFAULT_MAX_CONCURRENCY = 4
+export const CASTBOARD_DEFAULT_MAX_CONCURRENCY = 4
 /** 默认重试次数（仅幂等请求） */
-export const LATTICE_DEFAULT_RETRIES = 2
+export const CASTBOARD_DEFAULT_RETRIES = 2
 /** 文件端点最小超时（大文件上传/下载） */
-export const LATTICE_FILE_TIMEOUT_MS = 60_000
+export const CASTBOARD_FILE_TIMEOUT_MS = 60_000
 
-export interface LatticeTransportOptions {
+export interface CastboardTransportOptions {
   /** 已归一（含前缀）的 base URL */
   baseUrl: string
   timeoutMs?: number
   maxConcurrency?: number
   retries?: number
   /** 注入自定义 fetch（仍会套并发闸与超时） */
-  fetchImpl?: LatticeFetch
+  fetchImpl?: CastboardFetch
   /** 出站句柄选项（TLS / 代理）；`fetchImpl` 给了就忽略 */
-  fetchOptions?: LatticeFetchOptions
+  fetchOptions?: CastboardFetchOptions
   onRequest?: (info: { method: string; path: string; status: number; ms: number }) => void
-  auth?: LatticeAuthLike
+  auth?: CastboardAuthLike
   /** 已知能力清单（`/version.endpoints[]`）；`null` = 未探测 */
   capabilities?: readonly string[] | null
 }
 
-export interface LatticeRequestOptions {
-  method?: LatticeHttpMethod
+export interface CastboardRequestOptions {
+  method?: CastboardHttpMethod
   body?: unknown
   query?: Record<string, string | number | boolean | null | undefined>
   /** `request()` 用；默认 `signed` */
-  auth?: LatticeAuthMode
+  auth?: CastboardAuthMode
   timeoutMs?: number
   /** 调用方已知本次带业务幂等键 → 允许重试（D15） */
   idempotent?: boolean
   headers?: Record<string, string>
 }
 
-export interface LatticeRawOptions {
-  method?: LatticeHttpMethod
+export interface CastboardRawOptions {
+  method?: CastboardHttpMethod
   body?: string | Uint8Array
   query?: Record<string, string | number | boolean | null | undefined>
-  auth?: LatticeAuthMode
+  auth?: CastboardAuthMode
   timeoutMs?: number
   idempotent?: boolean
   headers?: Record<string, string>
@@ -83,7 +84,7 @@ export interface LatticeRawOptions {
 /** 失败的原始描述（尚未包成信封） */
 interface AttemptFailure {
   status: number
-  code: LatticeErrorCode
+  code: CastboardErrorCode
   reason: string
   body?: string
   retryable: boolean
@@ -92,33 +93,33 @@ interface AttemptFailure {
 type AttemptOk = { ok: true; status: number; data: Response }
 type AttemptResult = AttemptOk | { ok: false; failure: AttemptFailure }
 
-export class LatticeTransport {
+export class CastboardTransport {
   readonly baseUrl: string
   readonly timeoutMs: number
   readonly maxConcurrency: number
   readonly retries: number
-  private readonly auth: LatticeAuthLike | undefined
-  private readonly onRequest: LatticeTransportOptions['onRequest']
-  private readonly fetchImpl: LatticeFetch
-  private readonly ownHandle: ReturnType<typeof createLatticeFetch> | null
+  private readonly auth: CastboardAuthLike | undefined
+  private readonly onRequest: CastboardTransportOptions['onRequest']
+  private readonly fetchImpl: CastboardFetch
+  private readonly ownHandle: ReturnType<typeof createCastboardFetch> | null
   private capabilities: readonly string[] | null
   private disposed = false
 
-  constructor(options: LatticeTransportOptions) {
+  constructor(options: CastboardTransportOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
-    this.timeoutMs = Math.max(1, options.timeoutMs ?? LATTICE_DEFAULT_TIMEOUT_MS)
-    this.maxConcurrency = Math.max(1, Math.floor(options.maxConcurrency ?? LATTICE_DEFAULT_MAX_CONCURRENCY))
-    this.retries = Math.max(0, Math.floor(options.retries ?? LATTICE_DEFAULT_RETRIES))
+    this.timeoutMs = Math.max(1, options.timeoutMs ?? CASTBOARD_DEFAULT_TIMEOUT_MS)
+    this.maxConcurrency = Math.max(1, Math.floor(options.maxConcurrency ?? CASTBOARD_DEFAULT_MAX_CONCURRENCY))
+    this.retries = Math.max(0, Math.floor(options.retries ?? CASTBOARD_DEFAULT_RETRIES))
     this.auth = options.auth
     this.onRequest = options.onRequest
     this.capabilities = options.capabilities ?? null
 
-    let raw: LatticeFetch
+    let raw: CastboardFetch
     if (options.fetchImpl !== undefined) {
       this.ownHandle = null
       raw = options.fetchImpl
     } else {
-      const handle = createLatticeFetch({
+      const handle = createCastboardFetch({
         defaultTimeoutMs: this.timeoutMs,
         ...(options.fetchOptions ?? {}),
       })
@@ -135,19 +136,19 @@ export class LatticeTransport {
   }
 
   /** 探过能力后，某个端点是否被服务端声明 */
-  supports(name: LatticeEndpointName): boolean {
+  supports(name: CastboardEndpointName): boolean {
     if (this.capabilities === null) return true
     return this.capabilities.includes(endpointCapabilityKey(name))
   }
 
   /** 按端点表发 JSON 请求 */
   async call<T>(
-    name: LatticeEndpointName,
+    name: CastboardEndpointName,
     params: Record<string, string | number> = {},
-    options: Omit<LatticeRequestOptions, 'method' | 'auth'> = {},
-  ): Promise<LatticeResult<T>> {
+    options: Omit<CastboardRequestOptions, 'method' | 'auth'> = {},
+  ): Promise<CastboardResult<T>> {
     if (!this.supports(name)) return this.unsupported(name)
-    const endpoint = LATTICE_ENDPOINTS[name]
+    const endpoint = CASTBOARD_ENDPOINTS[name]
     const path = this.pathOf(endpoint.path, params)
     if (typeof path !== 'string') return path
     const raw = await this.perform(path, {
@@ -162,12 +163,12 @@ export class LatticeTransport {
 
   /** 按端点表发原始请求（自己读 `Response`） */
   async callRaw(
-    name: LatticeEndpointName,
+    name: CastboardEndpointName,
     params: Record<string, string | number> = {},
-    options: Omit<LatticeRawOptions, 'method' | 'auth'> = {},
-  ): Promise<LatticeResult<Response>> {
+    options: Omit<CastboardRawOptions, 'method' | 'auth'> = {},
+  ): Promise<CastboardResult<Response>> {
     if (!this.supports(name)) return this.unsupported(name)
-    const endpoint = LATTICE_ENDPOINTS[name]
+    const endpoint = CASTBOARD_ENDPOINTS[name]
     const path = this.pathOf(endpoint.path, params)
     if (typeof path !== 'string') return path
     return this.perform(path, {
@@ -179,7 +180,7 @@ export class LatticeTransport {
   }
 
   /** 逃生口：按裸路径发 JSON（端点表之外，同 host） */
-  async request<T>(path: string, options: LatticeRequestOptions = {}): Promise<LatticeResult<T>> {
+  async request<T>(path: string, options: CastboardRequestOptions = {}): Promise<CastboardResult<T>> {
     const method = options.method ?? 'GET'
     const raw = await this.perform(path, {
       ...options,
@@ -192,7 +193,7 @@ export class LatticeTransport {
   }
 
   /** 逃生口：按裸路径发原始请求 */
-  async raw(path: string, options: LatticeRawOptions = {}): Promise<LatticeResult<Response>> {
+  async raw(path: string, options: CastboardRawOptions = {}): Promise<CastboardResult<Response>> {
     const method = options.method ?? 'GET'
     return this.perform(path, {
       ...options,
@@ -217,8 +218,9 @@ export class LatticeTransport {
 
   // ── 内部 ────────────────────────────────────────────────────────────────
 
-  private unsupported(name: LatticeEndpointName): LatticeFail {
-    return latticeFail({
+  private unsupported(name: CastboardEndpointName): CastboardFail {
+    castboardLog('warn', 'sdk-unsupported', name)
+    return castboardFail({
       status: 0,
       code: 'unsupported',
       reason: `服务端未声明该端点（见 /version 的 endpoints[]）：${name}`,
@@ -226,13 +228,13 @@ export class LatticeTransport {
   }
 
   /** 占位符替换 + 编码；残留 `{` → `internal_error`（不让字面量打到服务端） */
-  private pathOf(path: string, params: Record<string, string | number>): string | LatticeFail {
+  private pathOf(path: string, params: Record<string, string | number>): string | CastboardFail {
     let out = path
     for (const [key, value] of Object.entries(params)) {
       out = out.split(`{${key}}`).join(seg(value))
     }
     if (out.includes('{') || out.includes('}')) {
-      return latticeFail({
+      return castboardFail({
         status: 0,
         code: 'internal_error',
         reason: `端点路径占位符没替换完：${out}（SDK 内部错误，请报 bug）`,
@@ -242,7 +244,7 @@ export class LatticeTransport {
     return out
   }
 
-  private buildUrl(path: string, query: LatticeRequestOptions['query']): string {
+  private buildUrl(path: string, query: CastboardRequestOptions['query']): string {
     const suffix = path.startsWith('/') ? path : `/${path}`
     const url = new URL(`${this.baseUrl}${suffix}`)
     for (const [key, value] of Object.entries(query ?? {})) {
@@ -253,8 +255,8 @@ export class LatticeTransport {
   }
 
   private authHeaders(
-    mode: LatticeAuthMode,
-  ): { ok: true; headers: Record<string, string> } | { ok: false; fail: LatticeFail } {
+    mode: CastboardAuthMode,
+  ): { ok: true; headers: Record<string, string> } | { ok: false; fail: CastboardFail } {
     if (mode === 'public') return { ok: true, headers: {} }
     const auth = this.auth
     const snapshot = auth?.headers() ?? null
@@ -262,7 +264,7 @@ export class LatticeTransport {
       if (mode === 'local') return { ok: true, headers: {} }
       return {
         ok: false,
-        fail: latticeFail({
+        fail: castboardFail({
           status: 401,
           code: 'login_required',
           reason: '需要先登录：client 还没有会话（调用 auth.login() / auth.register()，或注入 credentials / tokenProvider）',
@@ -274,7 +276,7 @@ export class LatticeTransport {
       if (role !== undefined && role !== 'administrator') {
         return {
           ok: false,
-          fail: latticeFail({
+          fail: castboardFail({
             status: 403,
             code: 'forbidden',
             reason: `该端点需要 administrator，当前账号 globalRole=${role}`,
@@ -290,17 +292,24 @@ export class LatticeTransport {
 
   private async perform(
     path: string,
-    options: LatticeRequestOptions | LatticeRawOptions,
-  ): Promise<LatticeResult<Response>> {
+    options: CastboardRequestOptions | CastboardRawOptions,
+  ): Promise<CastboardResult<Response>> {
+    const method = options.method ?? 'GET'
+    const startedAt = Date.now()
+    // Every SDK HTTP interface funnels through here: one request line + one outcome line.
+    // Never log headers/body: they may contain tokens or passwords.
+    castboardLog('info', 'sdk-request', `${method} ${path}`)
     if (this.disposed) {
-      return latticeFail({ status: 0, code: 'internal_error', reason: 'client 已 dispose，不能再发请求' })
+      return castboardFail({ status: 0, code: 'internal_error', reason: 'client 已 dispose，不能再发请求' })
     }
     const mode = options.auth ?? 'signed'
     const authResult = this.authHeaders(mode)
-    if (!authResult.ok) return authResult.fail
+    if (!authResult.ok) {
+      castboardLog('warn', 'sdk-auth-failed', `${method} ${path} ${mode} ${authResult.fail.code}`)
+      return authResult.fail
+    }
 
     const url = this.buildUrl(path, options.query)
-    const method = options.method ?? 'GET'
     const body = 'body' in options ? options.body : undefined
     const noTimeout = 'noTimeout' in options ? options.noTimeout === true : false
     const headers: Record<string, string> = { ...authResult.headers, ...(options.headers ?? {}) }
@@ -313,7 +322,7 @@ export class LatticeTransport {
         try {
           payload = JSON.stringify(body)
         } catch (err) {
-          return latticeFail({
+          return castboardFail({
             status: 0,
             code: 'internal_error',
             reason: `请求体无法序列化：${(err as Error).message}`,
@@ -326,7 +335,7 @@ export class LatticeTransport {
 
     const idempotent = options.idempotent === true
     const attempts = 1 + (idempotent ? this.retries : 0)
-    let lastFail: LatticeFail | null = null
+    let lastFail: CastboardFail | null = null
 
     for (let attempt = 0; attempt < attempts; attempt++) {
       const outcome = await this.attempt(url, {
@@ -335,10 +344,13 @@ export class LatticeTransport {
         ...(payload === undefined ? {} : { body: payload }),
         ...(noTimeout ? { noTimeout: true } : { timeoutMs: options.timeoutMs ?? this.timeoutMs }),
       })
-      if (outcome.ok) return latticeOk(outcome.status, outcome.data)
+      if (outcome.ok) {
+        castboardLog('info', 'sdk-response', `${method} ${path} ${outcome.status} ${Date.now() - startedAt}ms`)
+        return castboardOk(outcome.status, outcome.data)
+      }
 
       const failure = outcome.failure
-      lastFail = latticeFail({
+      lastFail = castboardFail({
         status: failure.status,
         code: failure.code,
         reason: failure.reason,
@@ -350,10 +362,19 @@ export class LatticeTransport {
       await sleep(backoffMs(attempt))
     }
 
-    return (
-      lastFail ??
-      latticeFail({ status: 0, code: 'internal_error', reason: '请求未发出（SDK 内部错误）', method, path })
+    const failure = lastFail ?? castboardFail({
+      status: 0,
+      code: 'internal_error',
+      reason: '请求未发出（SDK 内部错误）',
+      method,
+      path,
+    })
+    castboardLog(
+      'warn',
+      'sdk-error',
+      `${method} ${path} ${failure.status} ${failure.code} ${Date.now() - startedAt}ms`,
     )
+    return failure
   }
 
   private async attempt(
@@ -367,7 +388,7 @@ export class LatticeTransport {
     },
   ): Promise<AttemptResult> {
     const started = Date.now()
-    const requestInit: LatticeFetchInit = {
+    const requestInit: CastboardFetchInit = {
       method: init.method,
       headers: init.headers,
       ...(init.body === undefined ? {} : { body: init.body }),
@@ -418,7 +439,7 @@ export class LatticeTransport {
       status: response.status,
       code: parsed.code ?? 'http_error',
       reason: parsed.message ?? describeHttpFailure(response.status, text),
-      body: text.length > LATTICE_BODY_LIMIT ? `${text.slice(0, LATTICE_BODY_LIMIT)}…` : text,
+      body: text.length > CASTBOARD_BODY_LIMIT ? `${text.slice(0, CASTBOARD_BODY_LIMIT)}…` : text,
       retryable: response.status === 429 || response.status >= 500,
     }
 
@@ -518,32 +539,32 @@ export class LatticeTransport {
   }
 
   /** 直连 fetch（无默认超时；TLS/代理句柄下走 `fetchDirect`） */
-  private async fetchDirect(url: string, init: LatticeFetchInit): Promise<Response> {
+  private async fetchDirect(url: string, init: CastboardFetchInit): Promise<Response> {
     if (this.ownHandle !== null) return this.ownHandle.fetchDirect(url, init)
     return this.fetchImpl(url, init)
   }
 
-  private async parseJson<T>(response: Response, method: string, path: string): Promise<LatticeResult<T>> {
+  private async parseJson<T>(response: Response, method: string, path: string): Promise<CastboardResult<T>> {
     void method
     void path
-    if (response.status === 204) return latticeOk(204, undefined as T)
+    if (response.status === 204) return castboardOk(204, undefined as T)
     const text = await safeText(response)
-    if (text.trim() === '') return latticeOk(response.status, undefined as T)
+    if (text.trim() === '') return castboardOk(response.status, undefined as T)
     try {
-      return latticeOk(response.status, JSON.parse(text) as T)
+      return castboardOk(response.status, JSON.parse(text) as T)
     } catch {
       // 非 JSON 但 2xx：把文本原样给调用方（网关 HTML 之类）
-      return latticeOk(response.status, text as unknown as T)
+      return castboardOk(response.status, text as unknown as T)
     }
   }
 }
 
-function parseErrorBody(text: string): { code?: LatticeErrorCode; message?: string } {
+function parseErrorBody(text: string): { code?: CastboardErrorCode; message?: string } {
   if (text.trim() === '') return {}
   try {
     const parsed = JSON.parse(text) as { code?: unknown; message?: unknown }
     return {
-      ...(typeof parsed.code === 'string' ? { code: parsed.code as LatticeErrorCode } : {}),
+      ...(typeof parsed.code === 'string' ? { code: parsed.code as CastboardErrorCode } : {}),
       ...(typeof parsed.message === 'string' ? { message: parsed.message } : {}),
     }
   } catch {

@@ -1,0 +1,12 @@
+# dsh-magica-castboard bundle patch：把插件行插进 profile 的行清单。
+#
+# 语义（AGENTS.md 一.3）：
+# - `id` 与 `name` 都是**裸包名那一行**才会挂载 `./client`（浏览器半边）；
+# - `name` 必须与 package.json 的 `name` 完全相同，否则 Host 扫描直接报错；
+# - 这里不放任何用户运行态配置（设置项的默认值由代码里的 schema 提供）。
+#
+# 装配方式：`dsh plugin --profile <name> add link:<path-to-this-package>`，
+# 或直接把本包加进 profile 的 `dsh.profile.bundles`。
+- insert:
+    - id: '@meiyukichan/dsh-magica-castboard'
+      name: '@meiyukichan/dsh-magica-castboard'

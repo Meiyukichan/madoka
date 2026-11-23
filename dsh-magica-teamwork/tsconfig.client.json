@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "react": ["../dsh-magica-spellbook/node_modules/@types/react"],
+      "react/jsx-runtime": ["../dsh-magica-spellbook/node_modules/@types/react/jsx-runtime"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["../dsh-magica-castboard/node_modules/@deepseek-ai/dsh-client-ui-primitives"]
+    }
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]
+}

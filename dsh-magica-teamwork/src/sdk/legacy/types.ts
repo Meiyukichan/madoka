@@ -1,8 +1,8 @@
-﻿/**
+/**
  * 旧 SDK（`TeamworkClient`）的公开类型：与服务端契约一一对应，但不依赖服务端实现。
  *
- * ⚠️ **历史层**：新 SDK（`dsh-teamwork/1` 协议面 + lattice 兼容面）在 `src/sdk/lattice/**`，
- * 类型见 `src/sdk/lattice/types.ts`。本文件只服务旧 `TeamworkClient`，按迁移计划（设计文档 §15）
+ * ⚠️ **历史层**：新 SDK（`dsh-teamwork/1` 协议面 + castboard 兼容面）在 `src/sdk/castboard/**`，
+ * 类型见 `src/sdk/castboard/types.ts`。本文件只服务旧 `TeamworkClient`，按迁移计划（设计文档 §15）
  * 在 P2 阶段改为薄适配、P3 阶段删除。**新代码不要 import 这里的类型。**
  */
 
@@ -87,7 +87,8 @@ export interface Workspace {
 export type IssueStatus = 'pending' | 'accepted' | 'routing' | 'running' | 'success' | 'failed' | 'abandoned'
 export type IssueUrgency = 'runtime' | 'direct' | 'urgent' | 'normal' | 'relaxed'
 export type IssuePermission = 'read-only' | 'workspace-write' | 'danger-full-access'
-export type AttachmentType = 'assigner' | 'assignee'
+export type AttachmentTargetType = 'issue' | 'comment'
+export type AttachmentRole = 'assigner' | 'assignee'
 
 export interface Issue {
   id: number
@@ -150,10 +151,11 @@ export interface Comment {
 
 export interface Attachment {
   id: number
-  issueId: string
+  targetType: AttachmentTargetType
+  targetId: string
   fileId: string
-  fileName: string
-  type: AttachmentType
+  fileName: string | null
+  role: AttachmentRole
   description: string | null
   createdAt: string
   updatedAt: string

@@ -1,4 +1,4 @@
-﻿-- dsh-teamwork · 001_init.sql
+-- dsh-teamwork · 001_init.sql
 -- 由 docs/design/db-design.zh.md §4 直接生成，勿手改（改文档后重新抽取）
 -- 迁移器会在事务内执行本文件，成功后把 PRAGMA user_version 置为 1
 -- 目标：SQLite >= 3.35（依赖 RETURNING 与部分唯一索引）
@@ -139,18 +139,20 @@ CREATE INDEX        idx_tw_issue_project          ON dsh_teamwork_issue(project_
 
 CREATE TABLE dsh_teamwork_issue_attachment (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  issue_id    TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id   TEXT NOT NULL,
   file_id     TEXT NOT NULL,
   file_name   TEXT,
-  type        TEXT NOT NULL,
+  role        TEXT NOT NULL,
   description TEXT,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  CONSTRAINT ck_tw_attachment_type CHECK (type IN ('assigner','assignee'))
+  CONSTRAINT ck_tw_attachment_target CHECK (target_type IN ('issue','comment')),
+  CONSTRAINT ck_tw_attachment_role   CHECK (role IN ('assigner','assignee'))
 );
-CREATE UNIQUE INDEX uk_tw_attachment             ON dsh_teamwork_issue_attachment(issue_id, file_id);
-CREATE INDEX        idx_tw_attachment_issue      ON dsh_teamwork_issue_attachment(issue_id);
-CREATE INDEX        idx_tw_attachment_issue_type ON dsh_teamwork_issue_attachment(issue_id, type);
+CREATE UNIQUE INDEX uk_tw_attachment           ON dsh_teamwork_issue_attachment(target_type, target_id, file_id);
+CREATE INDEX        idx_tw_attachment_target    ON dsh_teamwork_issue_attachment(target_type, target_id);
+CREATE INDEX        idx_tw_attachment_target_role ON dsh_teamwork_issue_attachment(target_type, target_id, role);
 
 CREATE TABLE dsh_teamwork_issue_comment (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,

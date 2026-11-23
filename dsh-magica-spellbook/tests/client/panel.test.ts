@@ -66,7 +66,7 @@ describe('locales', () => {
 
   it('makeTranslate 支持 {param} 插值并回退 key', () => {
     const t = makeTranslate(zh)
-    assert.equal(t('ix.progress', { current: '2', total: '3' }), '2/3')
+    assert.equal(t('ix.progress', { current: '2', total: '3' }), '2 / 3')
     assert.equal(makeTranslate(en)('ix.next'), 'Next')
     // 未知 key 原样返回（类型层不允许，运行时容错）
     assert.equal(t('ix.unknown' as never), 'ix.unknown')
@@ -198,8 +198,21 @@ describe('A 组收尾项（Round 9）', () => {
   })
 
   it('自定义答案用自增高 textarea 样式（T8）', () => {
-    assert.match(INTERACTION_STYLES, /\.magica-ix-input\{[^}]*resize:none/)
-    assert.match(INTERACTION_STYLES, /\.magica-ix-input\{[^}]*max-height:160px/)
+    assert.match(INTERACTION_STYLES, /\.magica-ix-fieldInput\{[^}]*resize:none/)
+    assert.match(INTERACTION_STYLES, /\.magica-ix-fieldInput\{[^}]*overflow-y:auto/)
+    assert.match(INTERACTION_STYLES, /\.magica-ix-fieldMirror\{[^}]*max-height:144px/)
+  })
+
+  it('选择框指标位与 dsh QuestionComposer 一致（单选序号 / 多选勾选框）', () => {
+    // dsh：.number 是 20×20、12px/500 的序号座；.checkbox 是 14×14 描边块。
+    assert.match(INTERACTION_STYLES, /\.magica-ix-number\{[^}]*font-size:12px/)
+    assert.match(INTERACTION_STYLES, /\.magica-ix-number\{[^}]*border-radius:var\(--dsw-radius-xs,4px\)/)
+    assert.match(INTERACTION_STYLES, /\.magica-ix-checkbox::before\{[^}]*width:14px;height:14px/)
+    // 选项行几何：md 圆角、40px 最小高、8px 左内边距。
+    assert.match(INTERACTION_STYLES, /\.magica-ix-option\{[^}]*min-height:40px/)
+    assert.match(INTERACTION_STYLES, /\.magica-ix-option\{[^}]*border-radius:var\(--dsw-radius-md,12px\)/)
+    // 单选选中态才有底色/描边；多选只体现在勾选框。
+    assert.match(INTERACTION_STYLES, /\.magica-ix-optionSelected\{border-color:var\(--dsw-alias-border-l2\);\}/)
   })
 
   it('目录截断提示有中英文案（T5）', () => {

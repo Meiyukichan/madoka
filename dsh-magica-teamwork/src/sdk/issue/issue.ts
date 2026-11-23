@@ -9,19 +9,19 @@
  * 不做：写后读回（D12）、跨端点组合（那是组合层 `sdk.ts`）。
  */
 
-import type { LatticeTransport } from '../transport.js'
-import { latticeOk, type LatticeResult } from '../result.js'
+import type { CastboardTransport } from '../transport.js'
+import { castboardOk, type CastboardResult } from '../result.js'
 import {
-  isLatticeIssueStatus,
-  isLatticeUrgency,
-  isLatticePermission,
-  type LatticeIssue,
-  type LatticeIssueInput,
-  type LatticeIssuePage,
-  type LatticeIssueQuery,
-  type LatticeIssueStatus,
-  type LatticeStatusBatchResult,
-  type LatticeStatusUpdate,
+  isCastboardIssueStatus,
+  isCastboardUrgency,
+  isCastboardPermission,
+  type CastboardIssue,
+  type CastboardIssueInput,
+  type CastboardIssuePage,
+  type CastboardIssueQuery,
+  type CastboardIssueStatus,
+  type CastboardStatusBatchResult,
+  type CastboardStatusUpdate,
 } from '../types.js'
 import {
   asDependsOnString,
@@ -31,10 +31,10 @@ import {
   normalizePermission,
   pick,
 } from '../wire.js'
-import { LatticeAttachmentApi } from './attachment.js'
-import { LatticeCommentApi } from './comment.js'
-import { LatticeSourceApi } from './source.js'
-import { LatticeWorkspaceApi } from './workspaces.js'
+import { CastboardAttachmentApi } from './attachment.js'
+import { CastboardCommentApi } from './comment.js'
+import { CastboardSourceApi } from './source.js'
+import { CastboardWorkspaceApi } from './workspaces.js'
 
 /** C1 允许的键（**不含 `assigner`**：身份来自 token） */
 const SUBMIT_KEYS = [
@@ -66,7 +66,7 @@ const STATUS_KEYS = ['issueId', 'status', 'expectedStatus', 'assigneeTask', 'ass
 
 /** 把门面入参翻成线上请求体（`*Meta` 序列化、`dependsOn` 序列化、`permission` 归一） */
 function issueWireBody(
-  input: LatticeIssueInput,
+  input: CastboardIssueInput,
   allowed: readonly string[],
 ): { body: Record<string, unknown> } | { error: string; field: string } {
   const translated: Record<string, unknown> = { ...input }
@@ -77,17 +77,17 @@ function issueWireBody(
   return { body: pick(translated, allowed) }
 }
 
-export class LatticeIssueApi {
-  readonly attachment: LatticeAttachmentApi
-  readonly comment: LatticeCommentApi
-  readonly source: LatticeSourceApi
-  readonly workspace: LatticeWorkspaceApi
+export class CastboardIssueApi {
+  readonly attachment: CastboardAttachmentApi
+  readonly comment: CastboardCommentApi
+  readonly source: CastboardSourceApi
+  readonly workspace: CastboardWorkspaceApi
 
-  constructor(private readonly transport: LatticeTransport) {
-    this.attachment = new LatticeAttachmentApi(transport)
-    this.comment = new LatticeCommentApi(transport)
-    this.source = new LatticeSourceApi(transport)
-    this.workspace = new LatticeWorkspaceApi(transport)
+  constructor(private readonly transport: CastboardTransport) {
+    this.attachment = new CastboardAttachmentApi(transport)
+    this.comment = new CastboardCommentApi(transport)
+    this.source = new CastboardSourceApi(transport)
+    this.workspace = new CastboardWorkspaceApi(transport)
   }
 
   /**
@@ -95,15 +95,15 @@ export class LatticeIssueApi {
    *
    * `dependsOn` 空清单会整字段剔除（不会写入 `"[]"`）。
    */
-  async submit(issues: readonly LatticeIssueInput[]): Promise<LatticeResult<string[]>> {
-    if (issues.length === 0) return latticeOk(200, [])
+  async submit(issues: readonly CastboardIssueInput[]): Promise<CastboardResult<string[]>> {
+    if (issues.length === 0) return castboardOk(200, [])
     const body: Record<string, unknown>[] = []
     for (const [index, item] of issues.entries()) {
       if (item.issueId !== undefined) {
         const checked = checkIssueId(item.issueId, `issue.submit[${index}]`)
         if (checked !== null) return checked
       }
-      if (item.urgency !== undefined && !isLatticeUrgency(item.urgency)) {
+      if (item.urgency !== undefined && !isCastboardUrgency(item.urgency)) {
         return {
           ok: false,
           status: 400,
@@ -112,7 +112,7 @@ export class LatticeIssueApi {
           field: 'urgency',
         }
       }
-      if (item.permission !== undefined && item.permission !== '' && item.permission !== null && !isLatticePermission(item.permission)) {
+      if (item.permission !== undefined && item.permission !== '' && item.permission !== null && !isCastboardPermission(item.permission)) {
         return {
           ok: false,
           status: 400,
@@ -121,7 +121,7 @@ export class LatticeIssueApi {
           field: 'permission',
         }
       }
-      if (item.status !== undefined && !isLatticeIssueStatus(item.status)) {
+      if (item.status !== undefined && !isCastboardIssueStatus(item.status)) {
         return {
           ok: false,
           status: 400,
@@ -136,37 +136,37 @@ export class LatticeIssueApi {
     }
     const result = await this.transport.call<string[]>('issueSubmit', {}, { body })
     if (!result.ok) return result
-    return latticeOk(result.status, Array.isArray(result.data) ? result.data : [])
+    return castboardOk(result.status, Array.isArray(result.data) ? result.data : [])
   }
 
   /** C3 `GET /issues/{issueId}`：单条（读回 `dependsOn` 归一成 `string[]`） */
-  async get(issueId: string): Promise<LatticeResult<LatticeIssue>> {
+  async get(issueId: string): Promise<CastboardResult<CastboardIssue>> {
     const checked = checkIssueId(issueId, 'issue.get')
     if (checked !== null) return checked
-    const result = await this.transport.call<LatticeIssue>('issueGet', { issueId })
+    const result = await this.transport.call<CastboardIssue>('issueGet', { issueId })
     if (!result.ok) return result
-    return latticeOk(result.status, normalizeIssue(result.data))
+    return castboardOk(result.status, normalizeIssue(result.data))
   }
 
   /** C4 `PUT /issues/{issueId}`：全字段覆盖（**未传字段保留原值**；传 `null` 才清空） */
-  async replace(issueId: string, patch: LatticeIssueInput): Promise<LatticeResult<LatticeIssue>> {
+  async replace(issueId: string, patch: CastboardIssueInput): Promise<CastboardResult<CastboardIssue>> {
     const checked = checkIssueId(issueId, 'issue.replace')
     if (checked !== null) return checked
-    if (patch.urgency !== undefined && !isLatticeUrgency(patch.urgency)) {
+    if (patch.urgency !== undefined && !isCastboardUrgency(patch.urgency)) {
       return { ok: false, status: 400, code: 'invalid_urgency', reason: 'urgency 取值不合法', field: 'urgency' }
     }
-    if (patch.status !== undefined && !isLatticeIssueStatus(patch.status)) {
+    if (patch.status !== undefined && !isCastboardIssueStatus(patch.status)) {
       return { ok: false, status: 400, code: 'invalid_status', reason: 'status 取值不合法', field: 'status' }
     }
     const wire = issueWireBody(patch, REPLACE_KEYS)
     if ('error' in wire) return { ok: false, status: 400, code: 'invalid_body', reason: wire.error, field: wire.field }
-    const result = await this.transport.call<LatticeIssue>('issueReplace', { issueId }, { body: wire.body })
+    const result = await this.transport.call<CastboardIssue>('issueReplace', { issueId }, { body: wire.body })
     if (!result.ok) return result
-    return latticeOk(result.status, normalizeIssue(result.data))
+    return castboardOk(result.status, normalizeIssue(result.data))
   }
 
   /** C5 `DELETE /issues/{issueId}`：遗弃（软删，置 `abandoned`） */
-  async abandon(issueId: string): Promise<LatticeResult<void>> {
+  async abandon(issueId: string): Promise<CastboardResult<void>> {
     const checked = checkIssueId(issueId, 'issue.abandon')
     if (checked !== null) return checked
     return this.transport.call<void>('issueAbandon', { issueId })
@@ -177,13 +177,13 @@ export class LatticeIssueApi {
    *
    * 逐条失败进 `failed[]`；`status_conflict` 表示并发抢输了、**不要重试**。
    */
-  async updateStatuses(updates: readonly LatticeStatusUpdate[]): Promise<LatticeResult<LatticeStatusBatchResult>> {
-    if (updates.length === 0) return latticeOk(200, { success: 0, failed: [] })
+  async updateStatuses(updates: readonly CastboardStatusUpdate[]): Promise<CastboardResult<CastboardStatusBatchResult>> {
+    if (updates.length === 0) return castboardOk(200, { success: 0, failed: [] })
     const body: Record<string, unknown>[] = []
     for (const [index, item] of updates.entries()) {
       const checked = checkIssueId(item.issueId, `issue.updateStatuses[${index}]`)
       if (checked !== null) return checked
-      if (!isLatticeIssueStatus(item.status)) {
+      if (!isCastboardIssueStatus(item.status)) {
         return {
           ok: false,
           status: 400,
@@ -192,7 +192,7 @@ export class LatticeIssueApi {
           field: 'status',
         }
       }
-      if (item.expectedStatus !== undefined && !isLatticeIssueStatus(item.expectedStatus)) {
+      if (item.expectedStatus !== undefined && !isCastboardIssueStatus(item.expectedStatus)) {
         return {
           ok: false,
           status: 400,
@@ -211,10 +211,10 @@ export class LatticeIssueApi {
         ),
       )
     }
-    const result = await this.transport.call<LatticeStatusBatchResult>('issueUpdateStatuses', {}, { body })
+    const result = await this.transport.call<CastboardStatusBatchResult>('issueUpdateStatuses', {}, { body })
     if (!result.ok) return result
     const data = result.data
-    return latticeOk(result.status, {
+    return castboardOk(result.status, {
       success: typeof data?.success === 'number' ? data.success : 0,
       failed: Array.isArray(data?.failed) ? data.failed : [],
     })
@@ -225,12 +225,12 @@ export class LatticeIssueApi {
    *
    * 入参同时接受 `page`（raw 写法）与 `pageNum`；出参**两者都给**且恒等（D11）。
    */
-  async list(query: LatticeIssueQuery = {}): Promise<LatticeResult<LatticeIssuePage>> {
+  async list(query: CastboardIssueQuery = {}): Promise<CastboardResult<CastboardIssuePage>> {
     const rawPage = query.pageNum ?? query.page
     const pageNum = typeof rawPage === 'number' && Number.isFinite(rawPage) && rawPage >= 1 ? Math.floor(rawPage) : 1
     const rawSize = typeof query.pageSize === 'number' && Number.isFinite(query.pageSize) ? Math.floor(query.pageSize) : 20
     const pageSize = rawSize < 1 ? 20 : rawSize > 200 ? 200 : rawSize
-    if (query.status !== undefined && !isLatticeIssueStatus(query.status)) {
+    if (query.status !== undefined && !isCastboardIssueStatus(query.status)) {
       return {
         ok: false,
         status: 400,
@@ -243,7 +243,7 @@ export class LatticeIssueApi {
       total?: number
       pageNum?: number
       pageSize?: number
-      items?: LatticeIssue[]
+      items?: CastboardIssue[]
     }>('issueList', {}, {
       query: {
         pageNum,
@@ -258,7 +258,7 @@ export class LatticeIssueApi {
     const data = result.data
     const items = Array.isArray(data?.items) ? data.items.map(normalizeIssue) : []
     const effectivePageNum = typeof data?.pageNum === 'number' && data.pageNum >= 1 ? data.pageNum : pageNum
-    return latticeOk(result.status, {
+    return castboardOk(result.status, {
       total: typeof data?.total === 'number' ? data.total : items.length,
       page: effectivePageNum,
       pageNum: effectivePageNum,
@@ -267,8 +267,8 @@ export class LatticeIssueApi {
     })
   }
 
-  /** 供组合层判状态用：`LatticeIssueStatus` 的守卫（避免组合层再 import 一次 types） */
-  static isStatus(value: unknown): value is LatticeIssueStatus {
-    return isLatticeIssueStatus(value)
+  /** 供组合层判状态用：`CastboardIssueStatus` 的守卫（避免组合层再 import 一次 types） */
+  static isStatus(value: unknown): value is CastboardIssueStatus {
+    return isCastboardIssueStatus(value)
   }
 }

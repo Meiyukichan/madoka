@@ -1,13 +1,14 @@
-﻿/**
+/**
  * 配置解析：CLI flag > 环境变量 > config.json > 默认值。
  *
  * 用户态最简单：什么都不配，起在 127.0.0.1:3939，数据落在
- * `~/.dsh/storages/teamwork/server/`（自动创建）。
+ * `~/.dsh/storages/teamwork/`（自动创建）。
  */
 import { readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isLoopbackHost } from './net.js'
 import { join, resolve } from 'node:path'
+import { formatDomain, parseDomain } from '../shared/domain.js'
 
 export interface Config {
   host: string
@@ -19,8 +20,9 @@ export interface Config {
   maxUploadBytes: number
   shutdownGraceMs: number
   startTimeoutMs: number
-  registration: 'open' | 'code' | 'closed'
-  registrationCode: string | null
+  /** 对外地址：本机 `127.0.0.1:3939`，线上 `xxx.com`（不带端口）。 */
+  domain: string
+  registration: 'open' | 'closed'
   privateMemberLimit: number
   authCacheTtlMs: number
   /** 关闭后不再限流（仅本地压测/自动化用） */
@@ -50,7 +52,7 @@ export function defaultHome(): string {
 }
 
 export function defaultDataDir(): string {
-  return process.env.DSH_TEAMWORK_DATA ?? join(defaultHome(), 'server')
+  return process.env.DSH_TEAMWORK_DATA ?? defaultHome()
 }
 
 interface RawConfig {
@@ -61,13 +63,14 @@ interface RawConfig {
   maxUploadMb?: number
   shutdownGraceMs?: number
   startTimeoutMs?: number
+  domain?: string
   registration?: string
-  registrationCode?: string | null
   privateMemberLimit?: number
   authCacheTtlMs?: number
   rateLimit?: boolean | string
   logLevel?: string
   logFile?: string | null
+  localServiceRestart?: boolean
 }
 
 const ENV_MAP: Record<string, keyof RawConfig> = {
@@ -78,8 +81,8 @@ const ENV_MAP: Record<string, keyof RawConfig> = {
   DSH_TEAMWORK_MAX_UPLOAD_MB: 'maxUploadMb',
   DSH_TEAMWORK_SHUTDOWN_GRACE_MS: 'shutdownGraceMs',
   DSH_TEAMWORK_START_TIMEOUT_MS: 'startTimeoutMs',
+  DSH_TEAMWORK_DOMAIN: 'domain',
   DSH_TEAMWORK_REGISTRATION: 'registration',
-  DSH_TEAMWORK_REGISTRATION_CODE: 'registrationCode',
   DSH_TEAMWORK_PRIVATE_MEMBER_LIMIT: 'privateMemberLimit',
   DSH_TEAMWORK_AUTH_CACHE_TTL_MS: 'authCacheTtlMs',
   DSH_TEAMWORK_RATE_LIMIT: 'rateLimit',
@@ -95,8 +98,8 @@ const FLAG_MAP: Record<string, keyof RawConfig> = {
   '--max-upload-mb': 'maxUploadMb',
   '--shutdown-grace': 'shutdownGraceMs',
   '--start-timeout': 'startTimeoutMs',
+  '--domain': 'domain',
   '--registration': 'registration',
-  '--registration-code': 'registrationCode',
   '--private-member-limit': 'privateMemberLimit',
   '--auth-cache-ttl': 'authCacheTtlMs',
   '--rate-limit': 'rateLimit',
@@ -125,7 +128,8 @@ function parseJsonc(text: string): unknown {
 
 const KNOWN_KEYS = new Set([
   'host', 'port', 'dataDir', 'tokenTtlDays', 'maxUploadMb', 'shutdownGraceMs', 'startTimeoutMs',
-  'registration', 'registrationCode', 'privateMemberLimit', 'authCacheTtlMs', 'rateLimit', 'logLevel', 'logFile',
+  'domain', 'registration', 'privateMemberLimit', 'authCacheTtlMs', 'rateLimit', 'logLevel', 'logFile',
+  'localServiceRestart',
 ])
 
 export interface ResolveArgs {
@@ -239,24 +243,38 @@ function oneOf<T extends string>(v: unknown, name: string, allowed: readonly T[]
 
 function buildConfig(raw: RawConfig, source: Config['source']): Config {
   const dataDir = resolve(str(raw.dataDir, 'dataDir', defaultDataDir()))
-  const registration = oneOf(raw.registration, 'registration', ['open', 'code', 'closed'] as const, 'open')
-  const registrationCode = raw.registrationCode ? String(raw.registrationCode) : null
-  if (registration === 'code' && !registrationCode) {
-    throw new Error('registration=code 时必须提供 --registration-code 或 DSH_TEAMWORK_REGISTRATION_CODE')
-  }
+  const registration = oneOf(raw.registration, 'registration', ['open', 'closed'] as const, 'open')
   const tokenTtlDays = num(raw.tokenTtlDays, 'tokenTtlDays', DEFAULTS.tokenTtlDays, 1, 30)
   const host = str(raw.host, 'host', DEFAULTS.host)
+  const port = num(raw.port, 'port', DEFAULTS.port, 0, 65535)
+  const configuredDomain = raw.domain === undefined || raw.domain === '' ? null : String(raw.domain).trim()
+  const parsedDomain = configuredDomain === null ? null : parseDomain(configuredDomain)
+  if (configuredDomain !== null && parsedDomain === null) {
+    throw new Error(`domain 不是合法地址：${configuredDomain}（例：127.0.0.1:3939 或 team.example.com）`)
+  }
+  if (parsedDomain !== null && ['0.0.0.0', '::', '[::]'].includes(parsedDomain.host)) {
+    throw new Error(`domain 不能是 ${parsedDomain.host}：请写 127.0.0.1:端口，或线上域名`)
+  }
+  // 本机 domain 带端口时，它就是 bind 地址；线上 domain 只作对外地址，bind 仍走 host/port。
+  const bindHost = raw.host === undefined && parsedDomain !== null && isLoopbackHost(parsedDomain.host)
+    ? parsedDomain.host
+    : host
+  const bindPort = raw.port === undefined && parsedDomain !== null && parsedDomain.port !== null
+    ? parsedDomain.port
+    : port
+  const domain = configuredDomain ?? formatDomain(bindHost, bindPort)
   // 安全边界：本服务不做资源级鉴权，绑到非回环等于把数据全暴露给局域网
-  if (!isLoopbackHost(host)) {
+  if (!isLoopbackHost(bindHost)) {
     throw new Error(
-      `拒绝绑定 ${host}：本服务只允许回环地址（127.0.0.1 / ::1 / localhost）。` +
+      `拒绝绑定 ${bindHost}：本服务只允许回环地址（127.0.0.1 / ::1 / localhost）。` +
         '需要跨机访问请用 SSH 隧道或反向代理，不要把服务直接暴露出去。',
     )
   }
 
   return {
-    host,
-    port: num(raw.port, 'port', DEFAULTS.port, 0, 65535),
+    host: bindHost,
+    port: bindPort,
+    domain,
     dataDir,
     dbPath: join(dataDir, 'teamwork.db'),
     tokenTtlSeconds: Math.round(tokenTtlDays * 86400),
@@ -264,7 +282,6 @@ function buildConfig(raw: RawConfig, source: Config['source']): Config {
     shutdownGraceMs: num(raw.shutdownGraceMs, 'shutdownGraceMs', DEFAULTS.shutdownGraceMs, 0, 120_000),
     startTimeoutMs: num(raw.startTimeoutMs, 'startTimeoutMs', DEFAULTS.startTimeoutMs, 100, 120_000),
     registration,
-    registrationCode,
     privateMemberLimit: num(raw.privateMemberLimit, 'privateMemberLimit', DEFAULTS.privateMemberLimit, 1, 1000),
     authCacheTtlMs: num(raw.authCacheTtlMs, 'authCacheTtlMs', DEFAULTS.authCacheTtlMs, 0, 3_600_000),
     rateLimit: bool(raw.rateLimit, 'rateLimit', DEFAULTS.rateLimit),
@@ -282,13 +299,13 @@ export const HELP = `dsh-teamwork — 本地协作服务（issue / 项目 / 设�
 选项（优先级：CLI > 环境变量 > config.json > 默认值）
   --host <ip>                  监听地址（默认 127.0.0.1；改成非回环会打安全告警）
   --port <n>                   监听端口（默认 3939；0 = 随机）
-  --data-dir <dir>            数据目录（默认 ~/.dsh/storages/teamwork/server，自动创建）
+  --data-dir <dir>            数据目录（默认 ~/.dsh/storages/teamwork，自动创建）
   --config <path>              配置文件路径（默认 <data-dir>/config.json）
   --token-ttl-days <n>         token 有效期天数（默认 3）
   --max-upload-mb <n>          单文件上传上限 MB（默认 64）
   --shutdown-grace <ms>        优雅停机等待在飞请求上限（默认 5000）
-  --registration <mode>        注册闸门 open|code|closed（默认 open）
-  --registration-code <code>   registration=code 时必填
+  --domain <addr>              对外地址（127.0.0.1:3939；线上写 team.example.com，不带端口）
+  --registration <mode>        注册闸门 open|closed（默认 open）
   --private-member-limit <n>   private 项目成员上限（默认 5）
   --auth-cache-ttl <ms>        鉴权缓存 TTL（默认 60000；0 = 关闭）
   --rate-limit <on|off>        限流开关（默认 on；off 仅用于本地压测/自动化）

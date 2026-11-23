@@ -9,20 +9,20 @@
  * `list()` 只回 `active`（派活寻址用）；要看含历史的全量请用 `teamwork.device.mine()`。
  */
 
-import type { LatticeTransport } from './transport.js'
-import { latticeOk, type LatticeResult } from './result.js'
-import { type LatticeDevice, type LatticeDeviceInput } from './types.js'
+import type { CastboardTransport } from './transport.js'
+import { castboardOk, type CastboardResult } from './result.js'
+import { type CastboardDevice, type CastboardDeviceInput } from './types.js'
 import { toAccount } from './wire.js'
 
-export class LatticeDeviceApi {
-  constructor(private readonly transport: LatticeTransport) {}
+export class CastboardDeviceApi {
+  constructor(private readonly transport: CastboardTransport) {}
 
   /**
    * B11 `POST /devices/batch`：全量同步我的设备。
    *
    * ⚠️ 传空数组等于"我这台机器下线了"——该账号所有设备会被标 `inactive`。
    */
-  async sync(devices: readonly LatticeDeviceInput[]): Promise<LatticeResult<{ synced: number; deactivated: number }>> {
+  async sync(devices: readonly CastboardDeviceInput[]): Promise<CastboardResult<{ synced: number; deactivated: number }>> {
     const batch: Record<string, unknown>[] = []
     for (const [index, device] of devices.entries()) {
       if (typeof device.host !== 'string' || device.host.trim() === '') {
@@ -54,24 +54,24 @@ export class LatticeDeviceApi {
       body: { devices: batch },
     })
     if (!result.ok) return result
-    return latticeOk(result.status, {
+    return castboardOk(result.status, {
       synced: typeof result.data?.synced === 'number' ? result.data.synced : 0,
       deactivated: typeof result.data?.deactivated === 'number' ? result.data.deactivated : 0,
     })
   }
 
   /** B12 `GET /devices?accountId=`：在线设备（只含 `active`；省略 = 查自己） */
-  async list(accountId?: string): Promise<LatticeResult<LatticeDevice[]>> {
+  async list(accountId?: string): Promise<CastboardResult<CastboardDevice[]>> {
     let query: Record<string, string> = {}
     if (accountId !== undefined) {
       const account = toAccount(accountId, 'accountId', '查他人设备时必须给合法账号')
       if (!account.ok) return account.fail
       query = { accountId: account.value }
     }
-    const result = await this.transport.call<LatticeDevice[] | null>('deviceList', {}, { query })
+    const result = await this.transport.call<CastboardDevice[] | null>('deviceList', {}, { query })
     if (!result.ok) return result
     const items = Array.isArray(result.data) ? result.data : []
-    return latticeOk(
+    return castboardOk(
       result.status,
       items.filter((item) => item.status === 'active'),
     )

@@ -8,7 +8,7 @@
 import { createHmac } from 'node:crypto'
 import { CredentialStore, CredentialError, defaultHome, type StoredCredential } from '../credentials.js'
 import type {
-  Account, Attachment, AttachmentType, AuthSession, Comment, CommentDelta, Device, FileInfo, Issue,
+  Account, Attachment, AttachmentRole, AttachmentTargetType, AuthSession, Comment, CommentDelta, Device, FileInfo, Issue,
   IssueCreateInput, Project, ProjectDetail, ProjectMember, ProjectRole, Source, StatusUpdateItem,
   StatusUpdateResult, VersionInfo, Workspace,
 } from './types.js'
@@ -79,7 +79,7 @@ export class TeamworkClient {
           account: {
             accountId: saved.accountId,
             displayName: saved.displayName,
-            globalRole: saved.globalRole,
+            globalRole: 'user',
             status: 'active',
             lastLoginAt: null,
             createdAt: saved.savedAt,
@@ -118,10 +118,9 @@ export class TeamworkClient {
   }
 
   // ── 认证 ──────────────────────────────────────────────────
-  async register(input: { accountId: string; password: string; displayName?: string }, options: { registrationCode?: string } = {}): Promise<AuthSession> {
+  async register(input: { accountId: string; password: string; displayName?: string }): Promise<AuthSession> {
     const session = await this.request<AuthSession>('POST', '/auth/register', {
       body: { accountId: input.accountId, password: encodeBase64(input.password), displayName: input.displayName },
-      headers: options.registrationCode ? { 'x-registration-code': options.registrationCode } : undefined,
       anonymous: true,
     })
     this.acceptSession(session)
@@ -225,10 +224,10 @@ export class TeamworkClient {
   }
 
   readonly attachments = {
-    add: (items: Array<{ issueId: string; fileId: string; type: AttachmentType; fileName?: string; description?: string }>) =>
+    add: (items: Array<{ targetType: AttachmentTargetType; targetId: string; fileId: string; role: AttachmentRole; fileName?: string; description?: string }>) =>
       this.request<{ count: number }>('POST', '/issues/attachments/batch', { body: items }),
-    list: (issueId: string, type?: AttachmentType) =>
-      this.request<Attachment[]>('GET', `/issues/${encodeURIComponent(issueId)}/attachments`, { query: type ? { type } : {} }),
+    list: (targetType: AttachmentTargetType, targetId: string, role?: AttachmentRole) =>
+      this.request<Attachment[]>('GET', '/attachments', { query: { targetType, targetId, ...(role === undefined ? {} : { role }) } }),
   }
 
   readonly sources = {
@@ -297,7 +296,6 @@ export class TeamworkClient {
       server: this.host,
       accountId: this.session.account.accountId,
       displayName: this.session.account.displayName,
-      globalRole: this.session.account.globalRole,
       accountToken: this.session.accountToken,
       ttlSeconds: this.session.ttlSeconds,
       savedAt: new Date().toISOString(),

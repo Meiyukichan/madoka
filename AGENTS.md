@@ -7,6 +7,11 @@
 - 项目下所有子包采用pnpm构建 (pnpm-workspace.yaml)，版本统一从0.2.0-alpha.1开始，最后lib/只有两个文件：index.js/client.js【压缩源码】。*.js.map 禁止进入 lib/
 - 要有tests单元测试
 - 可以用playwright看网页，已安装到全局npm
+- 日志一律使用spellbook的logEvent
+- 尽可能复用spellbook的sdk能力
+- 禁止使用bash修改文件，请务必使用write/edit
+- 前端必须i18n
+- 修改代码之前，需要先告知用户问题根因、你的修改方案，简要就行
 
 ## 一、包结构与构建产物
 

@@ -12,6 +12,8 @@ import { run } from 'node:test'
 import { spec } from 'node:test/reporters'
 
 const dir = 'lib-tests/tests'
+// Unit tests exercise castboardLog; keep their fake `boom`/network fixtures out of the real log file.
+process.env.DSH_TEAMWORK_NO_LOG = '1'
 let files
 try {
   files = readdirSync(dir)

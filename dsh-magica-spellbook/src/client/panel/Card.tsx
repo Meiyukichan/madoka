@@ -3,6 +3,9 @@
  *
  * 全受控：数据与回调都由 props 进来（`t` / `actions`），组件本身不碰 `ctx`。
  *
+ * 提问卡的结构、指标位（单选序号 / 多选勾选框）、自增高输入区与底栏，
+ * 逐项对齐 dsh `QuestionComposer`（`packages/client/ui-user-questions`）。
+ *
  * @module dsh-magica-spellbook/client/panel/Card
  */
 
@@ -64,6 +67,36 @@ function toAnswer(question: InteractionQuestion, draft: Draft): InteractionAnswe
     if (question.multiSelect !== true) answer.selected = []
   }
   return answer
+}
+
+/**
+ * 自增高答案输入（同 dsh `AnswerField`）。
+ *
+ * 镜像层负责行高（软换行也算），textarea 与它共用一格；镜像与 textarea 的
+ * 字体、行高、内边距、换行规则必须完全一致，否则两边高度会分叉。
+ */
+function AnswerField({ block, value, placeholder, disabled, onChange, onKeyDown }: {
+  block: boolean
+  value: string
+  placeholder: string
+  disabled: boolean
+  onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
+  onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+}): React.ReactElement {
+  return (
+    <div className={block ? 'magica-ix-field magica-ix-fieldBlock' : 'magica-ix-field magica-ix-fieldInline'}>
+      <div aria-hidden className="magica-ix-fieldMirror">{`${value}\n`}</div>
+      <textarea
+        className="magica-ix-fieldInput"
+        value={value}
+        rows={1}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+      />
+    </div>
+  )
 }
 
 interface QuestionFlowProps {
@@ -183,27 +216,29 @@ function QuestionFlow({ view, questions, t, actions, onAnswered, takeover = true
     [t],
   )
 
+  const hasOptions = (question.options ?? []).length > 0
+  const planReview = question.intent?.kind === 'plan-review'
+  const showEyebrow = (question.header !== undefined && question.header !== '') || planReview
   const card = (
       <section className="magica-ix-card">
         <header className="magica-ix-header">
-          <div className="magica-ix-headings">
-            <span className="magica-ix-eyebrow">
-              {/* 没有 header 时**不显示**眉标：早前拿 `ix.recommended` 兜底，
-                  结果每张没 header 的卡片都写着"推荐"（A-114） */}
-              {question.header === undefined || question.header === '' ? null : question.header}
-              {/* 0.2 新增：计划评审走同一张卡，但语义是"批准/拒绝整份计划" */}
-              {question.intent?.kind === 'plan-review' ? (
-                <span className="magica-ix-badge">{t('ix.planReview')}</span>
-              ) : null}
-            </span>
+          <div className="magica-ix-headingBlock">
+            {showEyebrow ? (
+              <div className="magica-ix-eyebrow">
+                {question.header === undefined || question.header === '' ? null : question.header}
+                {/* 0.2 新增：计划评审走同一张卡，但语义是"批准/拒绝整份计划" */}
+                {planReview ? <span className="magica-ix-badge">{t('ix.planReview')}</span> : null}
+              </div>
+            ) : null}
             <h3 className="magica-ix-title">{question.question}</h3>
           </div>
-          <div className="magica-ix-actions">
+          <div className="magica-ix-headerActions">
             {/* 收起按钮只在 takeover 形态有意义（D5）：plain 卡由宿主控制显隐 */}
             {takeover ? (
               <button
                 type="button"
                 className="magica-ix-icon"
+                aria-label={minimized ? t('ix.expand') : t('ix.minimize')}
                 title={minimized ? t('ix.expand') : t('ix.minimize')}
                 onClick={() => setMinimized((value) => !value)}
               >
@@ -213,6 +248,7 @@ function QuestionFlow({ view, questions, t, actions, onAnswered, takeover = true
             <button
               type="button"
               className="magica-ix-icon"
+              aria-label={t('ix.cancel')}
               title={t('ix.cancel')}
               disabled={busy !== null}
               onClick={() => void cancel()}
@@ -224,12 +260,12 @@ function QuestionFlow({ view, questions, t, actions, onAnswered, takeover = true
 
         {minimized ? null : (
           <>
-            {question.detail === undefined ? null : (
-              <div className="magica-ix-detail">
-                <MarkdownText text={question.detail} labels={labels} variant="compact" />
-              </div>
-            )}
             <div className="magica-ix-body">
+              {question.detail === undefined ? null : (
+                <div className="magica-ix-detail">
+                  <MarkdownText text={question.detail} labels={labels} />
+                </div>
+              )}
               <div
                 className="magica-ix-options"
                 // 读屏可作答：多选是 group，单选是 radiogroup（A-269）
@@ -251,63 +287,115 @@ function QuestionFlow({ view, questions, t, actions, onAnswered, takeover = true
                       aria-checked={on}
                       className={[
                         'magica-ix-option',
-                        on ? 'magica-ix-on' : '',
-                        recommended ? 'magica-ix-approve' : '',
+                        on && question.multiSelect !== true ? 'magica-ix-optionSelected' : '',
                       ].filter(Boolean).join(' ')}
                       disabled={busy !== null}
                       onClick={() => toggle(option.label)}
                     >
-                      <span className="magica-ix-num">{at + 1}</span>
-                      <span className={on ? 'magica-ix-check magica-ix-checkon' : 'magica-ix-check'}>
-                        {on ? <IconCheckOutlineRegular size={12} /> : null}
-                      </span>
-                      <span className="magica-ix-copy">
-                        <span className="magica-ix-label">
-                          {parsed.clean}
-                          {recommended ? <span className="magica-ix-recommend">{t('ix.recommended')}</span> : null}
+                      {question.multiSelect === true ? (
+                        <span
+                          className={on ? 'magica-ix-checkbox magica-ix-checkboxChecked' : 'magica-ix-checkbox'}
+                          aria-hidden="true"
+                        >
+                          {on ? <IconCheckOutlineRegular size={12} /> : null}
                         </span>
-                        {option.description === undefined ? null : (
-                          <span className="magica-ix-desc">{option.description}</span>
-                        )}
+                      ) : <span className="magica-ix-number">{at + 1}</span>}
+                      <span className="magica-ix-optionCopy">
+                        <span className="magica-ix-optionLine">
+                          <span className="magica-ix-optionLabel">{parsed.clean}</span>
+                          {recommended ? <span className="magica-ix-badge">{t('ix.recommended')}</span> : null}
+                          {option.description === undefined ? null : (
+                            <span className="magica-ix-description">{option.description}</span>
+                          )}
+                        </span>
                       </span>
                     </button>
                   )
                 })}
-              </div>
-              <div className={question.options === undefined || question.options.length === 0 ? 'magica-ix-block' : 'magica-ix-customrow'}>
-                <IconEditOutlineRegular size={12} />
-                {/* 自增高 textarea（B-161/B-162）：`rows={1}` + 输入时同步高度，
-                    长答案不再被单行输入框截断 */}
-                <textarea
-                  className="magica-ix-input"
-                  rows={1}
-                  value={draft.custom}
-                  placeholder={t('ix.custom')}
-                  disabled={busy !== null}
-                  onChange={(event) => {
-                    patch({ custom: event.target.value, skipped: false })
-                    const field = event.currentTarget
-                    field.style.height = 'auto'
-                    field.style.height = `${field.scrollHeight}px`
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter' || event.shiftKey) return
-                    if (event.nativeEvent.isComposing || event.keyCode === 229) return
-                    event.preventDefault()
-                    void advance()
-                  }}
-                />
+                {hasOptions ? (
+                  <div
+                    className={[
+                      'magica-ix-customrow',
+                      draft.custom !== '' ? 'magica-ix-customrow-active' : '',
+                      question.multiSelect !== true && draft.selected.length > 0 ? 'magica-ix-customrow-yielded' : '',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    {question.multiSelect === true ? (
+                      <span
+                        className={draft.custom !== '' ? 'magica-ix-checkbox magica-ix-checkboxChecked' : 'magica-ix-checkbox'}
+                        aria-hidden="true"
+                      >
+                        {draft.custom === '' ? null : <IconCheckOutlineRegular size={12} />}
+                      </span>
+                    ) : (
+                      <span className="magica-ix-number" aria-hidden="true">
+                        <IconEditOutlineRegular size={12} />
+                      </span>
+                    )}
+                    <AnswerField
+                      block={false}
+                      value={draft.custom}
+                      placeholder={t('ix.custom')}
+                      disabled={busy !== null}
+                      onChange={(event) => {
+                        patch({ custom: event.target.value, skipped: false })
+                        if (question.multiSelect !== true) patch({ selected: [] })
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' || event.shiftKey) return
+                        if (event.nativeEvent.isComposing || event.keyCode === 229) return
+                        event.preventDefault()
+                        void advance()
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <AnswerField
+                    block
+                    value={draft.custom}
+                    placeholder={t('ix.custom')}
+                    disabled={busy !== null}
+                    onChange={(event) => {
+                      patch({ custom: event.target.value, skipped: false })
+                      if (question.multiSelect !== true) patch({ selected: [] })
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' || event.shiftKey) return
+                      if (event.nativeEvent.isComposing || event.keyCode === 229) return
+                      event.preventDefault()
+                      void advance()
+                    }}
+                  />
+                )}
               </div>
             </div>
 
             <footer className="magica-ix-footer">
-              <span className="magica-ix-progress">
-                {t('ix.progress', { current: String(index + 1), total: String(total) })}
-              </span>
-              <div className="magica-ix-footerbtns">
-                <Button variant="outline" disabled={index === 0 || busy !== null} onClick={() => setIndex((at) => Math.max(0, at - 1))}>
-                  <IconChevronLeftOutlineRegular /> {t('ix.prev')}
-                </Button>
+              <div className="magica-ix-pager">
+                <button
+                  type="button"
+                  className="magica-ix-icon"
+                  aria-label={t('ix.prev')}
+                  disabled={index === 0 || busy !== null}
+                  onClick={() => setIndex((at) => Math.max(0, at - 1))}
+                >
+                  <IconChevronLeftOutlineRegular />
+                </button>
+                <span className="magica-ix-progress">
+                  {t('ix.progress', { current: String(index + 1), total: String(total) })}
+                </span>
+                <button
+                  type="button"
+                  className="magica-ix-icon"
+                  aria-label={t('ix.next')}
+                  disabled={isLast || busy !== null}
+                  onClick={() => setIndex((at) => Math.min(total - 1, at + 1))}
+                >
+                  <IconChevronRightOutlineRegular />
+                </button>
+              </div>
+              <div className="magica-ix-feedback" role="status">{error === null ? null : error}</div>
+              <div className="magica-ix-footerActions">
                 <Button variant="outline" disabled={busy !== null} onClick={skip}>
                   {t('ix.skip')}
                 </Button>
@@ -319,11 +407,9 @@ function QuestionFlow({ view, questions, t, actions, onAnswered, takeover = true
                   onClick={() => void advance()}
                 >
                   {busy === 'answer' ? t('ix.submitting') : isLast ? t('ix.submit') : t('ix.next')}
-                  {isLast ? null : <IconChevronRightOutlineRegular />}
                 </Button>
               </div>
             </footer>
-            {error === null ? null : <div className="magica-ix-feedback" role="alert">{error}</div>}
           </>
         )}
       </section>
@@ -410,7 +496,7 @@ function ApprovalFlow({ view, t, actions, onAnswered, takeover = true }: Approva
 /**
  * 一条待决交互的卡片。
  *
- *  + 'ariant' + @ 是真参数（D5）： + '	akeover' + @（缺省）= 接管形态，自带浮层外壳与收起按钮；
+ *  + 'variant' + @ 是真参数（D5）： + 'takeover' + @（缺省）= 接管形态，自带浮层外壳与收起按钮；
  *  + 'plain' + @ = 裸卡，交给宿主自己套壳（官方卡片就是这样嵌在 composer 里的）。
  */
 export function InteractionCard({

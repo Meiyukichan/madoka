@@ -1,20 +1,20 @@
 /**
- * 新 SDK 门面（`dsh-teamwork/1` 协议面 + lattice 兼容面）。
+ * 新 SDK 门面（`dsh-teamwork/1` 协议面 + castboard 兼容面）。
  *
  * 分层：
  *  - `result` / `types` / `wire`：信封、线格式类型、翻译与校验（纯函数）
- *  - `endpoints`：48 条端点表（唯一真源）
+ *  - `endpoints`：49 条协议端点表（唯一真源）
  *  - `net` / `log`：出站句柄与日志接缝（**都用发布包 `@meiyukichan/dsh-magica-spellbook`**）
  *  - `auth` / `auth-api`：会话（现签 JWT）与账号端点
  *  - `transport`：一条请求管线
  *  - 原子分组：`project` / `device` / `file` / `issue/*` / `teamwork/*` / `ops` / `admin`
  *  - 组合层：`sdk.ts`（24 个语义方法 + E1）
- *  - 总入口：`client.ts`（`LatticeClient`）
+ *  - 总入口：`client.ts`（`CastboardClient`）
  *
- * 文档：`docs/design/lattice-sdk-design.zh.md`
+ * 文档：`docs/design/castboard-sdk-design.zh.md`
  */
 
-import { LatticeClient, type LatticeClientOptions } from './client.js'
+import { CastboardClient, type CastboardClientOptions } from './client.js'
 
 export * from './result.js'
 export * from './types.js'
@@ -22,6 +22,7 @@ export * from './endpoints.js'
 export * from './log.js'
 export * from './wire.js'
 export * from './env.js'
+export * from './local-service.js'
 export * from './net.js'
 export * from './auth.js'
 export * from './auth-api.js'
@@ -42,6 +43,6 @@ export * from './client.js'
  * `baseUrl` 缺省按 `显式 > DSH_TEAMWORK_URL > DSH_TEAMWORK_HOST/PORT > <dataDir>/config.json > 127.0.0.1:3939`
  * 解析；地址不合法时不抛，所有方法统一返回 `invalid_host` 信封。
  */
-export function createLatticeClient(options: LatticeClientOptions = {}): LatticeClient {
-  return new LatticeClient(options)
+export function createCastboardClient(options: CastboardClientOptions = {}): CastboardClient {
+  return new CastboardClient(options)
 }

@@ -11,8 +11,8 @@ import { join } from 'node:path'
 
 import {
   DEFAULT_SERVER_PORT,
-  LATTICE_DEFAULT_PREFIX,
-  latticeInstanceName,
+  CASTBOARD_DEFAULT_PREFIX,
+  castboardInstanceName,
   normalizeBaseUrl,
   resetEnvCache,
   teamworkBaseUrl,
@@ -57,10 +57,10 @@ function tempDir(): string {
 
 test('normalizeBaseUrl：裸 origin / 已带前缀 / 尾斜杠 / 默认端口', () => {
   const cases: Array<[string, string]> = [
-    ['127.0.0.1', `http://127.0.0.1:${DEFAULT_SERVER_PORT}${LATTICE_DEFAULT_PREFIX}`],
-    ['127.0.0.1:4000', `http://127.0.0.1:4000${LATTICE_DEFAULT_PREFIX}`],
-    ['https://team.example.com', `https://team.example.com${LATTICE_DEFAULT_PREFIX}`],
-    [`http://h:1${LATTICE_DEFAULT_PREFIX}/`, `http://h:1${LATTICE_DEFAULT_PREFIX}`],
+    ['127.0.0.1', `http://127.0.0.1:${DEFAULT_SERVER_PORT}${CASTBOARD_DEFAULT_PREFIX}`],
+    ['127.0.0.1:4000', `http://127.0.0.1:4000${CASTBOARD_DEFAULT_PREFIX}`],
+    ['https://team.example.com', `https://team.example.com${CASTBOARD_DEFAULT_PREFIX}`],
+    [`http://h:1${CASTBOARD_DEFAULT_PREFIX}/`, `http://h:1${CASTBOARD_DEFAULT_PREFIX}`],
   ]
   for (const [input, expected] of cases) {
     const resolved = normalizeBaseUrl(input)
@@ -94,13 +94,13 @@ test('baseUrl 回退链：显式参数 > 环境变量 > config.json > 默认值'
       // ① 只有 config.json
       const fromConfig = teamworkBaseUrl()
       assert.equal(fromConfig.ok, true)
-      if (fromConfig.ok) assert.equal(fromConfig.value, `http://127.0.0.1:4321${LATTICE_DEFAULT_PREFIX}`)
+      if (fromConfig.ok) assert.equal(fromConfig.value, `http://127.0.0.1:4321${CASTBOARD_DEFAULT_PREFIX}`)
 
       // ② 环境变量覆盖 config.json
       process.env['DSH_TEAMWORK_URL'] = 'https://team.example.com'
       const fromEnv = teamworkBaseUrl()
       assert.equal(fromEnv.ok, true)
-      if (fromEnv.ok) assert.equal(fromEnv.value, `https://team.example.com${LATTICE_DEFAULT_PREFIX}`)
+      if (fromEnv.ok) assert.equal(fromEnv.value, `https://team.example.com${CASTBOARD_DEFAULT_PREFIX}`)
 
       // ③ host/port 环境变量
       delete process.env['DSH_TEAMWORK_URL']
@@ -108,12 +108,34 @@ test('baseUrl 回退链：显式参数 > 环境变量 > config.json > 默认值'
       process.env['DSH_TEAMWORK_PORT'] = '5000'
       const fromHostEnv = teamworkBaseUrl()
       assert.equal(fromHostEnv.ok, true)
-      if (fromHostEnv.ok) assert.equal(fromHostEnv.value, `http://10.0.0.5:5000${LATTICE_DEFAULT_PREFIX}`)
+      if (fromHostEnv.ok) assert.equal(fromHostEnv.value, `http://10.0.0.5:5000${CASTBOARD_DEFAULT_PREFIX}`)
 
       // ④ 显式参数最高
       const explicit = teamworkBaseUrl({ baseUrl: 'http://explicit:9/dsh-teamwork/v1' })
       assert.equal(explicit.ok, true)
       if (explicit.ok) assert.equal(explicit.value, 'http://explicit:9/dsh-teamwork/v1')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('config.json 的 domain：本机按 http，线上按 https 且不补端口', () => {
+  withCleanEnv(() => {
+    const dir = tempDir()
+    try {
+      process.env['DSH_TEAMWORK_DATA'] = dir
+      writeFileSync(join(dir, 'config.json'), JSON.stringify({ domain: '127.0.0.1:4321' }), 'utf8')
+      resetEnvCache()
+      const local = teamworkBaseUrl()
+      assert.equal(local.ok, true)
+      if (local.ok) assert.equal(local.value, `http://127.0.0.1:4321${CASTBOARD_DEFAULT_PREFIX}`)
+
+      writeFileSync(join(dir, 'config.json'), JSON.stringify({ domain: 'team.example.com' }), 'utf8')
+      resetEnvCache()
+      const online = teamworkBaseUrl()
+      assert.equal(online.ok, true)
+      if (online.ok) assert.equal(online.value, `https://team.example.com${CASTBOARD_DEFAULT_PREFIX}`)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -129,7 +151,7 @@ test('config.json 坏了 → 回落默认值，不抛', () => {
       resetEnvCache()
       const resolved = teamworkBaseUrl()
       assert.equal(resolved.ok, true)
-      if (resolved.ok) assert.equal(resolved.value, `http://127.0.0.1:${DEFAULT_SERVER_PORT}${LATTICE_DEFAULT_PREFIX}`)
+      if (resolved.ok) assert.equal(resolved.value, `http://127.0.0.1:${DEFAULT_SERVER_PORT}${CASTBOARD_DEFAULT_PREFIX}`)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -146,7 +168,7 @@ test('身份文件：读 host/port → 实例名 ip:port；文件变了会重新
       resetEnvCache()
 
       assert.equal(teamworkInstanceName(), '10.1.2.3:3080')
-      assert.equal(latticeInstanceName(), teamworkInstanceName(), '旧名字别名必须指向同一实现')
+      assert.equal(castboardInstanceName(), teamworkInstanceName(), '旧名字别名必须指向同一实现')
 
       const device = teamworkDefaultDevice()
       assert.equal(device.host, '10.1.2.3')

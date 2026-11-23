@@ -9,7 +9,7 @@
 
 | # | 事项 | 影响面 | 状态 |
 |---|---|---|---|
-| TODO-1 | **权限（审批）/ 问答（提问）等「待决交互」事件的特殊通道** | 协议（表 + 端点）、SDK（原子 + 组合）、`dsh-magica-lattice` 协同链路 | 🟡 未决（协议未定，本轮不进 SDK） |
+| TODO-1 | **权限（审批）/ 问答（提问）等「待决交互」事件的特殊通道** | 协议（表 + 端点）、SDK（原子 + 组合）、`dsh-magica-castboard` 协同链路 | 🟡 未决（协议未定，本轮不进 SDK） |
 | TODO-2 | **`src/server` 是否迁到 `@meiyukichan/dsh-magica-spellbook` 的 `createJsonRouter`** | 服务端路由层（47 端点 / 118 用例）；SDK 不受影响 | 🟡 未决（当前保持 Fastify） |
 
 ---
@@ -47,7 +47,7 @@
 
 ### 1. 背景（为什么这条会落在 teamwork）
 
-`dsh-magica-lattice/docs/raw` 那套文档里，共享库只承载了五类协作事实：
+`dsh-magica-castboard/docs/raw` 那套文档里，共享库只承载了五类协作事实：
 
 | 已有通道 | 载体 | 方向 |
 |---|---|---|
@@ -103,7 +103,7 @@
 | 层 | 新增 |
 |---|---|
 | 原子 | `client.interaction.submit/list/listSince/claim/answer/cancel`（6 个）+ 端点表 6 行 |
-| 组合 | 建议 4 个：`latticePendingInteractions({ issueId, kind? })`、`latticeOpenInteraction(input)`（按 issue 上下文建一条）、`latticeAnswerInteraction(id, answer)`、`latticeCancelInteraction(id, reason?)` |
+| 组合 | 建议 4 个：`castboardPendingInteractions({ issueId, kind? })`、`castboardOpenInteraction(input)`（按 issue 上下文建一条）、`castboardAnswerInteraction(id, answer)`、`castboardCancelInteraction(id, reason?)` |
 | 约束 | 一律"**一拍一次**"（D20）：`waitInteraction()` 这种"内部等答案"的方法**不做**，等待由插件的 5s 轮询驱动 |
 | 组合层的顺序保证 | `issueFinalize` 之前若还有 `pending` 的 interaction，应能**本地拒绝**（否则会出现"标了 success 但审批还没人答"） |
 

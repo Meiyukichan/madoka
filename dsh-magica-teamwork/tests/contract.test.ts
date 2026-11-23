@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 契约测试：不看业务，只验证「47 个端点 × 鉴权级别 × 错误体形状」是否与文档一致。
  *
  * 这是防"接口忘了挂鉴权"的机械护栏。
@@ -21,15 +21,15 @@ const ADMIN = new Set([
 ])
 const LOCAL_OR_ADMIN = new Set(['POST /admin/shutdown'])
 
-test('端点清单：47 个、无重复、分级完整', () => {
-  assert.equal(ENDPOINTS.length, 47)
-  assert.equal(new Set(ENDPOINTS).size, 47, '不能有重复端点')
+test('端点清单：49 个、无重复、分级完整', () => {
+  assert.equal(ENDPOINTS.length, 49)
+  assert.equal(new Set(ENDPOINTS).size, 49, '不能有重复端点')
   const classified = new Set([...PUBLIC, ...ADMIN, ...LOCAL_OR_ADMIN])
   const signed = ENDPOINTS.filter((e) => !classified.has(e))
   assert.equal(PUBLIC.size, 4)
   assert.equal(ADMIN.size, 7)
   assert.equal(LOCAL_OR_ADMIN.size, 1)
-  assert.equal(signed.length, 35, '其余 35 个应该只依赖签名头')
+  assert.equal(signed.length, 37, '其余 37 个应该只依赖签名头')
 })
 
 test('所有需要鉴权的端点：不带签名头一律 401', async (t) => {

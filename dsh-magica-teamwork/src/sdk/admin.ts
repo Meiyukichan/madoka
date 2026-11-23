@@ -7,43 +7,43 @@
  *  - `resetPassword()` 的 `newPassword` 是明文入参，本层 base64；成功后该账号旧 token 全部失效。
  */
 
-import type { LatticeTransport } from './transport.js'
-import { latticeOk, type LatticeResult } from './result.js'
-import { isLatticeGlobalRole, type LatticeAccount, type LatticeGlobalRole, type LatticeTeamworkPage } from './types.js'
+import type { CastboardTransport } from './transport.js'
+import { castboardOk, type CastboardResult } from './result.js'
+import { isCastboardGlobalRole, type CastboardAccount, type CastboardGlobalRole, type CastboardTeamworkPage } from './types.js'
 import { toAccount } from './wire.js'
 import { normalizePage, pageParams } from './teamwork/shared.js'
-import { latticeFail } from './result.js'
+import { castboardFail } from './result.js'
 
-export class LatticeAdminApi {
-  constructor(private readonly transport: LatticeTransport) {}
+export class CastboardAdminApi {
+  constructor(private readonly transport: CastboardTransport) {}
 
   /** M6 `GET /admin/accounts`：账号列表（分页；绝不返回 `accountToken`） */
-  async accounts(query: { q?: string; pageNum?: number; pageSize?: number } = {}): Promise<LatticeResult<LatticeTeamworkPage<LatticeAccount>>> {
+  async accounts(query: { q?: string; pageNum?: number; pageSize?: number } = {}): Promise<CastboardResult<CastboardTeamworkPage<CastboardAccount>>> {
     const { pageNum, pageSize } = pageParams(query)
     const result = await this.transport.call<unknown>('adminAccounts', {}, {
       query: { q: query.q, pageNum, pageSize },
     })
     if (!result.ok) return result
-    return latticeOk(result.status, normalizePage<LatticeAccount>(result.data, { pageNum, pageSize }))
+    return castboardOk(result.status, normalizePage<CastboardAccount>(result.data, { pageNum, pageSize }))
   }
 
   /** M4 `PUT /admin/accounts/{accountId}/role`：改全局角色（最后一个管理员不能降级） */
-  async setRole(accountId: string, role: LatticeGlobalRole): Promise<LatticeResult<LatticeAccount>> {
+  async setRole(accountId: string, role: CastboardGlobalRole): Promise<CastboardResult<CastboardAccount>> {
     const account = toAccount(accountId, 'accountId', '')
     if (!account.ok) return account.fail
-    if (!isLatticeGlobalRole(role)) {
-      return latticeFail({
+    if (!isCastboardGlobalRole(role)) {
+      return castboardFail({
         status: 400,
         code: 'invalid_role',
         reason: 'role 只能是 administrator / leader / user',
         field: 'role',
       })
     }
-    return this.transport.call<LatticeAccount>('adminSetRole', { accountId: account.value }, { body: { role } })
+    return this.transport.call<CastboardAccount>('adminSetRole', { accountId: account.value }, { body: { role } })
   }
 
   /** M5 `POST /admin/accounts/{accountId}/password`：管理员重置密码（204；旧 token 立即失效） */
-  async resetPassword(accountId: string, newPassword: string): Promise<LatticeResult<void>> {
+  async resetPassword(accountId: string, newPassword: string): Promise<CastboardResult<void>> {
     const account = toAccount(accountId, 'accountId', '')
     if (!account.ok) return account.fail
     const encoded = Buffer.from(newPassword, 'utf8').toString('base64')
@@ -57,13 +57,13 @@ export class LatticeAdminApi {
    *
    * 两种通道：`shutdownToken`（锁文件里的，仅回环）或 administrator 双头。
    */
-  async shutdown(options: { shutdownToken?: string } = {}): Promise<LatticeResult<{ ok: boolean; stopping: boolean }>> {
+  async shutdown(options: { shutdownToken?: string } = {}): Promise<CastboardResult<{ ok: boolean; stopping: boolean }>> {
     const headers = options.shutdownToken === undefined ? undefined : { 'x-shutdown-token': options.shutdownToken }
     const result = await this.transport.call<{ ok?: boolean; stopping?: boolean }>('shutdown', {}, {
       ...(headers === undefined ? {} : { headers }),
     })
     if (!result.ok) return result
-    return latticeOk(result.status, {
+    return castboardOk(result.status, {
       ok: result.data?.ok === true,
       stopping: result.data?.stopping === true,
     })

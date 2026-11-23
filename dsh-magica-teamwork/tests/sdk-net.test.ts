@@ -8,14 +8,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  createLatticeFetch,
+  createCastboardFetch,
   createLimitedFetch,
-  hasLatticeLogger,
-  latticeLog,
+  hasCastboardLogger,
+  castboardLog,
   mapLimit,
   netModeOf,
-  setLatticeLogger,
-  type LatticeFetch,
+  setCastboardLogger,
+  type CastboardFetch,
   type EventLogger,
 } from '../src/sdk/index.js'
 
@@ -47,7 +47,7 @@ function withoutProxyEnv<T>(fn: () => T): T {
 test('严格 TLS 且无代理 → global 模式（零依赖，不碰 undici）', () => {
   withoutProxyEnv(() => {
     assert.equal(netModeOf(), 'global')
-    const handle = createLatticeFetch()
+    const handle = createCastboardFetch()
     assert.equal(handle.mode, 'global')
     assert.equal(handle.configuredProxy(), null)
   })
@@ -61,7 +61,7 @@ test('rejectUnauthorized:false → undici 模式；proxy:false 强制回 global'
     assert.equal(netModeOf(), 'undici')
 
     assert.equal(netModeOf({ proxy: false }), 'global')
-    const forced = createLatticeFetch({ proxy: false })
+    const forced = createCastboardFetch({ proxy: false })
     assert.equal(forced.mode, 'global')
     assert.equal(forced.configuredProxy(), null)
   })
@@ -77,10 +77,10 @@ test('https_proxy 缺省沿用 http_proxy（spellbook 的语义）', () => {
 test('undici 模式下首次调用才加载依赖：缺包时给可操作错误，而不是 import 阶段炸', async () => {
   withoutProxyEnv(() => {
     // 构造不加载 undici（纯计算模式）
-    const handle = createLatticeFetch({ rejectUnauthorized: false })
+    const handle = createCastboardFetch({ rejectUnauthorized: false })
     assert.equal(handle.mode, 'undici')
   })
-  const handle = createLatticeFetch({ rejectUnauthorized: false })
+  const handle = createCastboardFetch({ rejectUnauthorized: false })
   let error: unknown = null
   try {
     await handle.fetch('http://127.0.0.1:1/health', { method: 'GET' })
@@ -94,7 +94,7 @@ test('undici 模式下首次调用才加载依赖：缺包时给可操作错误�
 test('并发闸（发布包实现）：同时在飞不超过 limit', async () => {
   let inflight = 0
   let peak = 0
-  const fetcher: LatticeFetch = async () => {
+  const fetcher: CastboardFetch = async () => {
     inflight += 1
     peak = Math.max(peak, inflight)
     await new Promise((resolve) => setTimeout(resolve, 5))
@@ -129,17 +129,27 @@ test('日志接缝：注入 spellbook 的 EventLogger 后事件走它；清掉�
     },
   } as unknown as EventLogger
 
-  assert.equal(hasLatticeLogger(), false)
-  setLatticeLogger(fake)
+  assert.equal(hasCastboardLogger(), false)
+  setCastboardLogger(fake)
   try {
-    assert.equal(hasLatticeLogger(), true)
-    latticeLog('warn', 'depends-on', '归一了一条脏数据')
+    assert.equal(hasCastboardLogger(), true)
+    castboardLog('warn', 'depends-on', '归一了一条脏数据')
     assert.deepEqual(events, [{ level: 'warn', event: 'depends-on', detail: '归一了一条脏数据' }])
   } finally {
-    setLatticeLogger(null)
+    setCastboardLogger(null)
   }
-  assert.equal(hasLatticeLogger(), false)
-  // 没 logger 时 info 静默、warn/error 落 console（这里只断言不抛）
-  latticeLog('info', 'noop', '不该刷屏')
-  latticeLog('error', 'boom', '这里会打一行 console.error')
+  assert.equal(hasCastboardLogger(), false)
+  // 没注入 logger 时仍走 spellbook 的默认 NDJSON，不碰 console。
+  const consoleHits: string[] = []
+  const original = { warn: console.warn, error: console.error }
+  console.warn = () => { consoleHits.push('warn') }
+  console.error = () => { consoleHits.push('error') }
+  try {
+    castboardLog('info', 'noop', '不该刷屏')
+    castboardLog('error', 'boom', '写文件而不是 terminal')
+  } finally {
+    console.warn = original.warn
+    console.error = original.error
+  }
+  assert.deepEqual(consoleHits, [])
 })

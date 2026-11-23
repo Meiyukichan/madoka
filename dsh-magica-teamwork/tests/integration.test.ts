@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 端到端集成测试：起真服务 + 用 SDK 跑完整链路。
  *
  *   node --test lib/integration.test.js
@@ -137,8 +137,8 @@ test('完整链路：注册 → 项目 → issue → 认领 → 评论 → 附�
   const bytes = Buffer.from('hello teamwork', 'utf8')
   const file = await bob.files.upload(bytes, { fileName: '报告 v1.pdf' })
   assert.equal(file.size, bytes.length)
-  await bob.attachments.add([{ issueId, fileId: file.fileId, type: 'assignee', fileName: '报告 v1.pdf' }])
-  const attachments = await bob.attachments.list(issueId, 'assignee')
+  await bob.attachments.add([{ targetType: 'issue', targetId: issueId, fileId: file.fileId, role: 'assignee', fileName: '报告 v1.pdf' }])
+  const attachments = await bob.attachments.list('issue', issueId, 'assignee')
   assert.equal(attachments.length, 1)
   assert.equal(attachments[0]?.fileId, file.fileId)
   const downloaded = await admin.files.download(file.fileId)

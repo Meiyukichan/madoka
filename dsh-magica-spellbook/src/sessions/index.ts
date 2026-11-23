@@ -83,6 +83,7 @@ export type {
   EphemeralSessionState,
   RunEphemeralSessionOptions,
   SessionPermission,
+  SessionQuiescenceOptions,
 } from './ephemeral.ts'
 
 export { runWorkspaceSession, ensureWorkspaceForSession } from './workspace.ts'

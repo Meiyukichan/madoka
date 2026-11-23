@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Issue 模块（C1–C16）：issue / 评论 / 附件 / 来源字典。
  *
  * 分工（api-design §5）：服务端只做 ①认证 ②枚举与格式校验 ③落库；
@@ -13,12 +13,16 @@ import { normalizePage, normalizePageSize } from '../account/service.js'
 export const STATUSES = ['pending', 'accepted', 'routing', 'running', 'success', 'failed', 'abandoned'] as const
 export const URGENCIES = ['runtime', 'direct', 'urgent', 'normal', 'relaxed'] as const
 export const PERMISSIONS = ['read-only', 'workspace-write', 'danger-full-access'] as const
-export const ATTACHMENT_TYPES = ['assigner', 'assignee'] as const
+/** 附件挂在哪类对象上（DB `ck_tw_attachment_target`） */
+export const ATTACHMENT_TARGET_TYPES = ['issue', 'comment'] as const
+/** 附件角色：下发方提供 / 执行方交付（DB `ck_tw_attachment_role`） */
+export const ATTACHMENT_ROLES = ['assigner', 'assignee'] as const
 
 export type IssueStatus = (typeof STATUSES)[number]
 export type IssueUrgency = (typeof URGENCIES)[number]
 export type IssuePermission = (typeof PERMISSIONS)[number]
-export type AttachmentType = (typeof ATTACHMENT_TYPES)[number]
+export type AttachmentTargetType = (typeof ATTACHMENT_TARGET_TYPES)[number]
+export type AttachmentRole = (typeof ATTACHMENT_ROLES)[number]
 
 export interface IssueVo {
   id: number
@@ -60,10 +64,11 @@ export interface CommentVo {
 
 export interface AttachmentVo {
   id: number
-  issueId: string
+  targetType: AttachmentTargetType
+  targetId: string
   fileId: string
-  fileName: string
-  type: AttachmentType
+  fileName: string | null
+  role: AttachmentRole
   description: string | null
   createdAt: string
   updatedAt: string
@@ -88,8 +93,8 @@ const COMMENT_COLUMNS = `id, comment_id AS commentId, issue_id AS issueId, autho
   comment_role AS commentRole, comment_author_type AS commentAuthorType,
   comment_at AS commentAt, created_at AS createdAt, updated_at AS updatedAt`
 
-const ATTACHMENT_COLUMNS = `id, issue_id AS issueId, file_id AS fileId, file_name AS fileName, type,
-  description, created_at AS createdAt, updated_at AS updatedAt`
+const ATTACHMENT_COLUMNS = `id, target_type AS targetType, target_id AS targetId, file_id AS fileId,
+  file_name AS fileName, role, description, created_at AS createdAt, updated_at AS updatedAt`
 
 const SOURCE_COLUMNS = `id, code, description, plugin_name AS pluginName, created_at AS createdAt, updated_at AS updatedAt`
 
@@ -403,22 +408,24 @@ export class IssueService {
     try {
       for (const raw of items) {
         const item = raw as Record<string, unknown>
-        const issueId = requireString(item.issueId, 'issueId', 1, 100)
-        this.get(issueId)
+        const targetType = requireEnum(item.targetType, 'targetType', ATTACHMENT_TARGET_TYPES)
+        const targetId = requireString(item.targetId, 'targetId', 1, 100)
+        const role = requireEnum(item.role, 'role', ATTACHMENT_ROLES)
         const fileId = requireString(item.fileId, 'fileId', 1, 36)
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(fileId)) throw errors.invalidFileId()
-        const type = requireEnum(item.type, 'type', ATTACHMENT_TYPES)
+        // issue 强引用必须存在；comment 只做弱引用（本地评论可能先于云端评论行上传，不能要求行已存在）
+        if (targetType === 'issue') this.get(targetId)
         const fileName = optionalString(item.fileName, 'fileName', 255) ?? fileId
         const description = optionalString(item.description, 'description', 500)
         this.db
           .prepare(
-            `INSERT INTO dsh_teamwork_issue_attachment(issue_id, file_id, file_name, type, description, created_at, updated_at)
-             VALUES(?,?,?,?,?,?,?)
-             ON CONFLICT(issue_id, file_id) DO UPDATE SET
-               file_name = excluded.file_name, type = excluded.type,
+            `INSERT INTO dsh_teamwork_issue_attachment(target_type, target_id, file_id, file_name, role, description, created_at, updated_at)
+             VALUES(?,?,?,?,?,?,?,?)
+             ON CONFLICT(target_type, target_id, file_id) DO UPDATE SET
+               file_name = excluded.file_name, role = excluded.role,
                description = COALESCE(excluded.description, description), updated_at = excluded.updated_at`,
           )
-          .run(issueId, fileId, fileName, type, description, nowIso(), nowIso())
+          .run(targetType, targetId, fileId, fileName, role, description, nowIso(), nowIso())
         count++
       }
       this.db.exec('COMMIT')
@@ -430,11 +437,16 @@ export class IssueService {
   }
 
   // ── C12 查附件 ─────────────────────────────────────────────
-  listAttachments(issueId: string, typeRaw: unknown): AttachmentVo[] {
-    this.get(issueId)
-    const type = typeRaw === undefined || typeRaw === null || typeRaw === '' ? null : requireEnum(typeRaw, 'type', ATTACHMENT_TYPES)
-    const sql = `SELECT ${ATTACHMENT_COLUMNS} FROM dsh_teamwork_issue_attachment WHERE issue_id = ?${type ? ' AND type = ?' : ''} ORDER BY created_at ASC, id ASC`
-    const args = type ? [issueId, type] : [issueId]
+  listAttachments(targetTypeRaw: unknown, targetIdRaw: unknown, roleRaw: unknown): AttachmentVo[] {
+    const targetType = requireEnum(targetTypeRaw, 'targetType', ATTACHMENT_TARGET_TYPES)
+    const targetId = requireString(targetIdRaw, 'targetId', 1, 100)
+    // issue 必须存在；comment 允许「附件先于评论行」（弱引用），不过滤
+    if (targetType === 'issue') this.get(targetId)
+    const role = roleRaw === undefined || roleRaw === null || roleRaw === '' ? null : requireEnum(roleRaw, 'role', ATTACHMENT_ROLES)
+    const sql = `SELECT ${ATTACHMENT_COLUMNS} FROM dsh_teamwork_issue_attachment
+      WHERE target_type = ? AND target_id = ?${role ? ' AND role = ?' : ''}
+      ORDER BY created_at ASC, id ASC`
+    const args = role ? [targetType, targetId, role] : [targetType, targetId]
     return rows<AttachmentVo>(this.db.prepare(sql).all(...(args as never[])))
   }
 
@@ -557,6 +569,8 @@ function requireEnum<T extends string>(v: unknown, field: string, allowed: reado
     if (field === 'urgency') throw errors.invalidUrgency()
     if (field === 'permission') throw errors.invalidPermission()
     if (field === 'type') throw errors.invalidType(field)
+    if (field === 'targetType') throw errors.invalidRequest('targetType 只能是 issue / comment', { field })
+    if (field === 'role') throw errors.invalidRequest('role 只能是 assigner / assignee', { field })
     throw errors.invalidRequest(`${field} 取值不合法`, { field })
   }
   return v as T

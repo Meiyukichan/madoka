@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 项目与成员业务层（B1–B10）。
  *
  * 不变式：
@@ -11,12 +11,15 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { errors, nowIso } from '../../errors.js'
 import type { CurrentUser } from '../../auth/guard.js'
-import { ProjectMapper, toMemberVo, type MemberVo, type ProjectDetailVo, type ProjectRole, type ProjectStatus, type Visibility } from './mapper.js'
+import type { AccountService } from '../account/service.js'
+import type { AccountVo } from '../account/mapper.js'
 import { normalizePage, normalizePageSize } from '../account/service.js'
+import { ProjectMapper, toMemberVo, type MemberVo, type ProjectDetailVo, type ProjectRole, type ProjectStatus, type Visibility } from './mapper.js'
 
 export interface ProjectServiceDeps {
   db: DatabaseSync
   privateMemberLimit: number
+  accounts: Pick<AccountService, 'list'>
 }
 
 const NAME_MAX = 100
@@ -51,6 +54,16 @@ export class ProjectService {
     if (this.isAdmin(user)) return ctx
     if (ctx.member?.role !== 'owner') throw errors.forbidden('需要项目 owner 或 administrator')
     return ctx
+  }
+
+  /** 成员管理写路径：全局 leader 不需要先成为项目成员。 */
+  private requireMemberManager(user: CurrentUser, projectId: number) {
+    if (user.globalRole === 'leader' && !this.isAdmin(user)) {
+      const project = this.mapper.findById(projectId)
+      if (!project) throw errors.projectNotFound(projectId)
+      return { project, member: this.mapper.findMember(projectId, user.accountId) }
+    }
+    return this.requireVisible(user, projectId)
   }
 
   // ── B1 / B2 ────────────────────────────────────────────────
@@ -150,9 +163,35 @@ export class ProjectService {
     return this.mapper.members(projectId).map(toMemberVo)
   }
 
+  /** 成员管理资格：全局 administrator / leader，或项目 owner / manager。 */
+  canManageMembers(user: CurrentUser, projectId: number): boolean {
+    const project = this.mapper.findById(projectId)
+    if (!project) return false
+    if (this.isAdmin(user) || user.globalRole === 'leader') return true
+    const member = this.mapper.findMember(projectId, user.accountId)
+    return member?.role === 'owner' || member?.role === 'manager'
+  }
+
+  /** 成员搜索：复用账号目录的模糊查询，只返回成员选择需要的字段。 */
+  searchAccounts(
+    user: CurrentUser,
+    projectId: number,
+    keyword: string,
+    limit = 20,
+  ): Array<Pick<AccountVo, 'accountId' | 'displayName' | 'globalRole'>> {
+    if (!this.canManageMembers(user, projectId)) throw errors.forbidden('需要 owner / manager / administrator / leader')
+    const q = keyword.trim()
+    if (q === '') return []
+    return this.deps.accounts.list(q, 1, limit).items.map(({ accountId, displayName, globalRole }) => ({
+      accountId,
+      displayName,
+      globalRole,
+    }))
+  }
+
   // ── B8 ─────────────────────────────────────────────────────
   addMember(user: CurrentUser, projectId: number, body: { accountId?: unknown; role?: unknown }): MemberVo {
-    const { project, member } = this.requireVisible(user, projectId)
+    const { project, member } = this.requireMemberManager(user, projectId)
     if (!this.isAdmin(user) && member?.role === 'member') throw errors.forbidden('需要 owner / manager / administrator')
     if (project.status === 'archived') throw errors.projectArchived()
 

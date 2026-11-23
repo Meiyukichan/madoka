@@ -1,6 +1,6 @@
 {
-  "name": "dsh-magica-teamwork",
-  "version": "0.2.0-alpha.1",
+  "name": "@meiyukichan/dsh-magica-teamwork",
+  "version": "0.2.0-alpha.4",
   "description": "DSH Teamwork：本地协作服务（issue / 项目 / 设备 / 文件）+ 客户端 SDK",
   "type": "module",
   "license": "MIT",
@@ -20,6 +20,10 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -30,20 +34,28 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
+    "typecheck:client": "tsc -p tsconfig.client.json",
+    "lint:tokens": "node scripts/lint-tokens.mjs",
     "smoke": "tsc -p tsconfig.tests.json && node lib-tests/tests/smoke-script.js",
     "pretest": "tsc -p tsconfig.tests.json",
     "test": "node scripts/run-tests.mjs",
     "saturate:sdk": "node scripts/sdk-saturate.mjs",
     "start": "node lib/index.js"
   },
+  "peerDependencies": {
+    "react": ">=19",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.0-rc.2 <0.3.0-0"
+  },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/react": "19.3.0",
     "dts-bundle-generator": "^10.0.0",
     "esbuild": "^0.28.2",
-    "typescript": "^5.9.3"
+    "react": "19.3.1",
+    "typescript": "^5.9.3",
+    "@meiyukichan/dsh-magica-spellbook": "link:../dsh-magica-spellbook"
   },
   "dependencies": {
-    "@meiyukichan/dsh-magica-spellbook": "^0.2.0-alpha.1",
     "@sinclair/typebox": "^0.34.52",
     "fastify": "^5.12.8"
   },

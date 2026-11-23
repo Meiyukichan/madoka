@@ -3,3 +3,8 @@
 packages:
   - '.'
   - 'packages/*'
+allowBuilds:
+  '@primno/dpapi': true
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@meiyukichan/dsh-magica-spellbook@0.2.0-alpha.1 || 0.2.0-alpha.3'

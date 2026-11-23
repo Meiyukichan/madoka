@@ -8,12 +8,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  LatticeTransport,
+  CastboardTransport,
   signToken,
-  type LatticeAuthLike,
-  type LatticeFetch,
-  type LatticeGlobalRole,
-  type LatticeSession,
+  type CastboardAuthLike,
+  type CastboardFetch,
+  type CastboardGlobalRole,
+  type CastboardSession,
 } from '../src/sdk/index.js'
 
 const BASE = 'http://127.0.0.1:3939/dsh-teamwork/v1'
@@ -25,10 +25,10 @@ interface RecordedCall {
 
 function recorder(handler: (call: RecordedCall) => Response | Promise<Response>): {
   calls: RecordedCall[]
-  fetchImpl: LatticeFetch
+  fetchImpl: CastboardFetch
 } {
   const calls: RecordedCall[] = []
-  const fetchImpl: LatticeFetch = async (url, init) => {
+  const fetchImpl: CastboardFetch = async (url, init) => {
     const call: RecordedCall = {
       url,
       init: { method: init?.method, headers: init?.headers, body: init?.body },
@@ -43,9 +43,9 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-class FakeAuth implements LatticeAuthLike {
+class FakeAuth implements CastboardAuthLike {
   signed = true
-  role: LatticeGlobalRole | undefined = 'administrator'
+  role: CastboardGlobalRole | undefined = 'administrator'
   expired = 0
   skew: number | null = null
   cleared = 0
@@ -57,7 +57,7 @@ class FakeAuth implements LatticeAuthLike {
     return { token: `token-${this.counter}`, accountId: 'alice' }
   }
 
-  globalRole(): LatticeGlobalRole | undefined {
+  globalRole(): CastboardGlobalRole | undefined {
     return this.role
   }
 
@@ -76,10 +76,10 @@ class FakeAuth implements LatticeAuthLike {
 }
 
 function makeTransport(
-  fetchImpl: LatticeFetch,
-  extra: Partial<ConstructorParameters<typeof LatticeTransport>[0]> = {},
-): LatticeTransport {
-  return new LatticeTransport({ baseUrl: BASE, fetchImpl, ...extra })
+  fetchImpl: CastboardFetch,
+  extra: Partial<ConstructorParameters<typeof CastboardTransport>[0]> = {},
+): CastboardTransport {
+  return new CastboardTransport({ baseUrl: BASE, fetchImpl, ...extra })
 }
 
 test('public 端点不带鉴权头；signed 端点带双头', async () => {
@@ -122,9 +122,9 @@ test('admin 端点：已知角色不是 administrator → 403 forbidden，零请
 })
 
 test('现签 JWT：payload 只有 {a,iat,exp}，两次请求的 exp 不同', async () => {
-  const session: LatticeSession = { accountId: 'alice', accountToken: 'a'.repeat(64), ttlSeconds: 3600 }
+  const session: CastboardSession = { accountId: 'alice', accountToken: 'a'.repeat(64), ttlSeconds: 3600 }
   const { calls, fetchImpl } = recorder(() => json({ ok: true }))
-  const auth: LatticeAuthLike = {
+  const auth: CastboardAuthLike = {
     headers: () => ({ token: signToken(session), accountId: session.accountId }),
     globalRole: () => 'administrator',
     onExpired: () => {},

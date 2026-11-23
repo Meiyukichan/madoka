@@ -2,12 +2,12 @@
  * teamwork 分组入口：`client.teamwork.project` / `client.teamwork.device`。
  */
 
-import type { LatticeTransport } from '../transport.js'
-import { LatticeTeamworkDeviceApi } from './device.js'
-import { LatticeTeamworkProjectApi } from './project.js'
+import type { CastboardTransport } from '../transport.js'
+import { CastboardTeamworkDeviceApi } from './device.js'
+import { CastboardTeamworkProjectApi } from './project.js'
 
-export { LatticeTeamworkDeviceApi } from './device.js'
-export { LatticeTeamworkProjectApi } from './project.js'
+export { CastboardTeamworkDeviceApi } from './device.js'
+export { CastboardTeamworkProjectApi } from './project.js'
 export {
   affectedOf,
   emptyBodyFail,
@@ -18,12 +18,12 @@ export {
   pageParams,
 } from './shared.js'
 
-export class LatticeTeamworkApi {
-  readonly project: LatticeTeamworkProjectApi
-  readonly device: LatticeTeamworkDeviceApi
+export class CastboardTeamworkApi {
+  readonly project: CastboardTeamworkProjectApi
+  readonly device: CastboardTeamworkDeviceApi
 
-  constructor(transport: LatticeTransport) {
-    this.project = new LatticeTeamworkProjectApi(transport)
-    this.device = new LatticeTeamworkDeviceApi(transport)
+  constructor(transport: CastboardTransport) {
+    this.project = new CastboardTeamworkProjectApi(transport)
+    this.device = new CastboardTeamworkDeviceApi(transport)
   }
 }

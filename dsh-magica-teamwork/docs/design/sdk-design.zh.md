@@ -46,7 +46,7 @@
                     │  client.issue.submit(...)  ← 原子层（协议面 1:1）
                     └──────────────────┬──────────────────────────┘
                                        ▼
-                          LatticeTransport（一条请求管线）
+                          CastboardTransport（一条请求管线）
                      URL 拼装 / JWT 现签 / 并发闸 / 超时 / 重试 / 错误归一
                                        ▼
                          HTTP + dsh-teamwork/1 协议（§7 端点表）
@@ -62,7 +62,7 @@
 1. **SDK 的 `data` 就是协议里的响应体**，不是服务端内部结构。任何字段语义都以 `api-design.zh.md` 为准。
 2. **SDK 不 import `src/server` 的任何运行时模块**（类型也自带一份）。否则"服务端可替换"就是空话，
    而且 server 的内部重构会连带打断 SDK。
-3. **一个 `LatticeClient` 实例 = 一份会话 + 一个并发闸 + 一套连接**。不要给每个分组各造一个 client。
+3. **一个 `CastboardClient` 实例 = 一份会话 + 一个并发闸 + 一套连接**。不要给每个分组各造一个 client。
 
 ### 0.2 决策登记（勿单方面推翻）
 
@@ -73,41 +73,41 @@
 | **D3** | 命名 | 原子层端点名 / 方法名**沿用兼容面**（`issueSubmit` / `issue.submit` / `issueCreate`…）；新增的用 `dsh-teamwork` 风格 | 旧调用方零改名成本；差异集中记录在 §14 |
 | **D4** | 鉴权 | 完全走本协议：`dsh-teamwork-token`（现签 HS256 JWT）+ `dsh-teamwork-account`；凭据只落 `accountToken` | 兼容面的 `x-auth-token` / `user_id` 方案**整体废弃** |
 | **D5** | baseUrl | 解析链 `显式参数 > DSH_TEAMWORK_URL > DSH_TEAMWORK_HOST/PORT > <dataDir>/config.json > 127.0.0.1:3939`；前缀默认 `/dsh-teamwork/v1` | 与 `src/server/config.ts` 同源，拿不到参数时也能连上本机 server |
-| **D6** | 信封 | 全部返回 `LatticeResult<T>`，**永不抛异常**（`dispose()` 不抛） | 调用方几乎全是后台任务，漏一个 `try/catch` 就是未处理 rejection |
+| **D6** | 信封 | 全部返回 `CastboardResult<T>`，**永不抛异常**（`dispose()` 不抛） | 调用方几乎全是后台任务，漏一个 `try/catch` 就是未处理 rejection |
 | **D7** | `issueId` | **不强制 UUID**：非空、`trim` 后 1..100、不含控制字符 | 服从 DB：`ck_tw_issue_id_len CHECK (length(issue_id) BETWEEN 1 AND 100)`；兼容面的 UUID 硬约束属于原协议服务端 schema，在这里会把 `dsh:<host>:<uuid5>` 这类语义键挡在门外。UUID 是本规则的**子集**，旧调用方零成本 |
 | **D8** | 附件类型 | 对外 `input` / `output`（兼容面能力），上线映射 `assigner` / `assignee`；也**接受**直接传 `assigner`/`assignee`（原样透传） | 服从 DB：`ck_tw_attachment_type CHECK (type IN ('assigner','assignee'))`；门面形状保留是为了 兼容面调用方 |
 | **D9** | `title` / `detail` | 组合层接受顶层 `title`/`detail`，缺省从 `assignerMeta.title`/`.detail` 兜底；写库落到真列，`assignerMeta` 原样保留 | 服从 DB：`title TEXT NOT NULL` / `detail TEXT`（兼容面没有这两列，只能塞 meta；我们有真列，两种写法都要能跑） |
 | **D10** | `permission` | `''` → `null` | 服从 DB：`ck_tw_issue_permission CHECK (permission IS NULL OR permission IN ('read-only','workspace-write','danger-full-access'))` |
-| **D11** | 分页 | 协议一律 `pageNum`；`issue.list()` 出参同时给 `page` 与 `pageNum` | 兼容面的 `LatticeIssuePage.page` 与 teamwork 的 `pageNum`；DB 无分页概念，形状按 `api-design` §0.5 |
+| **D11** | 分页 | 协议一律 `pageNum`；`issue.list()` 出参同时给 `page` 与 `pageNum` | 兼容面的 `CastboardIssuePage.page` 与 teamwork 的 `pageNum`；DB 无分页概念，形状按 `api-design` §0.5 |
 | **D12** | 原子层返回形状 | 一律返回**协议真实形状**（DB 行的 camelCase 投影） | 兼容面里若干原子方法回 `number`/`boolean`（影响行数、成功位），那是原协议服务端的省略写法；我们的 C 组直接回 `IssueVo`/`CommentVo`/`WorkspaceVo`。能力不减，信息更多 |
 | **D13** | 组合层 `issueCreate` 撞已有 `issueId` | 默认 `onExist:'skip'`（读一次、一致即跳过并返回现有记录）；`'overwrite'` 才重发 | 服从服务端语义 + 补回旧护栏：C1 的 upsert 会把 `status` 打回 `pending` 并清空 `assignee_instance/assignee_meta`（`service.ts::upsertOne` 的 UPDATE 分支），默认重放等于把别人正在跑的活踢回待认领。兼容面里"不再有 pending 守卫"是原协议服务端的**退步**，SDK 层补回来 |
 | **D14** | 匿名下载 | `file.downloadPublic()` 保留为 `download()` 的**别名**，不新增端点 | 服从协议：F2 只要签名头，没有匿名口 |
 | **D15** | 重试 | 只对**幂等**请求重试（GET/PUT/DELETE；带 `issueId` 的 C1、带 `commentId` 的 C9）；`POST /files` 不重试 | 上传重试会写出孤儿文件（F1 无幂等键） |
-| **D16** | 并发 | 出站并发上限 **4**（`LATTICE_DEFAULT_MAX_CONCURRENCY`） | dsh web 单 Node 进程，libuv 线程池 4 槽；否则所有 HTTP handler 排队 |
+| **D16** | 并发 | 出站并发上限 **4**（`CASTBOARD_DEFAULT_MAX_CONCURRENCY`） | dsh web 单 Node 进程，libuv 线程池 4 槽；否则所有 HTTP handler 排队 |
 | **D17** | 依赖 | 运行时依赖：`@meiyukichan/dsh-magica-spellbook`（出站 + 日志 + JSON 路由，**已发布 0.2.0-alpha.1**）+ 既有 `fastify` / `@sinclair/typebox`；**不引 dsh 运行时** | 这三件事不自己造第二套：出站细节（TLS/代理/闸）、`EventLogger`、`createJsonRouter`；本包产物仍只 `lib/index.js`（发布包走 `external`） |
 | **D18** | `assigner`（下发人） | 组合层**接受**该入参，但必须等于当前登录账号；不等 → 本地 `invalid_body` 零请求 | 服从鉴权：DB `assigner TEXT NOT NULL` 由服务端填 token 账号（`upsertOne` 里写的是 `user.accountId`），请求体出现 `assigner` → `400 unknown_field`。**这是有意的能力收紧**：本协议下"代他人派活"不存在，替代做法是用对方账号的实例上报，或用 `source`/`assignerMeta` 记录来源 |
-| **D19** | 单条查询的可见性 | `issue.get()` 对所有登录用户返回数据；依赖门禁改为**显式判 `status`**，并新增扩展组合方法 `E1 latticeIssueStatuses(ids)` | 服从协议：C 组明确不做资源级鉴权（`api-design` §5.0「全部 16 个 C 端点都不管」）。兼容面靠 404 判"查不到"的做法在这里**恒不触发**，必须换判据，否则门禁静默失效 |
+| **D19** | 单条查询的可见性 | `issue.get()` 对所有登录用户返回数据；依赖门禁改为**显式判 `status`**，并新增扩展组合方法 `E1 castboardIssueStatuses(ids)` | 服从协议：C 组明确不做资源级鉴权（`api-design` §5.0「全部 16 个 C 端点都不管」）。兼容面靠 404 判"查不到"的做法在这里**恒不触发**，必须换判据，否则门禁静默失效 |
 | **D20** | 轮询友好 | 组合方法一律"**一拍一次**"：不内部 sleep、不重试到成功、不等待远端变化 | 插件用 3s/5s 轮询驱动；方法内再循环会让拍与拍重叠且不可取消 |
-| **D21** | 逃生口 | 保留 `client.request<T>(path, options)`；并导出 `LatticeTransport`（`call`/`callRaw`/`request`/`raw`） | 兼容面有这层能力（`roleOf()` 就是用法）；新能力仍优先补端点表 |
+| **D21** | 逃生口 | 保留 `client.request<T>(path, options)`；并导出 `CastboardTransport`（`call`/`callRaw`/`request`/`raw`） | 兼容面有这层能力（`roleOf()` 就是用法）；新能力仍优先补端点表 |
 | **D22** | 优先级与取舍口径 | **兼容面 = 能力清单（全收纳），`src/server` = 形状标准（全服从）**；两者冲突时**形状服从 server、能力不丢**，差异逐条记在 §14 | 兼容面是**能力来源**（方法名/入参/返回信封保持稳定），本协议是**形状来源**（路径/字段/状态码/DB 列） |
-| **D23** | 组合方法总数 | **24（兼容面全部）+ 1 个扩展 `E1 latticeIssueStatuses`**；扩展一律 `E` 前缀，与 24 分开计数 | 24 个必须全在（协同插件的调用点全落在这 24 个上）；E1 补的是 兼容面里插件手写的依赖门禁，属于"能力收纳"而不是发明新业务 |
+| **D23** | 组合方法总数 | **24（兼容面全部）+ 1 个扩展 `E1 castboardIssueStatuses`**；扩展一律 `E` 前缀，与 24 分开计数 | 24 个必须全在（协同插件的调用点全落在这 24 个上）；E1 补的是 兼容面里插件手写的依赖门禁，属于"能力收纳"而不是发明新业务 |
 | **D24** | 枚举以 DB CHECK 为准 | 成员角色 = `owner`/`manager`/`member`（**收掉 兼容面的 `creator`**）；设备无 `dshPatcherVersion`；成员无 `dept` | 服从 DB 三张 CHECK：`ck_tw_member_role`、设备 9 列、成员 6 列。多一个枚举值等于多一段永远走不到的分支 |
-| **D25** | 兼容面的注入能力全保留、语义映射 | `userId` → 组合层的身份兜底（`latticeMyInstanceIssues` 等）；`tokenProvider` → 返回 `{accountId, accountToken, ttlSeconds?}` 的提供器；`invalidateToken` → `onTokenInvalid()`；`fetchImpl`/`timeoutMs`/`maxConcurrency` 原样 | 兼容面把这些当"外部依赖接缝"，测试与 CI 全靠它；我们的鉴权换了，但**接缝不能少**（§5.6 全表） |
+| **D25** | 兼容面的注入能力全保留、语义映射 | `userId` → 组合层的身份兜底（`castboardMyInstanceIssues` 等）；`tokenProvider` → 返回 `{accountId, accountToken, ttlSeconds?}` 的提供器；`invalidateToken` → `onTokenInvalid()`；`fetchImpl`/`timeoutMs`/`maxConcurrency` 原样 | 兼容面把这些当"外部依赖接缝"，测试与 CI 全靠它；我们的鉴权换了，但**接缝不能少**（§5.6 全表） |
 | **D26** | 请求体只发 DB 可写列 | 每个端点用白名单投影（§8.6）；`assigner`/`createdBy`/`author`/`accountId` 这类身份列**永不进 body** | 服从服务端 strict schema（未声明字段一律 400）与 `api-design` §0.4.1 的"身份字段禁止出现在请求体" |
 
 ---
 
 ### 0.3 这个 SDK 是协同底座（谁在用它）
 
-`dsh-magica-lattice` 的三条协同维度，最终都落到本 SDK 的**组合方法**上：
+`dsh-magica-castboard` 的三条协同维度，最终都落到本 SDK 的**组合方法**上：
 
 | 协同维度 | 难题 | 插件侧机制（不在本 SDK） | 本 SDK 提供的支撑 |
 |---|---|---|---|
-| **多实例**（同一人，多台机器） | 写者唯一、认领仲裁 | 存储目录租约 `StorageLease`、启动对账 | `issueClaim`（`expectedStatus:'pending'` CAS）、`latticeMyInstanceIssues`（只拉本机）、`latticeUserDevices` / `teamworkInstanceName()`（实例口径） |
-| **多人**（下发方 ⇄ 执行方） | 消息送到"对端那个会话" | 关系表 + 评论流 jsonl + 三档投递 | `latticeAddIssueComments`（评论上云，`commentId` 幂等）、`latticeCommentsSince`（增量拉回）、`latticeIssueComments` |
-| **多目标系统**（一个事件源 = 一个系统） | 幂等 + 边界 | 源插件只做"翻译"、`issue_sources` 字典 | `issueCreateMany`（唯一写入口）、`latticeAddIssueSource` / `latticeIssueSources`、`issueId` 幂等键 |
+| **多实例**（同一人，多台机器） | 写者唯一、认领仲裁 | 存储目录租约 `StorageLease`、启动对账 | `issueClaim`（`expectedStatus:'pending'` CAS）、`castboardMyInstanceIssues`（只拉本机）、`castboardUserDevices` / `teamworkInstanceName()`（实例口径） |
+| **多人**（下发方 ⇄ 执行方） | 消息送到"对端那个会话" | 关系表 + 评论流 jsonl + 三档投递 | `castboardAddIssueComments`（评论上云，`commentId` 幂等）、`castboardCommentsSince`（增量拉回）、`castboardIssueComments` |
+| **多目标系统**（一个事件源 = 一个系统） | 幂等 + 边界 | 源插件只做"翻译"、`issue_sources` 字典 | `issueCreateMany`（唯一写入口）、`castboardAddIssueSource` / `castboardIssueSources`、`issueId` 幂等键 |
 | ——（贯穿） | 一件活的生命周期 | 本地台账是权威、远端是镜像 | `issueRouting` → `issueRouted` → `issueRunning` → `issueFinalize` / `issueAbandon` 五件套 |
-| ——（贯穿） | 派活四步（人/机/项目/目录） | `lattice_issues_*` 工具 | `latticeMyProjects` / `latticeProjectMembers` / `latticeUserDevices` / `latticeWorkspaceIndexes` / `latticeWorkspacePortal` |
+| ——（贯穿） | 派活四步（人/机/项目/目录） | `castboard_issues_*` 工具 | `castboardMyProjects` / `castboardProjectMembers` / `castboardUserDevices` / `castboardWorkspaceIndexes` / `castboardWorkspacePortal` |
 
 **一条硬分工**：本 SDK **不做**轮询、不做台账、不做会话编排。它只保证"一次调用、一个结果、一个可判别的失败原因"，
 让插件把"什么时候调、失败怎么降级"写成自己的策略（见 §10.0 的调用方地图）。
@@ -156,14 +156,14 @@ DB 引擎与表名、进程模型、端口、是否 `bin` 启动、限流参数�
 
 | 编号 | 不变量 | 落点 |
 |---|---|---|
-| INV-1 | **永不抛异常**：所有对外方法返回 `LatticeResult` 信封；组合层再兜一层 `guard()` | `result.ts`、`sdk.ts` |
+| INV-1 | **永不抛异常**：所有对外方法返回 `CastboardResult` 信封；组合层再兜一层 `guard()` | `result.ts`、`sdk.ts` |
 | INV-2 | **一个方法对一个端点，不多不少**；48 条表项覆盖 47 个协议端点 | `endpoints.ts` + 单测断言 |
 | INV-3 | **端点表是唯一真源**：方法体不出现手写路径字面量 | `transport.call(name)` |
 | INV-4 | **出站并发上限 4**，与是否注入自定义 `fetch` 无关 | `transport.ts` |
 | INV-5 | **`issueId` 是幂等键**，形状不合格在入口拦下且**零请求** | `wire.checkIssueId()` |
 | INV-6 | **线格式翻译只在一处**：`dependsOn`(string[]↔JSON 文本)、附件类型(input/output↔assigner/assignee)、分页(page↔pageNum) | `wire.ts` |
 | INV-7 | **只做"接口层 + 语义组合层"**：原子层 1:1 封端点，组合层只把端点按固定顺序拼一次；轮询 / 本地台账 / 执行闭环**不在本层** | `index.ts` 文件头、§10.0 |
-| INV-8 | 一个 `LatticeClient` = **一份会话 + 一个并发闸 + 一套连接** | `client.ts` |
+| INV-8 | 一个 `CastboardClient` = **一份会话 + 一个并发闸 + 一套连接** | `client.ts` |
 | INV-9 | **本地校验不合格则零请求** | `wire.ts`、`sdk.ts` 校验块 |
 | INV-10 | **不依赖 dsh 运行时**：不接收 `ctx`、不 `import @deepseek-ai/*`、不 import `src/server` | 全部 import |
 | INV-11 | 副作用可逆：`dispose()` 幂等且不抛 | `transport.dispose()` |
@@ -175,18 +175,18 @@ DB 引擎与表名、进程模型、端口、是否 `bin` 启动、限流参数�
 
 ## 3. 文件结构
 
-**落地位置**：新 SDK 直接在 `src/sdk/**` 根下（没有 `lattice/` 之类的中间目录）。
+**落地位置**：新 SDK 直接在 `src/sdk/**` 根下（没有 `castboard/` 之类的中间目录）。
 
 - `src/sdk/legacy/`：包内既有 `TeamworkClient` 的 `client.ts` / `types.ts`（按 §15 先并存、后适配、再删除）；
 - `src/sdk/credentials.ts`：AES-256-GCM 凭据存储，**两层共用**，不搬不改。
 
 ```
 src/sdk/
-├── index.ts            门面：createLatticeClient() + 全部再导出            ~37 行
-├── client.ts           LatticeClient：底座 + 8 分组 + 24 组合方法 + E1 + request() + dispose  ~412 行
+├── index.ts            门面：createCastboardClient() + 全部再导出            ~37 行
+├── client.ts           CastboardClient：底座 + 8 分组 + 24 组合方法 + E1 + request() + dispose  ~412 行
 ├── transport.ts        一条请求管线：URL/JWT/闸/超时/重试/非2xx 归一          ~551 行
 ├── endpoints.ts        48 条端点表（唯一真源）                                ~147 行
-├── result.ts           信封 + LatticeErrorCode（76 个已知码 + 兜底）           ~175 行
+├── result.ts           信封 + CastboardErrorCode（76 个已知码 + 兜底）           ~175 行
 ├── types.ts            线格式类型 + 枚举三件套 + 运行期守卫                    ~525 行
 ├── wire.ts             线格式翻译 + 入参校验助手                              ~321 行
 ├── env.ts              baseUrl / 实例身份 / 本机 IP / 环境变量               ~369 行
@@ -366,7 +366,7 @@ headers['dsh-teamwork-account'] = accountId
 ### 5.6 构造选项全表（兼容面的注入能力一个不少）
 
 ```ts
-export interface LatticeOptions {
+export interface CastboardOptions {
   // ── 地址（§4.1）─────────────────────────────────────────────
   baseUrl?: string
   host?: string
@@ -384,9 +384,9 @@ export interface LatticeOptions {
   os?: 'windows' | 'linux'
   // ── 传输 ────────────────────────────────────────────────────
   timeoutMs?: number              // 默认 15_000；文件端点取 max(它, 60_000)
-  maxConcurrency?: number         // 默认 4（LATTICE_DEFAULT_MAX_CONCURRENCY）
+  maxConcurrency?: number         // 默认 4（CASTBOARD_DEFAULT_MAX_CONCURRENCY）
   retries?: number                // 默认 2（仅幂等请求）
-  fetchImpl?: LatticeFetch
+  fetchImpl?: CastboardFetch
   onRequest?: (info: { method: string; path: string; status: number; ms: number }) => void
   // ── 能力 ────────────────────────────────────────────────────
   probe?: boolean                 // 默认 true：GET /version 填 capabilities
@@ -397,7 +397,7 @@ export interface LatticeOptions {
 | 兼容面的选项 | 本 SDK | 语义映射 |
 |---|---|---|
 | `baseUrl` | `baseUrl` / `host` / `port` / `prefix` | 多了 host/port/prefix 三种给法（§4.1）；`baseUrl` 仍最高优先 |
-| `userId` | `userId` | 兼容面用它填 `user_id` query；本协议**没有**这个 query，改作组合层的身份兜底（`latticeMyInstanceIssues` / 工作区上报），缺省取会话账号 |
+| `userId` | `userId` | 兼容面用它填 `user_id` query；本协议**没有**这个 query，改作组合层的身份兜底（`castboardMyInstanceIssues` / 工作区上报），缺省取会话账号 |
 | `timeoutMs` | `timeoutMs` | 同义；文件端点自动放宽到 60s（与 兼容面的 `FILE_TIMEOUT_MS` 一致） |
 | `maxConcurrency` | `maxConcurrency` | 同义；都是 `Math.max(1, floor(n))` |
 | `fetchImpl` | `fetchImpl` | 同义；SDK 仍会套并发闸与 `AbortSignal.timeout`（兼容面已踩过的坑） |
@@ -419,22 +419,22 @@ export interface LatticeOptions {
 ### 6.1 信封
 
 ```ts
-export interface LatticeOk<T>  { ok: true;  status: number; data: T }
-export interface LatticeFail   {
+export interface CastboardOk<T>  { ok: true;  status: number; data: T }
+export interface CastboardFail   {
   ok: false
   status: number                 // 0 = 网络层/本地失败；其余是服务端真实码
-  code: LatticeErrorCode         // 机器可读，用来分支
+  code: CastboardErrorCode         // 机器可读，用来分支
   reason: string                 // 人可读中文，直接进日志/看板
   field?: string; value?: string // 入参校验失败时指出字段
   method?: string; path?: string // 请求类失败时指出打到了哪
   body?: string                  // 服务端响应原文，截断 2KB
   created?: string[]             // 已写入但后续步骤失败时，回传已创建的 issueId
 }
-export type LatticeResult<T> = LatticeOk<T> | LatticeFail
-export const latticeOk  = <T>(status: number, data: T): LatticeOk<T> => ({ ok: true, status, data })
-export const latticeFail = (init: Omit<LatticeFail,'ok'>): LatticeFail => ({ ok: false, ...init })
-export const isLatticeOk  = <T>(r: LatticeResult<T>): r is LatticeOk<T>  => r.ok
-export const isLatticeFail = <T>(r: LatticeResult<T>): r is LatticeFail => !r.ok
+export type CastboardResult<T> = CastboardOk<T> | CastboardFail
+export const castboardOk  = <T>(status: number, data: T): CastboardOk<T> => ({ ok: true, status, data })
+export const castboardFail = (init: Omit<CastboardFail,'ok'>): CastboardFail => ({ ok: false, ...init })
+export const isCastboardOk  = <T>(r: CastboardResult<T>): r is CastboardOk<T>  => r.ok
+export const isCastboardFail = <T>(r: CastboardResult<T>): r is CastboardFail => !r.ok
 ```
 
 三个字段分工（**不许混用**）：
@@ -445,9 +445,9 @@ export const isLatticeFail = <T>(r: LatticeResult<T>): r is LatticeFail => !r.ok
 | `code` | **我该怎么处理** | `status_conflict`（别重试）/ `login_required`（重新登录）/ `update_rejected`（看 `failed[]`） |
 | `reason` | **直接展示给人** | 中文短句，可含服务端 `message` |
 
-### 6.2 `LatticeErrorCode` 全表
+### 6.2 `CastboardErrorCode` 全表
 
-「来源」列：**继承** = lattice 同名码；**协议** = 本协议 `code`（`src/server/errors.ts`）；**本地** = SDK 自己造。
+「来源」列：**继承** = castboard 同名码；**协议** = 本协议 `code`（`src/server/errors.ts`）；**本地** = SDK 自己造。
 
 | code | 来源 | 含义 / 处置 |
 |---|---|---|
@@ -509,25 +509,25 @@ export const isLatticeFail = <T>(r: LatticeResult<T>): r is LatticeFail => !r.ok
 ### 7.1 表结构
 
 ```ts
-export type LatticeHttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
+export type CastboardHttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
 /**
  * public = 不带鉴权头
  * signed = 双头（无会话 → 本地 401 login_required，零请求）
  * admin  = 双头 + 已知角色非 administrator 时本地拦 403
  * local  = 双头 **或** X-Shutdown-Token（回环），不做本地角色拦截（服务端自己判）
  */
-export type LatticeAuthMode = 'public' | 'signed' | 'admin' | 'local'
+export type CastboardAuthMode = 'public' | 'signed' | 'admin' | 'local'
 
-export interface LatticeEndpoint {
-  readonly method: LatticeHttpMethod
+export interface CastboardEndpoint {
+  readonly method: CastboardHttpMethod
   readonly path: string        // 可含 {issueId} / {id} / {accountId} / {fileId} 占位符
-  readonly auth: LatticeAuthMode
+  readonly auth: CastboardAuthMode
   /** true = 端点本身幂等，可无条件重试；false 时调用方可凭业务幂等键逐次置 true（D15） */
   readonly retry: boolean
 }
 
-export const LATTICE_ENDPOINTS = { /* … 48 条 … */ } as const satisfies Record<string, LatticeEndpoint>
-export type LatticeEndpointName = keyof typeof LATTICE_ENDPOINTS
+export const CASTBOARD_ENDPOINTS = { /* … 48 条 … */ } as const satisfies Record<string, CastboardEndpoint>
+export type CastboardEndpointName = keyof typeof CASTBOARD_ENDPOINTS
 ```
 
 **为什么把 `user` 换成 `auth`**：兼容面的 `user: 'required' | 'optional' | 'none'` 是"要不要塞 `user_id` query"；
@@ -548,7 +548,7 @@ export type LatticeEndpointName = keyof typeof LATTICE_ENDPOINTS
 | 6 | `authAccountLookup` | GET | `/auth/accounts?accountId=` | admin | `accountId` | `{exists,account}` | `auth.lookupAccount` |
 | 7 | `teamworkProjectList` | GET | `/projects` | signed | `pageNum? pageSize? keyword? includeArchived?` | `{total,pageNum,pageSize,items:ProjectVo[]}` | `teamwork.project.list` |
 | 8 | `teamworkProjectMine` | GET | `/projects/mine` | signed | `includeArchived?` | `ProjectVo[]`（**不分页**） | `teamwork.project.mine` |
-| 9 | `projectList` | GET | `/projects/mine` | signed | `includeArchived?` | `ProjectVo[]` | `project.list`（**同路径别名**，保 lattice API） |
+| 9 | `projectList` | GET | `/projects/mine` | signed | `includeArchived?` | `ProjectVo[]` | `project.list`（**同路径别名**，保 castboard API） |
 | 10 | `projectMembers` | GET | `/projects/{id}/members` | signed | — | `ProjectMemberVo[]` | `project.members` / `teamwork.project.members` |
 | 11 | `teamworkProjectDetail` | GET | `/projects/{id}` | signed | — | `ProjectDetailVo` | `teamwork.project.detail` |
 | 12 | `teamworkProjectCreate` | POST | `/projects` | signed | `{name,visibility?,description?}` | 201 `ProjectDetailVo` | `teamwork.project.create` |
@@ -590,13 +590,13 @@ export type LatticeEndpointName = keyof typeof LATTICE_ENDPOINTS
 | 48 | `adminResetPassword` | POST | `/admin/accounts/{accountId}/password` | admin | `{newPassword}` | 204 | `admin.resetPassword` |
 
 **计数自检**：48 条表项 = 47 个协议端点（`#8` 与 `#9` 同路径 `/projects/mine`）+ 0 条虚构端点。
-单测断言 `Object.keys(LATTICE_ENDPOINTS).length === 48`，且 §7.3 的分组映射与表键集合**完全相等**。
+单测断言 `Object.keys(CASTBOARD_ENDPOINTS).length === 48`，且 §7.3 的分组映射与表键集合**完全相等**。
 
 ### 7.3 兼容面 33 个端点名 → 本协议映射（逐条）
 
 | # | 兼容面端点名 | 兼容面路径 | 本协议端点 | 差异摘要 |
 |---|---|---|---|---|
-| 1 | `fileUpload` | `POST /api/s3/upload`（multipart） | `fileUpload` `POST /files` | **上传方式变了**：raw octet-stream + `X-File-Name` 头，不再手拼 multipart（协议如此）；返回体是 `LatticeFileInfo`（`fileId`/`fileName`/`size`/`sha256`） |
+| 1 | `fileUpload` | `POST /api/s3/upload`（multipart） | `fileUpload` `POST /files` | **上传方式变了**：raw octet-stream + `X-File-Name` 头，不再手拼 multipart（协议如此）；返回体是 `CastboardFileInfo`（`fileId`/`fileName`/`size`/`sha256`） |
 | 2 | `fileDownload` | `GET /api/internal/s3/{fileId}` | `fileDownload` `GET /files/{fileId}` | 需签名头（协议不做匿名下载） |
 | 3 | `fileDownloadPublic` | `GET /s3-download/{fileId}` | **无独立端点** | 保留方法名做 `download()` 别名（D14） |
 | 4 | `issueSubmit` | `POST /api/issues/batch` | `issueSubmit` | 同名同义；请求体字段以本协议为准（多 `title`/`detail`/`projectId`，无 `assigner`） |
@@ -629,7 +629,7 @@ export type LatticeEndpointName = keyof typeof LATTICE_ENDPOINTS
 | 29 | `teamworkProjectMemberRemove` | `DELETE …/members/{memberId}` | `teamworkProjectMemberRemove` | 路径段就是账号；删 owner → `409 owner_cannot_be_removed` |
 | 30 | `teamworkDeviceMine` | `GET /api/devices/mine` | `teamworkDeviceMine` | 同名同形 |
 | 31 | `teamworkDeviceDelete` | `DELETE /api/devices/{id}` | `teamworkDeviceDelete` | 本协议删别人的设备是 `user` 级但**不校验归属**（同旧行为） |
-| — | （兼容面没有） | — | `authRegister` / `authLogin` / `authMe` / `authLogout` / `authPassword` / `authAccountLookup` | 本协议自带的账号面（lattice 侧由 credential-resolver 外部提供） |
+| — | （兼容面没有） | — | `authRegister` / `authLogin` / `authMe` / `authLogout` / `authPassword` / `authAccountLookup` | 本协议自带的账号面（castboard 侧由 credential-resolver 外部提供） |
 | — | （兼容面没有） | — | `teamworkProjectTransferOwner` | 转让 owner（本协议有，原协议服务端没有） |
 | — | （兼容面没有） | — | `issueSourceUpdate` / `issueSourceDelete` / `fileDelete` | 管理面补充 |
 | — | （兼容面没有） | — | `health` / `version` / `shutdown` / `adminAccounts` / `adminSetRole` / `adminResetPassword` | 运维与管理面 |
@@ -642,47 +642,47 @@ export type LatticeEndpointName = keyof typeof LATTICE_ENDPOINTS
 
 | 枚举 | 取值 | 备注 |
 |---|---|---|
-| `LatticeIssueStatus` | `pending` `accepted` `routing` `running` `success` `failed` `abandoned` | 终态 = `success` `failed` `abandoned`（`isLatticeTerminalStatus()`）；**服务端不校验转移** |
-| `LatticeUrgency` | `runtime` `direct` `urgent` `normal` `relaxed` | 默认 `normal` |
-| `LatticePermission` | `read-only` `workspace-write` `danger-full-access` | 另有 `''`/`null` = 跟随本机默认 |
-| `LatticeAttachmentType` | `input` `output` | **对外**；上线映射 `assigner`/`assignee` |
-| `LatticeProjectStatus` | `active` `archived` | `archived` = 只读 |
-| `LatticeProjectVisibility` | `public` `private` | `private` 成员上限（默认 5） |
-| `LatticeMemberRole` | `owner` `manager` `member` | **服从 DB** `ck_tw_member_role`；兼容面的 `creator` 不收（D24：多一个值等于多一段永远走不到的分支） |
-| `LatticeDeviceStatus` | `active` `inactive` | |
-| `LatticeGlobalRole` | `administrator` `leader` `user` | 本协议新增（服务端有） |
-| `LatticeWorkspaceType` | `index` `portal` | `index` 不许有 `workspaceId`/`cwd`；`portal` 必须有 |
-| `LatticeCommentRole` | `assigner` `assignee` | 自由取值，服务端不校验 |
-| `LatticeCommentAuthorType` | `user` `agent` `system` | 自由取值 |
-| `LatticeStatusFailureReason` | `issue_id_required` `invalid_status` `invalid_expected_status` `not_found` `status_conflict` `update_conflict` | **与协议逐字一致** |
-| `LatticeOs` | `windows` `linux` | 组合层本地判据用 |
+| `CastboardIssueStatus` | `pending` `accepted` `routing` `running` `success` `failed` `abandoned` | 终态 = `success` `failed` `abandoned`（`isCastboardTerminalStatus()`）；**服务端不校验转移** |
+| `CastboardUrgency` | `runtime` `direct` `urgent` `normal` `relaxed` | 默认 `normal` |
+| `CastboardPermission` | `read-only` `workspace-write` `danger-full-access` | 另有 `''`/`null` = 跟随本机默认 |
+| `CastboardAttachmentType` | `input` `output` | **对外**；上线映射 `assigner`/`assignee` |
+| `CastboardProjectStatus` | `active` `archived` | `archived` = 只读 |
+| `CastboardProjectVisibility` | `public` `private` | `private` 成员上限（默认 5） |
+| `CastboardMemberRole` | `owner` `manager` `member` | **服从 DB** `ck_tw_member_role`；兼容面的 `creator` 不收（D24：多一个值等于多一段永远走不到的分支） |
+| `CastboardDeviceStatus` | `active` `inactive` | |
+| `CastboardGlobalRole` | `administrator` `leader` `user` | 本协议新增（服务端有） |
+| `CastboardWorkspaceType` | `index` `portal` | `index` 不许有 `workspaceId`/`cwd`；`portal` 必须有 |
+| `CastboardCommentRole` | `assigner` `assignee` | 自由取值，服务端不校验 |
+| `CastboardCommentAuthorType` | `user` `agent` `system` | 自由取值 |
+| `CastboardStatusFailureReason` | `issue_id_required` `invalid_status` `invalid_expected_status` `not_found` `status_conflict` `update_conflict` | **与协议逐字一致** |
+| `CastboardOs` | `windows` `linux` | 组合层本地判据用 |
 
 ### 8.2 实体（线格式 = 协议响应，不另造 DTO）
 
 | 类型 | 字段要点 |
 |---|---|
-| `LatticeIssue`（22 字段） | `id:number` `issueId:string` `projectId:number\|null` `title:string` `detail:string\|null` `assigner:string` `assignerTask\|assignerMeta` `cwd` `urgency` `permission` `assignee:string` `assigneeTask` `assigneeInstance` `assigneeMeta` `status` `source` `sourceInstance` `dependsOn:string[]`（**归一后**）`createdAt` `assignedAt` `updatedAt` |
-| `LatticeIssueInput` | 提交/覆盖用的可写字段（**不含 `assigner`**，它是 token 身份；不含 `id`/`createdAt`/`updatedAt`） |
-| `LatticeIssueQuery` | `status? source? projectId? keyword? page? pageNum? pageSize?`（`page` 与 `pageNum` 二者取一，见 §8.5） |
-| `LatticeIssuePage` | `{ total:number; page:number; pageNum:number; pageSize:number; items:LatticeIssue[] }`（`page` 与 `pageNum` 恒等） |
-| `LatticeStatusUpdate` | `{ issueId; status; expectedStatus?; assigneeTask?; assigneeInstance?; assigneeMeta?; assignedAt? }` |
-| `LatticeStatusBatchResult` | `{ success:number; failed:LatticeStatusFailure[] }` |
-| `LatticeComment`（10 字段） | `id` `commentId` `issueId` `author` `content` `commentRole` `commentAuthorType` `commentAt` `createdAt` `updatedAt` |
-| `LatticeCommentIncrement` | `{ items; nextSinceId:number; hasMore:boolean }` |
-| `LatticeAttachment`（8 字段） | `id` `issueId` `fileId` `fileName` `type`（已映射回 `input`/`output`）`description` `createdAt` `updatedAt` |
-| `LatticeSource`（6 字段） | `id` `code` `description` `pluginName` `createdAt` `updatedAt` |
-| `LatticeDevice`（9 字段） | `id` `accountId` `host` `port` `os` `status` `lastActiveAt` `createdAt` `updatedAt`（**无 `dshPatcherVersion`**） |
-| `LatticeDeviceWorkspace` | `id` `accountId`(=旧 `userId`) `instance` `workspaceId` `cwd` `type` `detail` `createdAt` `updatedAt` |
-| `LatticeProject`（10 字段） | `id` `name` `owner` `createdBy` `status` `visibility` `description` `memberCount` `createdAt` `updatedAt` |
-| `LatticeProjectMember`（8 字段） | `id` `projectId` `accountId`(=旧 `userId`) `displayName` `role` `joinedAt` `updatedAt`（**无 `dept`**） |
-| `LatticeTeamworkProject` | = `LatticeProject`（本协议两个项目端点返回同一形状，不再分两套） |
-| `LatticeProjectDetail` | `LatticeProject` + `members:LatticeProjectMember[]` |
-| `LatticeTeamworkPage<T>` | `{ total; pageNum; pageSize; items:T[] }` |
-| `LatticeFileInfo` | `{ fileId; fileName; size:number; sha256:string; createdAt }` |
-| `LatticeAttachmentInput` | `{ issueId; fileId; type:LatticeAttachmentType; fileName?; description? }` |
-| `LatticeAccount` | `{ accountId; displayName; globalRole; status; lastLoginAt; createdAt; updatedAt }` |
-| `LatticeAuthSession` | `{ account:LatticeAccount; accountToken:string; ttlSeconds:number }` |
-| `LatticeHealth` / `LatticeVersion` | 见 §8.9 |
+| `CastboardIssue`（22 字段） | `id:number` `issueId:string` `projectId:number\|null` `title:string` `detail:string\|null` `assigner:string` `assignerTask\|assignerMeta` `cwd` `urgency` `permission` `assignee:string` `assigneeTask` `assigneeInstance` `assigneeMeta` `status` `source` `sourceInstance` `dependsOn:string[]`（**归一后**）`createdAt` `assignedAt` `updatedAt` |
+| `CastboardIssueInput` | 提交/覆盖用的可写字段（**不含 `assigner`**，它是 token 身份；不含 `id`/`createdAt`/`updatedAt`） |
+| `CastboardIssueQuery` | `status? source? projectId? keyword? page? pageNum? pageSize?`（`page` 与 `pageNum` 二者取一，见 §8.5） |
+| `CastboardIssuePage` | `{ total:number; page:number; pageNum:number; pageSize:number; items:CastboardIssue[] }`（`page` 与 `pageNum` 恒等） |
+| `CastboardStatusUpdate` | `{ issueId; status; expectedStatus?; assigneeTask?; assigneeInstance?; assigneeMeta?; assignedAt? }` |
+| `CastboardStatusBatchResult` | `{ success:number; failed:CastboardStatusFailure[] }` |
+| `CastboardComment`（10 字段） | `id` `commentId` `issueId` `author` `content` `commentRole` `commentAuthorType` `commentAt` `createdAt` `updatedAt` |
+| `CastboardCommentIncrement` | `{ items; nextSinceId:number; hasMore:boolean }` |
+| `CastboardAttachment`（8 字段） | `id` `issueId` `fileId` `fileName` `type`（已映射回 `input`/`output`）`description` `createdAt` `updatedAt` |
+| `CastboardSource`（6 字段） | `id` `code` `description` `pluginName` `createdAt` `updatedAt` |
+| `CastboardDevice`（9 字段） | `id` `accountId` `host` `port` `os` `status` `lastActiveAt` `createdAt` `updatedAt`（**无 `dshPatcherVersion`**） |
+| `CastboardDeviceWorkspace` | `id` `accountId`(=旧 `userId`) `instance` `workspaceId` `cwd` `type` `detail` `createdAt` `updatedAt` |
+| `CastboardProject`（10 字段） | `id` `name` `owner` `createdBy` `status` `visibility` `description` `memberCount` `createdAt` `updatedAt` |
+| `CastboardProjectMember`（8 字段） | `id` `projectId` `accountId`(=旧 `userId`) `displayName` `role` `joinedAt` `updatedAt`（**无 `dept`**） |
+| `CastboardTeamworkProject` | = `CastboardProject`（本协议两个项目端点返回同一形状，不再分两套） |
+| `CastboardProjectDetail` | `CastboardProject` + `members:CastboardProjectMember[]` |
+| `CastboardTeamworkPage<T>` | `{ total; pageNum; pageSize; items:T[] }` |
+| `CastboardFileInfo` | `{ fileId; fileName; size:number; sha256:string; createdAt }` |
+| `CastboardAttachmentInput` | `{ issueId; fileId; type:CastboardAttachmentType; fileName?; description? }` |
+| `CastboardAccount` | `{ accountId; displayName; globalRole; status; lastLoginAt; createdAt; updatedAt }` |
+| `CastboardAuthSession` | `{ account:CastboardAccount; accountToken:string; ttlSeconds:number }` |
+| `CastboardHealth` / `CastboardVersion` | 见 §8.9 |
 
 ### 8.3 `*Meta` 与 `dependsOn` 的线格式
 
@@ -702,7 +702,7 @@ export type LatticeEndpointName = keyof typeof LATTICE_ENDPOINTS
 | `dshPatcherVersion`（设备） | —— | B12/B13 | 已删除（9 字段） |
 | `page`（`/api/internal/issues`） | `pageNum` | C2 | 出参同时给 `page` 与 `pageNum`（D11） |
 | `type: input\|output` | `type: assigner\|assignee` | C11/C12 | `wire.ts` 双向映射（D8） |
-| `LatticeS3File` | `LatticeFileInfo` | F1 | 字段名全变（`fileId`/`fileName`/`size`/`sha256`） |
+| `CastboardS3File` | `CastboardFileInfo` | F1 | 字段名全变（`fileId`/`fileName`/`size`/`sha256`） |
 | `issue.sourceInstance` / `assigneeInstance` | 同名字段，语义改为 `host:port` | C1/C6 | 与 `device.host:port` 同源（§12） |
 
 ### 8.5 分页的三处不一致（必须照抄，不许"统一"）
@@ -753,7 +753,7 @@ export type LatticeEndpointName = keyof typeof LATTICE_ENDPOINTS
 | `toAccount(v, field, hint)` | 非空字符串 + `trim`，≤64 | 400 `invalid_user_id` |
 | `toSourceCode(v)` | `^[a-z]+(-[a-z]+)*$`，1..64 | 400 `invalid_source_code` |
 | `toIsoLocal(v)` | `/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?$/` | 400 `invalid_datetime` |
-| `isLatticeIssueId(v)` | 同 `checkIssueId` 的布尔版 | — |
+| `isCastboardIssueId(v)` | 同 `checkIssueId` 的布尔版 | — |
 
 > **为什么放宽 UUID**（D7）：本协议 `issueId` 是"任意 1..100 的业务键"，`dsh:<host>:<uuid5>` 这类带冒号的
 > 语义键在旧团队实现里就是标准写法。强制 UUID 会让合法的 id 在本地被拒（零请求的假失败）。
@@ -770,14 +770,14 @@ export type LatticeEndpointName = keyof typeof LATTICE_ENDPOINTS
 ### 8.9 `ops` 两端的形状
 
 ```ts
-export interface LatticeHealth {
+export interface CastboardHealth {
   ok: boolean; version: string; pid: number; uptimeMs: number
   startedAt: string; serverTime: string
   db: { path: string; userVersion: number; journalMode: string }
   authCache: { size: number; hits: number; misses: number; ttlMs: number }
 }
 
-export interface LatticeVersion {
+export interface CastboardVersion {
   protocol: string            // 必须是 'dsh-teamwork/1'
   name: string; version: string
   dshEngine?: string; node?: string
@@ -794,12 +794,12 @@ export interface LatticeVersion {
 而端点表用 `{id}`。两边比较前统一转成 `"<METHOD> <path with :param>"`：
 
 ```ts
-const capabilityKey = (e: LatticeEndpoint): string =>
+const capabilityKey = (e: CastboardEndpoint): string =>
   `${e.method} ${e.path.replace(/\{([^}]+)\}/g, ':$1')}`
 // 'GET /projects/{id}' → 'GET /projects/:id'
 ```
 
-**`/health` 的 503 是"已知状态"不是"故障"**：停机中服务端回 `503` + 完整 `LatticeHealth`（`ok:false`）。
+**`/health` 的 503 是"已知状态"不是"故障"**：停机中服务端回 `503` + 完整 `CastboardHealth`（`ok:false`）。
 SDK 按普通失败处理（`http_error` + `status:503` + `body` 原文），**不**把它翻译成成功——
 调用方要看存活请用 `/version`，要看停机用 `health().status === 503`。
 
@@ -810,16 +810,16 @@ SDK 的每个实体字段都能在 `src/server/db/migrations/001_init.sql` 里�
 
 | SDK 类型 | DB 表 | 列 → 字段（camelCase 投影） |
 |---|---|---|
-| `LatticeIssue`（22） | `dsh_teamwork_issue` | `id` `issue_id→issueId` `project_id→projectId` `title` `detail` `assigner` `assigner_task→assignerTask` `assigner_meta→assignerMeta` `cwd` `urgency` `permission` `assignee` `assignee_task→assigneeTask` `assignee_instance→assigneeInstance` `assignee_meta→assigneeMeta` `status` `source` `source_instance→sourceInstance` `depends_on→dependsOn`（**JSON 文本 → `string[]`**） `created_at→createdAt` `assigned_at→assignedAt` `updated_at→updatedAt` |
-| `LatticeComment`（10） | `dsh_teamwork_issue_comment` | `id` `comment_id→commentId` `issue_id→issueId` `author` `content` `comment_role→commentRole` `comment_author_type→commentAuthorType` `comment_at→commentAt` `created_at` `updated_at` |
-| `LatticeAttachment`（8） | `dsh_teamwork_issue_attachment` | `id` `issue_id` `file_id→fileId` `file_name→fileName` `type`（**DB 值 `assigner`/`assignee` → 门面 `input`/`output`**）`description` `created_at` `updated_at` |
-| `LatticeSource`（6） | `dsh_teamwork_issue_source` | `id` `code` `description` `plugin_name→pluginName` `created_at` `updated_at` |
-| `LatticeProject`（10） | `dsh_teamwork_project` | `id` `name` `status` `visibility` `description` `created_by→createdBy` `created_at` `updated_at` + **派生** `owner`（成员表最早 `joined_at` 的 owner）`memberCount`（子查询） |
-| `LatticeProjectMember`（8） | `dsh_teamwork_project_member` | `id` `project_id` `account_id→accountId` `role` `joined_at→joinedAt` `updated_at` + **派生** `displayName`（JOIN `account`，`COALESCE(display_name, account_id)`） |
-| `LatticeDevice`（9） | `dsh_teamwork_device` | `id` `account_id` `host` `port` `os` `status` `last_active_at→lastActiveAt` `created_at` `updated_at`（**无 `dshPatcherVersion`**） |
-| `LatticeDeviceWorkspace`（9） | `dsh_teamwork_device_workspace` | `id` `account_id` `instance` `workspace_id→workspaceId` `cwd` `type` `detail` `created_at` `updated_at` |
-| `LatticeAccount`（7） | `dsh_teamwork_account` | `account_id` `display_name→displayName` `global_role→globalRole` `status` `last_login_at→lastLoginAt` `created_at` `updated_at`（**`account_token` 永不出现在 DTO 里**，只在 `auth.login/register/password` 的响应里） |
-| `LatticeFileInfo`（5） | 无表（F1 落盘 + 响应） | `fileId` `fileName` `size` `sha256` `createdAt` |
+| `CastboardIssue`（22） | `dsh_teamwork_issue` | `id` `issue_id→issueId` `project_id→projectId` `title` `detail` `assigner` `assigner_task→assignerTask` `assigner_meta→assignerMeta` `cwd` `urgency` `permission` `assignee` `assignee_task→assigneeTask` `assignee_instance→assigneeInstance` `assignee_meta→assigneeMeta` `status` `source` `source_instance→sourceInstance` `depends_on→dependsOn`（**JSON 文本 → `string[]`**） `created_at→createdAt` `assigned_at→assignedAt` `updated_at→updatedAt` |
+| `CastboardComment`（10） | `dsh_teamwork_issue_comment` | `id` `comment_id→commentId` `issue_id→issueId` `author` `content` `comment_role→commentRole` `comment_author_type→commentAuthorType` `comment_at→commentAt` `created_at` `updated_at` |
+| `CastboardAttachment`（8） | `dsh_teamwork_issue_attachment` | `id` `issue_id` `file_id→fileId` `file_name→fileName` `type`（**DB 值 `assigner`/`assignee` → 门面 `input`/`output`**）`description` `created_at` `updated_at` |
+| `CastboardSource`（6） | `dsh_teamwork_issue_source` | `id` `code` `description` `plugin_name→pluginName` `created_at` `updated_at` |
+| `CastboardProject`（10） | `dsh_teamwork_project` | `id` `name` `status` `visibility` `description` `created_by→createdBy` `created_at` `updated_at` + **派生** `owner`（成员表最早 `joined_at` 的 owner）`memberCount`（子查询） |
+| `CastboardProjectMember`（8） | `dsh_teamwork_project_member` | `id` `project_id` `account_id→accountId` `role` `joined_at→joinedAt` `updated_at` + **派生** `displayName`（JOIN `account`，`COALESCE(display_name, account_id)`） |
+| `CastboardDevice`（9） | `dsh_teamwork_device` | `id` `account_id` `host` `port` `os` `status` `last_active_at→lastActiveAt` `created_at` `updated_at`（**无 `dshPatcherVersion`**） |
+| `CastboardDeviceWorkspace`（9） | `dsh_teamwork_device_workspace` | `id` `account_id` `instance` `workspace_id→workspaceId` `cwd` `type` `detail` `created_at` `updated_at` |
+| `CastboardAccount`（7） | `dsh_teamwork_account` | `account_id` `display_name→displayName` `global_role→globalRole` `status` `last_login_at→lastLoginAt` `created_at` `updated_at`（**`account_token` 永不出现在 DTO 里**，只在 `auth.login/register/password` 的响应里） |
+| `CastboardFileInfo`（5） | 无表（F1 落盘 + 响应） | `fileId` `fileName` `size` `sha256` `createdAt` |
 
 **三处必须记住的"DB 与门面不一致"**：
 
@@ -874,89 +874,89 @@ client.request<T>(path, options)                                 （逃生口：
 
 ```ts
 // ── auth ────────────────────────────────────────────────────────────────
-register(input: { accountId: string; password: string; displayName?: string }, opts?: { registrationCode?: string }): Promise<LatticeResult<LatticeAuthSession>>
-login(input: { accountId: string; password: string }): Promise<LatticeResult<LatticeAuthSession>>
-me(): Promise<LatticeResult<LatticeAccount>>
-logout(options?: { allDevices?: boolean }): Promise<LatticeResult<void>>
-changePassword(input: { oldPassword: string; newPassword: string }): Promise<LatticeResult<{ accountToken: string; ttlSeconds: number }>>
-lookupAccount(accountId: string): Promise<LatticeResult<{ exists: boolean; account: LatticeAccount | null }>>
+register(input: { accountId: string; password: string; displayName?: string }, opts?: { registrationCode?: string }): Promise<CastboardResult<CastboardAuthSession>>
+login(input: { accountId: string; password: string }): Promise<CastboardResult<CastboardAuthSession>>
+me(): Promise<CastboardResult<CastboardAccount>>
+logout(options?: { allDevices?: boolean }): Promise<CastboardResult<void>>
+changePassword(input: { oldPassword: string; newPassword: string }): Promise<CastboardResult<{ accountToken: string; ttlSeconds: number }>>
+lookupAccount(accountId: string): Promise<CastboardResult<{ exists: boolean; account: CastboardAccount | null }>>
 
 // ── project（只读）──────────────────────────────────────────────────────
-list(query?: { includeArchived?: boolean }): Promise<LatticeResult<LatticeProject[]>>
-members(projectId: number | string): Promise<LatticeResult<LatticeProjectMember[]>>
+list(query?: { includeArchived?: boolean }): Promise<CastboardResult<CastboardProject[]>>
+members(projectId: number | string): Promise<CastboardResult<CastboardProjectMember[]>>
 
 // ── issue ───────────────────────────────────────────────────────────────
-submit(issues: readonly LatticeIssueInput[]): Promise<LatticeResult<string[]>>
-list(query?: LatticeIssueQuery): Promise<LatticeResult<LatticeIssuePage>>
-get(issueId: string): Promise<LatticeResult<LatticeIssue>>
-replace(issueId: string, patch: LatticeIssueInput): Promise<LatticeResult<LatticeIssue>>
-abandon(issueId: string): Promise<LatticeResult<void>>
-updateStatuses(updates: readonly LatticeStatusUpdate[]): Promise<LatticeResult<LatticeStatusBatchResult>>
+submit(issues: readonly CastboardIssueInput[]): Promise<CastboardResult<string[]>>
+list(query?: CastboardIssueQuery): Promise<CastboardResult<CastboardIssuePage>>
+get(issueId: string): Promise<CastboardResult<CastboardIssue>>
+replace(issueId: string, patch: CastboardIssueInput): Promise<CastboardResult<CastboardIssue>>
+abandon(issueId: string): Promise<CastboardResult<void>>
+updateStatuses(updates: readonly CastboardStatusUpdate[]): Promise<CastboardResult<CastboardStatusBatchResult>>
 
 // ── issue.attachment ────────────────────────────────────────────────────
-add(batch: readonly LatticeAttachmentInput[]): Promise<LatticeResult<{ count: number }>>
-list(issueId: string, type?: LatticeAttachmentType): Promise<LatticeResult<LatticeAttachment[]>>
+add(batch: readonly CastboardAttachmentInput[]): Promise<CastboardResult<{ count: number }>>
+list(issueId: string, type?: CastboardAttachmentType): Promise<CastboardResult<CastboardAttachment[]>>
 
 // ── issue.comment ───────────────────────────────────────────────────────
-add(issueId: string, comment: LatticeCommentInput): Promise<LatticeResult<LatticeComment>>
-list(issueId: string): Promise<LatticeResult<LatticeComment[]>>
-listSince(query?: { sinceId?: number; limit?: number }): Promise<LatticeResult<LatticeCommentIncrement>>
-cursor(): Promise<LatticeResult<number>>
+add(issueId: string, comment: CastboardCommentInput): Promise<CastboardResult<CastboardComment>>
+list(issueId: string): Promise<CastboardResult<CastboardComment[]>>
+listSince(query?: { sinceId?: number; limit?: number }): Promise<CastboardResult<CastboardCommentIncrement>>
+cursor(): Promise<CastboardResult<number>>
 
 // ── issue.source ────────────────────────────────────────────────────────
-list(code?: string): Promise<LatticeResult<LatticeSource[]>>
-register(batch: readonly LatticeSourceInput[]): Promise<LatticeResult<{ count: number }>>
-update(id: number | string, patch: { description?: string | null; pluginName?: string | null }): Promise<LatticeResult<LatticeSource>>
-remove(id: number | string): Promise<LatticeResult<void>>
+list(code?: string): Promise<CastboardResult<CastboardSource[]>>
+register(batch: readonly CastboardSourceInput[]): Promise<CastboardResult<{ count: number }>>
+update(id: number | string, patch: { description?: string | null; pluginName?: string | null }): Promise<CastboardResult<CastboardSource>>
+remove(id: number | string): Promise<CastboardResult<void>>
 
 // ── issue.workspace ─────────────────────────────────────────────────────
-upsert(input: LatticeDeviceWorkspaceInput): Promise<LatticeResult<LatticeDeviceWorkspace>>
-list(query?: LatticeDeviceWorkspaceQuery): Promise<LatticeResult<LatticeDeviceWorkspace[]>>
+upsert(input: CastboardDeviceWorkspaceInput): Promise<CastboardResult<CastboardDeviceWorkspace>>
+list(query?: CastboardDeviceWorkspaceQuery): Promise<CastboardResult<CastboardDeviceWorkspace[]>>
 
 // ── device ──────────────────────────────────────────────────────────────
-sync(devices: readonly LatticeDeviceInput[]): Promise<LatticeResult<{ synced: number; deactivated: number }>>
-list(accountId?: string): Promise<LatticeResult<LatticeDevice[]>>
+sync(devices: readonly CastboardDeviceInput[]): Promise<CastboardResult<{ synced: number; deactivated: number }>>
+list(accountId?: string): Promise<CastboardResult<CastboardDevice[]>>
 
 // ── teamwork.project ────────────────────────────────────────────────────
-list(query?: LatticeProjectPageQuery): Promise<LatticeResult<LatticeTeamworkPage<LatticeTeamworkProject>>>
-mine(query?: { includeArchived?: boolean }): Promise<LatticeResult<LatticeTeamworkPage<LatticeTeamworkProject>>>
-detail(projectId: number | string): Promise<LatticeResult<LatticeProjectDetail>>
-create(input: { name: string; visibility?: LatticeProjectVisibility; description?: string }): Promise<LatticeResult<LatticeProjectDetail>>
-update(projectId: number | string, input: { name?: string; description?: string | null; visibility?: LatticeProjectVisibility; status?: LatticeProjectStatus }): Promise<LatticeResult<LatticeProjectDetail>>
-remove(projectId: number | string): Promise<LatticeResult<void>>
-memberAdd(projectId: number | string, input: { accountId: string; role?: 'manager' | 'member' }): Promise<LatticeResult<LatticeProjectMember>>
-memberRemove(projectId: number | string, accountId: string): Promise<LatticeResult<void>>
-transferOwner(projectId: number | string, accountId: string): Promise<LatticeResult<LatticeProjectDetail>>
+list(query?: CastboardProjectPageQuery): Promise<CastboardResult<CastboardTeamworkPage<CastboardTeamworkProject>>>
+mine(query?: { includeArchived?: boolean }): Promise<CastboardResult<CastboardTeamworkPage<CastboardTeamworkProject>>>
+detail(projectId: number | string): Promise<CastboardResult<CastboardProjectDetail>>
+create(input: { name: string; visibility?: CastboardProjectVisibility; description?: string }): Promise<CastboardResult<CastboardProjectDetail>>
+update(projectId: number | string, input: { name?: string; description?: string | null; visibility?: CastboardProjectVisibility; status?: CastboardProjectStatus }): Promise<CastboardResult<CastboardProjectDetail>>
+remove(projectId: number | string): Promise<CastboardResult<void>>
+memberAdd(projectId: number | string, input: { accountId: string; role?: 'manager' | 'member' }): Promise<CastboardResult<CastboardProjectMember>>
+memberRemove(projectId: number | string, accountId: string): Promise<CastboardResult<void>>
+transferOwner(projectId: number | string, accountId: string): Promise<CastboardResult<CastboardProjectDetail>>
 
 // ── teamwork.device ─────────────────────────────────────────────────────
-mine(query?: { pageNum?: number; pageSize?: number }): Promise<LatticeResult<LatticeTeamworkPage<LatticeDevice>>>
-remove(deviceId: number | string): Promise<LatticeResult<void>>
+mine(query?: { pageNum?: number; pageSize?: number }): Promise<CastboardResult<CastboardTeamworkPage<CastboardDevice>>>
+remove(deviceId: number | string): Promise<CastboardResult<void>>
 
 // ── file ────────────────────────────────────────────────────────────────
-upload(input: { name: string; data: Buffer | Uint8Array | string; contentType?: string; sha256?: string }): Promise<LatticeResult<LatticeFileInfo>>
-download(fileId: string): Promise<LatticeResult<Buffer>>
-downloadPublic(fileId: string): Promise<LatticeResult<Buffer>>   // = download（同名协议无匿名口）
-remove(fileId: string): Promise<LatticeResult<void>>
+upload(input: { name: string; data: Buffer | Uint8Array | string; contentType?: string; sha256?: string }): Promise<CastboardResult<CastboardFileInfo>>
+download(fileId: string): Promise<CastboardResult<Buffer>>
+downloadPublic(fileId: string): Promise<CastboardResult<Buffer>>   // = download（同名协议无匿名口）
+remove(fileId: string): Promise<CastboardResult<void>>
 
 // ── ops ─────────────────────────────────────────────────────────────────
-health(): Promise<LatticeResult<LatticeHealth>>
-version(): Promise<LatticeResult<LatticeVersion>>
-probe(): Promise<LatticeResult<{ protocol: string; endpoints: string[] }>>
+health(): Promise<CastboardResult<CastboardHealth>>
+version(): Promise<CastboardResult<CastboardVersion>>
+probe(): Promise<CastboardResult<{ protocol: string; endpoints: string[] }>>
 
 // ── admin ───────────────────────────────────────────────────────────────
-accounts(query?: { q?: string; pageNum?: number; pageSize?: number }): Promise<LatticeResult<LatticeTeamworkPage<LatticeAccount>>>
-setRole(accountId: string, role: LatticeGlobalRole): Promise<LatticeResult<LatticeAccount>>
-resetPassword(accountId: string, newPassword: string): Promise<LatticeResult<void>>
-shutdown(options?: { shutdownToken?: string }): Promise<LatticeResult<{ ok: boolean; stopping: boolean }>>
+accounts(query?: { q?: string; pageNum?: number; pageSize?: number }): Promise<CastboardResult<CastboardTeamworkPage<CastboardAccount>>>
+setRole(accountId: string, role: CastboardGlobalRole): Promise<CastboardResult<CastboardAccount>>
+resetPassword(accountId: string, newPassword: string): Promise<CastboardResult<void>>
+shutdown(options?: { shutdownToken?: string }): Promise<CastboardResult<{ ok: boolean; stopping: boolean }>>
 
 // ── 逃生口（不进端点表，但走同一条管线：鉴权 / 闸 / 超时 / 归一）──────
 request<T>(path: string, options?: {
-  method?: LatticeHttpMethod
+  method?: CastboardHttpMethod
   query?: Record<string, string | number | boolean | undefined>
   body?: unknown
   timeoutMs?: number
   auth?: boolean            // 默认 true；false = 不带双头
-}): Promise<LatticeResult<T>>
+}): Promise<CastboardResult<T>>
 ```
 
 ### 9.3 原子层的三条纪律
@@ -974,23 +974,23 @@ request<T>(path: string, options?: {
 
 | 文件 | 对外导出 |
 |---|---|
-| `index.ts` | `createLatticeClient`、`LatticeOptions` + 下面所有值/类型重导出 |
-| `client.ts` | `LatticeClient`、`LatticeClientOptions` |
-| `transport.ts` | `LatticeTransport`（方法 `call` / `callRaw` / `request` / `raw` / `dispose`）、`LATTICE_DEFAULT_MAX_CONCURRENCY`、`LatticeFetch`、`LatticeTransportOptions`、`LatticeRequestOptions`、`LatticeRawOptions`、`LatticeTokenProvider` |
-| `endpoints.ts` | `LATTICE_ENDPOINTS`、`LatticeEndpointName`、`LatticeEndpoint`、`LatticeHttpMethod`、`LatticeAuthMode` |
-| `result.ts` | `latticeOk` / `latticeFail` / `isLatticeOk` / `isLatticeFail`、`LatticeOk` / `LatticeFail` / `LatticeResult` / `LatticeErrorCode` |
-| `types.ts` | 实体 19 个（§8.2）；枚举 14 组 × 三件套：`LatticeIssueStatus`(+`LATTICE_ISSUE_STATUSES`/`LATTICE_TERMINAL_ISSUE_STATUSES`/`isLatticeIssueStatus`/`isLatticeTerminalStatus`)、`LatticeUrgency`(+常量/守卫/`LATTICE_DEFAULT_URGENCY`)、`LatticePermission`、`LatticeAttachmentType`、`LatticeProjectStatus`、`LatticeProjectVisibility`、`LatticeMemberRole`、`LatticeDeviceStatus`、`LatticeGlobalRole`、`LatticeAccountStatus`、`LatticeWorkspaceType`、`LatticeCommentRole`、`LatticeCommentAuthorType`、`LatticeStatusFailureReason`(+`LATTICE_STATUS_FAILURE_REASONS`)、`LatticeOs`；`LATTICE_ISSUE_ID_PATTERN`/`isLatticeIssueId`、`LATTICE_PRESET_SOURCES`/`LATTICE_DEFAULT_SOURCE`、`LATTICE_TEAMWORK_DEFAULT_PAGE_NUM`/`PAGE_SIZE`、`LatticeMetaInput` |
-| `env.ts` | `teamworkBaseUrl` / `teamworkDeviceFile` / `teamworkDeviceIdentity` / `teamworkIp` / `teamworkInstanceName` / `teamworkDefaultDevice` / `teamworkUserId`、`LatticeDeviceIdentity`；**并附 兼容面名字的别名**：`latticeBaseUrl` / `latticeDeviceFile` / `latticeDeviceIdentity` / `latticeIp` / `latticeInstanceName` / `latticeUserId` / `latticeDefaultDevice`（deprecated，指向同一实现，保证 兼容面文档里的调用能编译） |
-| `auth.ts` | `LatticeAuthState`、`LatticeSession`（只给类型；`LatticeAuthApi` 由 `client.auth` 暴露） |
+| `index.ts` | `createCastboardClient`、`CastboardOptions` + 下面所有值/类型重导出 |
+| `client.ts` | `CastboardClient`、`CastboardClientOptions` |
+| `transport.ts` | `CastboardTransport`（方法 `call` / `callRaw` / `request` / `raw` / `dispose`）、`CASTBOARD_DEFAULT_MAX_CONCURRENCY`、`CastboardFetch`、`CastboardTransportOptions`、`CastboardRequestOptions`、`CastboardRawOptions`、`CastboardTokenProvider` |
+| `endpoints.ts` | `CASTBOARD_ENDPOINTS`、`CastboardEndpointName`、`CastboardEndpoint`、`CastboardHttpMethod`、`CastboardAuthMode` |
+| `result.ts` | `castboardOk` / `castboardFail` / `isCastboardOk` / `isCastboardFail`、`CastboardOk` / `CastboardFail` / `CastboardResult` / `CastboardErrorCode` |
+| `types.ts` | 实体 19 个（§8.2）；枚举 14 组 × 三件套：`CastboardIssueStatus`(+`CASTBOARD_ISSUE_STATUSES`/`CASTBOARD_TERMINAL_ISSUE_STATUSES`/`isCastboardIssueStatus`/`isCastboardTerminalStatus`)、`CastboardUrgency`(+常量/守卫/`CASTBOARD_DEFAULT_URGENCY`)、`CastboardPermission`、`CastboardAttachmentType`、`CastboardProjectStatus`、`CastboardProjectVisibility`、`CastboardMemberRole`、`CastboardDeviceStatus`、`CastboardGlobalRole`、`CastboardAccountStatus`、`CastboardWorkspaceType`、`CastboardCommentRole`、`CastboardCommentAuthorType`、`CastboardStatusFailureReason`(+`CASTBOARD_STATUS_FAILURE_REASONS`)、`CastboardOs`；`CASTBOARD_ISSUE_ID_PATTERN`/`isCastboardIssueId`、`CASTBOARD_PRESET_SOURCES`/`CASTBOARD_DEFAULT_SOURCE`、`CASTBOARD_TEAMWORK_DEFAULT_PAGE_NUM`/`PAGE_SIZE`、`CastboardMetaInput` |
+| `env.ts` | `teamworkBaseUrl` / `teamworkDeviceFile` / `teamworkDeviceIdentity` / `teamworkIp` / `teamworkInstanceName` / `teamworkDefaultDevice` / `teamworkUserId`、`CastboardDeviceIdentity`；**并附 兼容面名字的别名**：`castboardBaseUrl` / `castboardDeviceFile` / `castboardDeviceIdentity` / `castboardIp` / `castboardInstanceName` / `castboardUserId` / `castboardDefaultDevice`（deprecated，指向同一实现，保证 兼容面文档里的调用能编译） |
+| `auth.ts` | `CastboardAuthState`、`CastboardSession`（只给类型；`CastboardAuthApi` 由 `client.auth` 暴露） |
 | `credentials.ts` | `CredentialStore`、`CredentialError`、`defaultHome`（沿用现有实现） |
-| `file.ts` / `device.ts` / `project.ts` | `LatticeFileApi` / `LatticeDeviceApi` / `LatticeProjectApi` |
-| `issue/*.ts` | `LatticeIssueApi`、`LatticeAttachmentApi`、`LatticeCommentApi`、`LatticeSourceApi`、`LatticeWorkspaceApi` + `LATTICE_COMMENT_INCREMENT_DEFAULT_LIMIT` / `_MAX_LIMIT` |
-| `teamwork/*.ts` | `LatticeTeamworkApi`、`LatticeTeamworkProjectApi`、`LatticeTeamworkDeviceApi` |
-| `ops.ts` / `admin.ts` | `LatticeOpsApi`、`LatticeAdminApi`（兼容面没有，本协议新增） |
-| `sdk.ts` | **24 个组合方法 + `E1 latticeIssueStatuses`** + 组合层类型（§10.2 全列）；`*Impl` 与校验助手**不导出**（兼容面同样不导出） |
+| `file.ts` / `device.ts` / `project.ts` | `CastboardFileApi` / `CastboardDeviceApi` / `CastboardProjectApi` |
+| `issue/*.ts` | `CastboardIssueApi`、`CastboardAttachmentApi`、`CastboardCommentApi`、`CastboardSourceApi`、`CastboardWorkspaceApi` + `CASTBOARD_COMMENT_INCREMENT_DEFAULT_LIMIT` / `_MAX_LIMIT` |
+| `teamwork/*.ts` | `CastboardTeamworkApi`、`CastboardTeamworkProjectApi`、`CastboardTeamworkDeviceApi` |
+| `ops.ts` / `admin.ts` | `CastboardOpsApi`、`CastboardAdminApi`（兼容面没有，本协议新增） |
+| `sdk.ts` | **24 个组合方法 + `E1 castboardIssueStatuses`** + 组合层类型（§10.2 全列）；`*Impl` 与校验助手**不导出**（兼容面同样不导出） |
 | 私有（不到入口） | `wire.ts` 的 16 个助手、`teamwork/shared.ts` 的 5 个纯函数 |
 
-**计数**：类 **15**（兼容面13 + `LatticeOpsApi`/`LatticeAdminApi`）；组合方法 **25** = 24（兼容面）+ 1（E1）；
+**计数**：类 **15**（兼容面13 + `CastboardOpsApi`/`CastboardAdminApi`）；组合方法 **25** = 24（兼容面）+ 1（E1）；
 原子方法 **50** + 逃生口 **1**；端点表 **48** 项 / 协议端点 **47** 个。
 `tests/sdk-endpoints` 会把「表的键数」「分组映射」「导出符号」三处一起断言（§16.1）。
 
@@ -1015,33 +1015,33 @@ request<T>(path: string, options?: {
 > 来源：协同插件的 issue 流水线 / 协同骨架 / 派发工具 / 事件源契约四篇。
 > "失败策略"一列是**插件侧**的处置，SDK 只负责把失败原因说清楚。
 
-**A. 派活四步（`lattice_issues_*` 工具族）**
+**A. 派活四步（`castboard_issues_*` 工具族）**
 
 | 方法 | 调用点 | 时机 | 失败策略 |
 |---|---|---|---|
-| `latticeMyProjects()` | `lattice_issue_groups` | 用户打开派活表单 | 直接抛给工具层，`invalid_input` + `<code>: <reason>` |
-| `latticeProjectMembers(id, { manager: true })` | `lattice_issue_group_members` | 同上（第 2 步） | 同上；权限过滤在插件本地算 `restricted` |
-| `latticeUserDevices(userId)` | `lattice_issue_devices`；分发弹窗实例下拉 | 同上（第 3 步） | 同上；归一成 `host:port` |
-| `latticeWorkspaceIndexes(userId)` | `lattice_issue_workspaces`（`type=index`） | 同上（第 4 步） | 同上；本地按 `instance` 精确挑行 |
-| `latticeWorkspacePortal({ workspaceId, instance })` | `lattice_issue_workspaces`（`type=portal`） | 同上（第 5 步） | 同上；`instance` 必填 |
+| `castboardMyProjects()` | `castboard_issue_groups` | 用户打开派活表单 | 直接抛给工具层，`invalid_input` + `<code>: <reason>` |
+| `castboardProjectMembers(id, { manager: true })` | `castboard_issue_group_members` | 同上（第 2 步） | 同上；权限过滤在插件本地算 `restricted` |
+| `castboardUserDevices(userId)` | `castboard_issue_devices`；分发弹窗实例下拉 | 同上（第 3 步） | 同上；归一成 `host:port` |
+| `castboardWorkspaceIndexes(userId)` | `castboard_issue_workspaces`（`type=index`） | 同上（第 4 步） | 同上；本地按 `instance` 精确挑行 |
+| `castboardWorkspacePortal({ workspaceId, instance })` | `castboard_issue_workspaces`（`type=portal`） | 同上（第 5 步） | 同上；`instance` 必填 |
 
 **B. 下发（源侧）**
 
 | 方法 | 调用点 | 时机 | 失败策略 |
 |---|---|---|---|
-| `latticeAddIssueSource({ code, description, pluginName })` | 源插件首次上报前 | 进程启动 / 首次上报 | 进程内缓存，成功后不再调；失败 → 本次不上报 |
-| `latticeIssueSources(code?)` | 源插件自愈、`invalid_source` 排障 | 上报失败后 | 只读诊断，不阻塞 |
-| `issueCreateMany(inputs)` | `lattice_issues_create` 工具、源插件轮询器 | 事件到达（整批） | **整批原子**：失败即整批不发，游标不推进（下拍重来） |
+| `castboardAddIssueSource({ code, description, pluginName })` | 源插件首次上报前 | 进程启动 / 首次上报 | 进程内缓存，成功后不再调；失败 → 本次不上报 |
+| `castboardIssueSources(code?)` | 源插件自愈、`invalid_source` 排障 | 上报失败后 | 只读诊断，不阻塞 |
+| `issueCreateMany(inputs)` | `castboard_issues_create` 工具、源插件轮询器 | 事件到达（整批） | **整批原子**：失败即整批不发，游标不推进（下拍重来） |
 | `issueCreate(input)` | 面板「新建待规划 → 在线」（`POST /issues/online`） | 人点按钮 | 失败 → 面板报错，不落本地台账 |
 
 **C. 执行（目标侧）**
 
 | 方法 | 调用点 | 时机 | 失败策略 |
 |---|---|---|---|
-| `latticeMyInstanceIssues({ status:'pending', instance, os })` | `IssueSyncService.tick()` | **3 秒一拍** | 失败只记日志，下拍重试（绝不叠加并发） |
+| `castboardMyInstanceIssues({ status:'pending', instance, os })` | `IssueSyncService.tick()` | **3 秒一拍** | 失败只记日志，下拍重试（绝不叠加并发） |
 | `issueClaim([ids])` | 拉取后、合并进本地台账之前 | 每拍 | `status_conflict` → **那些不写本地**（归别人）；其它失败 → 整拍放弃 |
 | `issueRouting([id])` | router `markRouting()` | 派给会话之前 | 仅 `remote` 才写；失败只 `warn`（本地已是权威） |
-| `issueRouted(id, { assigneeTask, cwd, urgency, permission, assignerMeta, assignedAt })` | `lattice_issue_task` 转卡成功后 | 建卡 + `attachTask` 之后 | 要求 `status === 'routing'`；失败只 `warn`，本地关系表仍是真相 |
+| `issueRouted(id, { assigneeTask, cwd, urgency, permission, assignerMeta, assignedAt })` | `castboard_issue_task` 转卡成功后 | 建卡 + `attachTask` 之后 | 要求 `status === 'routing'`；失败只 `warn`，本地关系表仍是真相 |
 | `issueRunning(id)` | `onIssueRunning` | 执行开跑 | **fire-and-forget**；只让 `routing → running` |
 | `issueFinalize(id, { status, assigneeMeta, attachments })` | `IssueFinalizer` | task `done` / `canceled` 且跑过执行 | 失败记 `issue-finalize-remote-failed`，**不回滚本地** |
 | `issueAbandon([id])` | router 到 `maxAttempts`；直通字段校验不过；人点卡片删除 | 终态 | 只改状态、不带 meta；失败只记日志 |
@@ -1050,19 +1050,19 @@ request<T>(path: string, options?: {
 
 | 方法 | 调用点 | 时机 | 失败策略 |
 |---|---|---|---|
-| `latticeAddIssueComments(issueId, [{ commentId, content, commentAt, commentRole, commentAuthorType }])` | `CommentPublisher.publishAnchor()`（只发 `origin==='local'`）；依赖未满足时的提示评论 | 评论落盘即触发（不 await） | 失败保留发布水位，下拍重发（协议按 `commentId` 幂等） |
-| `latticeCommentsSince({ sinceId, limit })` | `IssueCommentInbox.tick()` | **5 秒一拍** | 失败下拍重来；`sinceId` 滞后 50 条做重叠窗口，靠本地 `commentId` 去重 |
-| `latticeIssueComments(issueId)` | `lattice_issue_state`（本地评论流为空时的回退） | 用户查看一条 issue | 失败当作"云端也没有" |
-| `latticeCommentCursor()` | 收件箱首次启动 / 游标丢失 | 一次性 | 失败退化为 `sinceId: 0` + 小 `limit` |
+| `castboardAddIssueComments(issueId, [{ commentId, content, commentAt, commentRole, commentAuthorType }])` | `CommentPublisher.publishAnchor()`（只发 `origin==='local'`）；依赖未满足时的提示评论 | 评论落盘即触发（不 await） | 失败保留发布水位，下拍重发（协议按 `commentId` 幂等） |
+| `castboardCommentsSince({ sinceId, limit })` | `IssueCommentInbox.tick()` | **5 秒一拍** | 失败下拍重来；`sinceId` 滞后 50 条做重叠窗口，靠本地 `commentId` 去重 |
+| `castboardIssueComments(issueId)` | `castboard_issue_state`（本地评论流为空时的回退） | 用户查看一条 issue | 失败当作"云端也没有" |
+| `castboardCommentCursor()` | 收件箱首次启动 / 游标丢失 | 一次性 | 失败退化为 `sinceId: 0` + 小 `limit` |
 
 **E. 产物与状态查询**
 
 | 方法 / 原子方法 | 调用点 | 时机 | 失败策略 |
 |---|---|---|---|
-| `latticeDownloadIssueAttachments(id, dir, { type: 'input' })` | router 取现场材料 | 派给会话之前 | `type` 必须给，否则会把产物当输入件 |
-| `latticeDownloadIssueAttachments(id, dir, { type: 'output' })` | `lattice_issue_state` 拉产物 | 用户查看 / 验收 | **失败不整体失败**，进 `failed[]` |
-| `issue.get(issueId)`（原子） | `lattice_issue_state` 取记录本体 | 查看一条 issue | 失败即当作"查不到" |
-| `latticeIssueStatuses(ids)`（**E1**） | `dependsOn` 门禁（每拍 / router 派活前） | 每拍 | 整体失败 → 不做门禁（与旧行为一致）；`null` → 视为未满足（D19） |
+| `castboardDownloadIssueAttachments(id, dir, { type: 'input' })` | router 取现场材料 | 派给会话之前 | `type` 必须给，否则会把产物当输入件 |
+| `castboardDownloadIssueAttachments(id, dir, { type: 'output' })` | `castboard_issue_state` 拉产物 | 用户查看 / 验收 | **失败不整体失败**，进 `failed[]` |
+| `issue.get(issueId)`（原子） | `castboard_issue_state` 取记录本体 | 查看一条 issue | 失败即当作"查不到" |
+| `castboardIssueStatuses(ids)`（**E1**） | `dependsOn` 门禁（每拍 / router 派活前） | 每拍 | 整体失败 → 不做门禁（与旧行为一致）；`null` → 视为未满足（D19） |
 | `file.upload` + `issue.attachment.add`（原子） | `ArtifactUplink`（中途报告） | 报告落库 | 与 `issueFinalize` 的产物通道**互斥**（`uploadedFiles` 去重） |
 | `client.request(path, options)` | `roleOf()` 之类同 host 表外端点 | 极少 | 默认不用 |
 
@@ -1075,14 +1075,14 @@ sequenceDiagram
   participant DB as 共享库（协议）
   participant TGT as 目标实例
 
-  SRC->>SDK: latticeAddIssueSource({code})
+  SRC->>SDK: castboardAddIssueSource({code})
   SDK->>DB: POST /issue-sources/batch
   SRC->>SDK: issueCreateMany([{issueId, source, assignee, assigneeInstance, assignerMeta, attachments}])
   SDK->>DB: POST /issues/batch（先 file.upload + attachment.add）
   SDK-->>SRC: {issues:[…], attachments:[…]}
 
   loop 每 3 秒
-    TGT->>SDK: latticeMyInstanceIssues({status:'pending', instance})
+    TGT->>SDK: castboardMyInstanceIssues({status:'pending', instance})
     SDK->>DB: GET /issues?pageNum=1..N（翻页 + 本地筛 assignee/assigneeInstance）
     TGT->>SDK: issueClaim([id])
     SDK->>DB: POST /issues/status/batch（expectedStatus:'pending' → accepted + assigneeInstance）
@@ -1109,12 +1109,12 @@ sequenceDiagram
   participant DB as 共享库
   participant B as B 侧（执行）
 
-  A->>SDK: latticeAddIssueComments(id, [{commentId: 本地id, commentAt, commentRole, commentAuthorType, content}])
+  A->>SDK: castboardAddIssueComments(id, [{commentId: 本地id, commentAt, commentRole, commentAuthorType, content}])
   SDK->>DB: POST /issues/{id}/comments（同 commentId → 200 已存在）
-  B->>SDK: latticeCommentsSince({sinceId: cursor-50, limit: 500})
+  B->>SDK: castboardCommentsSince({sinceId: cursor-50, limit: 500})
   SDK->>DB: GET /issues/comments
   SDK-->>B: {items, nextSinceId, hasMore}
-  B->>SDK: latticeAddIssueComments(id, [{commentId: 新id, …}])   （反向回答，同一条流）
+  B->>SDK: castboardAddIssueComments(id, [{commentId: 新id, …}])   （反向回答，同一条流）
   SDK->>DB: POST /issues/{id}/comments
 ```
 
@@ -1138,10 +1138,10 @@ SDK 若不强制，调用方就会拿到服务端生成的随机 UUID → 重发
 
 | # | 方法 | 组合自 | 一句话 |
 |---|---|---|---|
-| 1 | `latticeMyProjects()` | B2 | 我参与的项目（裸数组） |
-| 2 | `latticeProjectMembers(projectId, opts?)` | B7 | 项目成员，可按"能派活"过滤 |
-| 3 | `latticeUserDevices(userId)` | B12?accountId | 指定用户的在线设备 |
-| 4 | `latticeMyInstanceIssues(opts?)` | C2 翻页 + 本地判据 | 本机名下待办（+ `unclaimed` / `otherInstance` 便于排查） |
+| 1 | `castboardMyProjects()` | B2 | 我参与的项目（裸数组） |
+| 2 | `castboardProjectMembers(projectId, opts?)` | B7 | 项目成员，可按"能派活"过滤 |
+| 3 | `castboardUserDevices(userId)` | B12?accountId | 指定用户的在线设备 |
+| 4 | `castboardMyInstanceIssues(opts?)` | C2 翻页 + 本地判据 | 本机名下待办（+ `unclaimed` / `otherInstance` 便于排查） |
 | 5 | `issueCreate` / `issueCreateMany` | 校验 → 读盘 → C14 → F1 → C1 → C11 | 创建（带附件、带来源字典登记） |
 | 6 | `issueUpdateStatus(input)` | C6(单条) + C3 读回 | 单条状态更新 |
 | 7 | `issueClaim(issueIds)` | C6(`expectedStatus:'pending'`)+C3 | 认领（并发仲裁） |
@@ -1150,11 +1150,11 @@ SDK 若不强制，调用方就会拿到服务端生成的随机 UUID → 重发
 | 8c | `issueRunning(issueId)` | C6(`running`)+C3 | 开始执行 |
 | 8d | `issueFinalize(issueId, input)` | 读盘 → F1 → C6 → C11 → C3 | 收尾 + 挂产物 |
 | 9 | `issueRouted(issueId, input)` | C3 状态门 → C4 → C3 | 规划回填（转成哪个 task） |
-| 10 | `latticeIssueSources(code?)` / `latticeAddIssueSource(input)` | C13 / C14 + C13 读回 | 来源字典 |
-| 11 | `latticeDownloadIssueAttachments(issueId, dir, opts?)` | C12 → F2 × N → 落盘 | 附件下载 |
-| 12 | `latticeIssueComments` / `latticeAddIssueComments` / `latticeCommentsSince` / `latticeCommentCursor` | C10 / C9×N / C7 / C8 | 评论面 |
-| 13 | `latticeWorkspaceIndexes` / `latticeWorkspacePortal` / `latticeUpsertWorkspaceIndex` / `latticeUpsertWorkspacePortal` | B16 / B15+B16 | 工作区肖像 |
-| **E1**（扩展） | `latticeIssueStatuses(issueIds)` | C3 × N（并发 ≤4） | **依赖门禁**：批量取状态，`issue_not_found` 折成 `null`（补 兼容面里插件手写的那段，D19/D23） |
+| 10 | `castboardIssueSources(code?)` / `castboardAddIssueSource(input)` | C13 / C14 + C13 读回 | 来源字典 |
+| 11 | `castboardDownloadIssueAttachments(issueId, dir, opts?)` | C12 → F2 × N → 落盘 | 附件下载 |
+| 12 | `castboardIssueComments` / `castboardAddIssueComments` / `castboardCommentsSince` / `castboardCommentCursor` | C10 / C9×N / C7 / C8 | 评论面 |
+| 13 | `castboardWorkspaceIndexes` / `castboardWorkspacePortal` / `castboardUpsertWorkspaceIndex` / `castboardUpsertWorkspacePortal` | B16 / B15+B16 | 工作区肖像 |
+| **E1**（扩展） | `castboardIssueStatuses(issueIds)` | C3 × N（并发 ≤4） | **依赖门禁**：批量取状态，`issue_not_found` 折成 `null`（补 兼容面里插件手写的那段，D19/D23） |
 
 **全部 25 个方法**：`guard('<方法名>', () => xxxImpl(...))` 包一层，未预期异常 → `{status:0, code:'internal_error', reason:'<方法名> 未预期异常：…'}`。
 `E1` 在类型与测试里单独标注（`EXTENSION_COMPOSITES`），不计入 24。
@@ -1162,29 +1162,29 @@ SDK 若不强制，调用方就会拿到服务端生成的随机 UUID → 重发
 ### 10.2 类型定义（组合层）
 
 ```ts
-export type LatticeOs = 'windows' | 'linux'
+export type CastboardOs = 'windows' | 'linux'
 
-export interface LatticeProjectMemberQuery { manager?: boolean }
+export interface CastboardProjectMemberQuery { manager?: boolean }
 
-export interface LatticeMyInstanceIssuesOptions {
-  status?: LatticeIssueStatus
+export interface CastboardMyInstanceIssuesOptions {
+  status?: CastboardIssueStatus
   pageSize?: number        // 夹到 [1,200]，默认 200
   maxPages?: number        // 默认 1000
-  os?: LatticeOs           // 默认按 process.platform
+  os?: CastboardOs           // 默认按 process.platform
   instance?: string        // 默认 env.teamworkInstanceName()
   userId?: string          // 默认会话账号
 }
-export interface LatticeMyInstanceIssues {
-  instance: string; userId: string; os: LatticeOs
+export interface CastboardMyInstanceIssues {
+  instance: string; userId: string; os: CastboardOs
   scanned: number; pages: number; truncated: boolean
-  items: LatticeIssue[]; unclaimed: LatticeIssue[]; otherInstance: LatticeIssue[]
+  items: CastboardIssue[]; unclaimed: CastboardIssue[]; otherInstance: CastboardIssue[]
 }
 
-export type LatticeIssueAttachmentSpec =
+export type CastboardIssueAttachmentSpec =
   | string
-  | { path: string; type?: LatticeAttachmentType; description?: string }
+  | { path: string; type?: CastboardAttachmentType; description?: string }
 
-export interface LatticeIssueCreateInput {
+export interface CastboardIssueCreateInput {
   /** 创建时可用；不传则本地生成 UUID（重试必须复用同一个值，见 D13） */
   issueId?: string
   title?: string                     // 顶层优先（D9）
@@ -1192,87 +1192,87 @@ export interface LatticeIssueCreateInput {
   assigner?: string                  // 兼容旧 API；**必须等于当前登录账号**（D18），否则本地拒绝
   assignee: string                   // 必填（协议 C1 必填）
   assignerTask?: string
-  assignerMeta?: LatticeMetaInput    // 兜底提供 title/detail；原样落库
+  assignerMeta?: CastboardMetaInput    // 兜底提供 title/detail；原样落库
   cwd?: string                       // ≤500
-  urgency?: LatticeUrgency
-  permission?: LatticePermission | '' | null
+  urgency?: CastboardUrgency
+  permission?: CastboardPermission | '' | null
   projectId?: number
   source?: string
   sourceInstance?: string
   dependsOn?: readonly string[] | null
-  attachments?: readonly LatticeIssueAttachmentSpec[]
+  attachments?: readonly CastboardIssueAttachmentSpec[]
 }
-export interface LatticeIssueCreateResult { issue: LatticeIssue; attachments: LatticeAttachmentInput[] }
-export interface LatticeIssueCreateManyResult { issues: LatticeIssue[]; attachments: LatticeAttachmentInput[] }
+export interface CastboardIssueCreateResult { issue: CastboardIssue; attachments: CastboardAttachmentInput[] }
+export interface CastboardIssueCreateManyResult { issues: CastboardIssue[]; attachments: CastboardAttachmentInput[] }
 
-export interface LatticeIssueUpdateStatusInput {
-  issueId: string; status: LatticeIssueStatus; expectedStatus?: LatticeIssueStatus
+export interface CastboardIssueUpdateStatusInput {
+  issueId: string; status: CastboardIssueStatus; expectedStatus?: CastboardIssueStatus
   assigneeTask?: string; assigneeInstance?: string
-  assigneeMeta?: LatticeMetaInput; assignedAt?: string
+  assigneeMeta?: CastboardMetaInput; assignedAt?: string
 }
 
-export interface LatticeIssueClaimResult { claimed: string[]; failed: LatticeStatusFailure[]; issues: LatticeIssue[] }
-export interface LatticeIssueAbandonResult { abandoned: string[]; failed: LatticeStatusFailure[] }
-export interface LatticeIssueRoutingResult { routed: string[]; failed: LatticeStatusFailure[] }
+export interface CastboardIssueClaimResult { claimed: string[]; failed: CastboardStatusFailure[]; issues: CastboardIssue[] }
+export interface CastboardIssueAbandonResult { abandoned: string[]; failed: CastboardStatusFailure[] }
+export interface CastboardIssueRoutingResult { routed: string[]; failed: CastboardStatusFailure[] }
 
-export interface LatticeIssueFinalizeInput {
+export interface CastboardIssueFinalizeInput {
   status: 'success' | 'failed'
-  assigneeMeta: LatticeMetaInput                       // 必填（执行结果 JSON）
+  assigneeMeta: CastboardMetaInput                       // 必填（执行结果 JSON）
   assigneeTask?: string
-  attachments?: readonly LatticeIssueAttachmentSpec[]  // 产物
+  attachments?: readonly CastboardIssueAttachmentSpec[]  // 产物
 }
-export interface LatticeIssueFinalizeResult { issue: LatticeIssue; attachments: LatticeAttachmentInput[] }
+export interface CastboardIssueFinalizeResult { issue: CastboardIssue; attachments: CastboardAttachmentInput[] }
 
-export interface LatticeIssueRoutedInput {
+export interface CastboardIssueRoutedInput {
   assigneeTask: string            // 必填：最终转成了哪个 task
   cwd: string                     // 必填，≤500
-  assignerMeta: LatticeMetaInput  // 必填：诉求内容 JSON
-  urgency?: LatticeUrgency
-  permission?: LatticePermission
+  assignerMeta: CastboardMetaInput  // 必填：诉求内容 JSON
+  urgency?: CastboardUrgency
+  permission?: CastboardPermission
   assignedAt?: string             // ISO-8601
 }
 
-export interface LatticeIssueAttachmentDownloadItem { attachment: LatticeAttachment; path: string; size: number }
-export interface LatticeIssueAttachmentDownloadFailure { fileId: string; fileName: string; code: LatticeErrorCode; reason: string }
-export interface LatticeIssueAttachmentDownloadResult {
+export interface CastboardIssueAttachmentDownloadItem { attachment: CastboardAttachment; path: string; size: number }
+export interface CastboardIssueAttachmentDownloadFailure { fileId: string; fileName: string; code: CastboardErrorCode; reason: string }
+export interface CastboardIssueAttachmentDownloadResult {
   outputDir: string
-  downloaded: LatticeIssueAttachmentDownloadItem[]
-  failed: LatticeIssueAttachmentDownloadFailure[]
+  downloaded: CastboardIssueAttachmentDownloadItem[]
+  failed: CastboardIssueAttachmentDownloadFailure[]
 }
 
-export interface LatticeIssueCommentInput {
+export interface CastboardIssueCommentInput {
   commentId: string               // 必填（幂等键，重试必须复用）
   content: string
   commentAt?: string
-  commentRole?: LatticeCommentRole
-  commentAuthorType?: LatticeCommentAuthorType
+  commentRole?: CastboardCommentRole
+  commentAuthorType?: CastboardCommentAuthorType
 }
-export interface LatticeIssueCommentFailure { index: number; content: string; code: LatticeErrorCode; reason: string }
-export interface LatticeIssueAddCommentsResult { issueId: string; written: number; failed: LatticeIssueCommentFailure[] }
+export interface CastboardIssueCommentFailure { index: number; content: string; code: CastboardErrorCode; reason: string }
+export interface CastboardIssueAddCommentsResult { issueId: string; written: number; failed: CastboardIssueCommentFailure[] }
 
-export interface LatticeWorkspaceIndexInput { detail: string; userId?: string; instance?: string }
-export interface LatticeWorkspacePortalInput { workspaceId: string; cwd: string; detail: string; userId?: string; instance?: string }
-export interface LatticeWorkspacePortalQuery { workspaceId: string; instance: string; userId?: string }
+export interface CastboardWorkspaceIndexInput { detail: string; userId?: string; instance?: string }
+export interface CastboardWorkspacePortalInput { workspaceId: string; cwd: string; detail: string; userId?: string; instance?: string }
+export interface CastboardWorkspacePortalQuery { workspaceId: string; instance: string; userId?: string }
 
 /** E1（本协议扩展，非 兼容面）：依赖门禁用的批量状态查询 */
-export interface LatticeIssueStatusesQuery {
+export interface CastboardIssueStatusesQuery {
   issueIds: readonly string[]
   /** 并发上限，默认 4、夹到 [1,8]；再高无意义（底座闸也是 4） */
   concurrency?: number
 }
-export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   // null = 查不到
+export type CastboardIssueStatuses = Record<string, CastboardIssueStatus | null>   // null = 查不到
 ```
 
 ### 10.3 逐个方法规格
 
-#### 10.3.1 `latticeMyProjects() → LatticeResult<LatticeProject[]>`
+#### 10.3.1 `castboardMyProjects() → CastboardResult<CastboardProject[]>`
 
 | 步 | 动作 |
 |---|---|
 | 1 | `client.project.list()`（B2 `/projects/mine`） |
 | 2 | 原样返回裸数组 |
 
-#### 10.3.2 `latticeProjectMembers(projectId, { manager? }) → LatticeResult<LatticeProjectMember[]>`
+#### 10.3.2 `castboardProjectMembers(projectId, { manager? }) → CastboardResult<CastboardProjectMember[]>`
 
 | 步 | 动作 |
 |---|---|
@@ -1283,21 +1283,21 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 > 语义：`manager: true` 回答"这个项目里谁能给我派活"。本协议角色只有 `owner`/`manager`/`member` 三值，
 > 所以判据是 `owner || manager`（不再有既有实现的"角色白名单里还有别的值"那种情况）。
 
-#### 10.3.3 `latticeUserDevices(userId) → LatticeResult<LatticeDevice[]>`
+#### 10.3.3 `castboardUserDevices(userId) → CastboardResult<CastboardDevice[]>`
 
 | 步 | 动作 |
 |---|---|
 | 1 | `toAccount(userId)` |
 | 2 | `client.device.list(userId)`（B12，**只回 active**） |
 
-#### 10.3.4 `latticeMyInstanceIssues(opts) → LatticeResult<LatticeMyInstanceIssues>`
+#### 10.3.4 `castboardMyInstanceIssues(opts) → CastboardResult<CastboardMyInstanceIssues>`
 
 默认值：`os = process.platform === 'win32' ? 'windows' : 'linux'`；`instance = env.teamworkInstanceName()`；
 `userId = session.accountId`；`pageSize = 200`；`maxPages = 1000`；`status` 缺省不过滤。
 
 | 步 | 动作 |
 |---|---|
-| 1 | 三个身份都解析不到 → `400 invalid_user_id`，reason：`latticeMyInstanceIssues 需要账号：client 没有登录，也没有显式传 userId` |
+| 1 | 三个身份都解析不到 → `400 invalid_user_id`，reason：`castboardMyInstanceIssues 需要账号：client 没有登录，也没有显式传 userId` |
 | 2 | 循环 `client.issue.list({ status, pageNum, pageSize })`，**三条终止条件任一成立即停**：① 本页 `items` 为空 ② `scanned >= total` ③ `items.length < pageSize` |
 | 3 | 翻满 `maxPages` → `truncated: true`（不报错） |
 | 4 | 本地判据 `belongsToThisMachine(issue)`：`assignee === userId` 且（`os === 'windows'` 时 `assigneeInstance === instance \|\| assigneeInstance === null`；否则 `assigneeInstance === instance`） |
@@ -1340,18 +1340,18 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 **结果**
 
 ```ts
-{ issues: LatticeIssue[]; attachments: LatticeAttachmentInput[] }        // issueCreateMany
-{ issue: LatticeIssue;     attachments: LatticeAttachmentInput[] }       // issueCreate（长度 1 的包装）
+{ issues: CastboardIssue[]; attachments: CastboardAttachmentInput[] }        // issueCreateMany
+{ issue: CastboardIssue;     attachments: CastboardAttachmentInput[] }       // issueCreate（长度 1 的包装）
 ```
 
 **顺序保证**：先上传附件、再提交 issue、最后挂关系。任一步失败都**不会**留下"issue 存在但引用了不存在的文件"。
 
-#### 10.3.6 `issueUpdateStatus(input) → LatticeResult<LatticeIssue>`
+#### 10.3.6 `issueUpdateStatus(input) → CastboardResult<CastboardIssue>`
 
 | # | 校验 | 失败 |
 |---|---|---|
 | 1 | `checkIssueId(input.issueId)` | `400 invalid_issue_id` |
-| 2 | `isLatticeIssueStatus(input.status)` | `400 invalid_status`，reason 内联 7 值 |
+| 2 | `isCastboardIssueStatus(input.status)` | `400 invalid_status`，reason 内联 7 值 |
 | 3 | `expectedStatus` 给了也要是 7 值之一 | `400 invalid_status` |
 | 4 | `assignedAt` 给了必须是 ISO-8601 | `400 invalid_datetime` |
 | 5 | `assigneeMeta` 经 `asMetaString()` | `400 invalid_meta` |
@@ -1360,12 +1360,12 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 |---|---|
 | 1 | `client.issue.updateStatuses([{...}])` |
 | 2 | `failed.length > 0` → `update_rejected`，`reason` 保留服务端 `failed[0].reason`（`status_conflict` 也是这条路） |
-| 3 | `client.issue.get(issueId)` 读回 → 返回最新 `LatticeIssue` |
+| 3 | `client.issue.get(issueId)` 读回 → 返回最新 `CastboardIssue` |
 
 > **为什么组合层只做单条**：认领/推进都是**仲裁动作**，批量会把"哪条成功哪条失败"糊在一起，
 > 调用方还得自己拆。要批量请用原子层 `client.issue.updateStatuses()`。
 
-#### 10.3.7 `issueClaim(issueIds) → LatticeResult<LatticeIssueClaimResult>`
+#### 10.3.7 `issueClaim(issueIds) → CastboardResult<CastboardIssueClaimResult>`
 
 写死三件：`status: 'accepted'`、`expectedStatus: 'pending'`、`assigneeInstance: <本机 instance>`。
 `assigneeTask` / `assigneeMeta` 不写（那是执行方后面填的）。
@@ -1379,20 +1379,20 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 
 **`status_conflict` 的语义（必须写进 JSDoc）**：别人先抢到了。**不要重试**，去拉本机待办看下一条。
 
-#### 10.3.8 `issueAbandon(issueIds) → LatticeResult<LatticeIssueAbandonResult>`
+#### 10.3.8 `issueAbandon(issueIds) → CastboardResult<CastboardIssueAbandonResult>`
 
 `status: 'abandoned'`，**不带 `expectedStatus`**（放弃是单方面的，不仲裁）。
 
-#### 10.3.9 `issueRouting(issueIds) → LatticeResult<LatticeIssueRoutingResult>`
+#### 10.3.9 `issueRouting(issueIds) → CastboardResult<CastboardIssueRoutingResult>`
 
 `status: 'routing'`，可选带 `assignedAt = nowIso()`（协议 C6 支持 `assignedAt` 透传）。
 不带 `expectedStatus`（规划是执行方的动作，不抢）。
 
-#### 10.3.10 `issueRunning(issueId) → LatticeResult<LatticeIssue>`
+#### 10.3.10 `issueRunning(issueId) → CastboardResult<CastboardIssue>`
 
 `client.issue.updateStatuses([{ issueId, status: 'running' }])` → 失败折 `update_rejected` → `get` 读回。
 
-#### 10.3.11 `issueFinalize(issueId, input) → LatticeResult<LatticeIssueFinalizeResult>`
+#### 10.3.11 `issueFinalize(issueId, input) → CastboardResult<CastboardIssueFinalizeResult>`
 
 | # | 校验 | 失败 |
 |---|---|---|
@@ -1410,7 +1410,7 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 
 任一附件上传失败 → 整条中止（状态不变），`reason` 指出是哪个文件。
 
-#### 10.3.12 `issueRouted(issueId, input) → LatticeResult<LatticeIssue>`
+#### 10.3.12 `issueRouted(issueId, input) → CastboardResult<CastboardIssue>`
 
 | # | 校验 | 失败 |
 |---|---|---|
@@ -1431,14 +1431,14 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 > 本协议的 C4 是 `undefined → 保留原值`、`null → 清空`，**不会丢数据**，所以这里只发改动字段。
 > 这条差异必须在代码注释里写清，否则后人会照抄旧的回填逻辑（无害但会多写 9 个字段）。
 
-#### 10.3.13 `latticeIssueSources(code?)` / `latticeAddIssueSource(input)`
+#### 10.3.13 `castboardIssueSources(code?)` / `castboardAddIssueSource(input)`
 
 | 方法 | 步 |
 |---|---|
-| `latticeIssueSources(code?)` | `client.issue.source.list(code)` |
-| `latticeAddIssueSource(input)` | `toSourceCode(input.code)` → `register([input])` → `list(code)` 读回**那条**（找不到 → `read_back_failed`） |
+| `castboardIssueSources(code?)` | `client.issue.source.list(code)` |
+| `castboardAddIssueSource(input)` | `toSourceCode(input.code)` → `register([input])` → `list(code)` 读回**那条**（找不到 → `read_back_failed`） |
 
-#### 10.3.14 `latticeDownloadIssueAttachments(issueId, outputDir, opts?)`
+#### 10.3.14 `castboardDownloadIssueAttachments(issueId, outputDir, opts?)`
 
 | 步 | 动作 |
 |---|---|
@@ -1455,10 +1455,10 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 
 | 方法 | 步 |
 |---|---|
-| `latticeIssueComments(issueId)` | `checkIssueId` → `comment.list` |
-| `latticeAddIssueComments(issueId, comments)` | `checkIssueId` → **逐条**校验（`commentId` 必填非空 ≤100；`content` 1..10000）→ **逐条发送**（整批校验失败则一条都不发；发送阶段单条失败只进 `failed[]`）→ `{ written, failed }` |
-| `latticeCommentsSince(query)` | `limit` 夹到 `[1, 2000]`，默认 500；`sinceId` 只在 `> 0` 时发；响应兼容 `{items,nextSinceId,hasMore}` 与裸数组两种形状 |
-| `latticeCommentCursor()` | `cursor()` → `Math.max(0, floor(x))` |
+| `castboardIssueComments(issueId)` | `checkIssueId` → `comment.list` |
+| `castboardAddIssueComments(issueId, comments)` | `checkIssueId` → **逐条**校验（`commentId` 必填非空 ≤100；`content` 1..10000）→ **逐条发送**（整批校验失败则一条都不发；发送阶段单条失败只进 `failed[]`）→ `{ written, failed }` |
+| `castboardCommentsSince(query)` | `limit` 夹到 `[1, 2000]`，默认 500；`sinceId` 只在 `> 0` 时发；响应兼容 `{items,nextSinceId,hasMore}` 与裸数组两种形状 |
+| `castboardCommentCursor()` | `cursor()` → `Math.max(0, floor(x))` |
 
 **为什么 `commentId` 必填**：网络超时重发会重复评论。协议对同 `commentId` 是"返回已存在的那条"（幂等），
 所以组合层强制调用方给一个**稳定**的 `commentId`（重试复用）。没给 → `400 invalid_request`，reason 说明。
@@ -1467,15 +1467,15 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 
 | 方法 | 步 |
 |---|---|
-| `latticeWorkspaceIndexes(userId?)` | `resolveWorkspaceUser(userId)` → `workspace.list({ accountId: user, type: 'index' })` |
-| `latticeWorkspacePortal(query)` | `query.instance` 必填（reason 见 §13）；`resolveWorkspaceUser` → `workspace.list({ accountId, instance, workspaceId, type: 'portal' })` → **本地精确比对 `workspaceId`**（服务端是精确匹配，但仍做一次防御）→ 无命中返回 `ok(null)` |
-| `latticeUpsertWorkspaceIndex(input)` | `resolveWorkspaceUser` + `resolveWorkspaceInstance` → `workspace.upsert({ instance, type:'index', detail })` → `readBackWorkspace()` |
-| `latticeUpsertWorkspacePortal(input)` | `toPositiveIntId`?? 不需要 → `workspaceId`/`cwd` 必填 → `upsert({ instance, workspaceId, cwd, type:'portal', detail })` → 读回 |
+| `castboardWorkspaceIndexes(userId?)` | `resolveWorkspaceUser(userId)` → `workspace.list({ accountId: user, type: 'index' })` |
+| `castboardWorkspacePortal(query)` | `query.instance` 必填（reason 见 §13）；`resolveWorkspaceUser` → `workspace.list({ accountId, instance, workspaceId, type: 'portal' })` → **本地精确比对 `workspaceId`**（服务端是精确匹配，但仍做一次防御）→ 无命中返回 `ok(null)` |
+| `castboardUpsertWorkspaceIndex(input)` | `resolveWorkspaceUser` + `resolveWorkspaceInstance` → `workspace.upsert({ instance, type:'index', detail })` → `readBackWorkspace()` |
+| `castboardUpsertWorkspacePortal(input)` | `toPositiveIntId`?? 不需要 → `workspaceId`/`cwd` 必填 → `upsert({ instance, workspaceId, cwd, type:'portal', detail })` → 读回 |
 
 `readBackWorkspace()`：用 `(type, instance, accountId[, workspaceId])` 再 `list` 一次，取最新一条；
 `index` 用 `workspaceId === null` 定位；读不到 → `read_back_failed`。
 
-#### 10.3.17 `E1 latticeIssueStatuses(issueIds) → LatticeResult<Record<issueId, status|null>>`（扩展）
+#### 10.3.17 `E1 castboardIssueStatuses(issueIds) → CastboardResult<Record<issueId, status|null>>`（扩展）
 
 | 步 | 动作 |
 |---|---|
@@ -1488,7 +1488,7 @@ export type LatticeIssueStatuses = Record<string, LatticeIssueStatus | null>   /
 E1 把"查不到"显式折成 `null`，门禁实现变成：
 
 ```ts
-const r = await client.latticeIssueStatuses(dependsOn)
+const r = await client.castboardIssueStatuses(dependsOn)
 if (!r.ok) return { found: false }                    // 拿不到 = 不做门禁（与旧行为一致）
 const blocked = dependsOn.filter(id => r.data[id] !== 'success')
 ```
@@ -1572,8 +1572,8 @@ client.<group>.<method>(...)
 | 项 | 决定 |
 |---|---|
 | 类型 | 直接 `import type { EventLogger, LogLevel } from '@meiyukichan/dsh-magica-spellbook'` |
-| 谁创建 | **宿主**（dsh 插件 / CLI）用 `createEventLogger(pluginName, rootDir)` 造，通过 `LatticeOptions.logger` 传入 |
-| SDK 做什么 | 只调 `logger.logEvent(level, event, detail)`；`setLatticeLogger()` 注入/清除 |
+| 谁创建 | **宿主**（dsh 插件 / CLI）用 `createEventLogger(pluginName, rootDir)` 造，通过 `CastboardOptions.logger` 传入 |
+| SDK 做什么 | 只调 `logger.logEvent(level, event, detail)`；`setCastboardLogger()` 注入/清除 |
 | 没传 logger | `warn` / `error` 落 console，`info` 静默（库场景不刷屏） |
 | 级别 | 跟发布包一致：只有 `info` / `warn` / `error`（**没有 debug**） |
 | 使用点 | `depends-on`（读回脏数据归一）、`auth-expired` / `auth-unauthorized`、`retry`（网络层重试） |
@@ -1582,12 +1582,12 @@ client.<group>.<method>(...)
 ### 11.4 并发闸
 
 ```ts
-function createLimitedFetch(fetchImpl: LatticeFetch, limit: number): LatticeFetch   // 发布包实现
+function createLimitedFetch(fetchImpl: CastboardFetch, limit: number): CastboardFetch   // 发布包实现
 ```
 
 | 规则 | 值 |
 |---|---|
-| 默认上限 | 4（`LATTICE_DEFAULT_MAX_CONCURRENCY`） |
+| 默认上限 | 4（`CASTBOARD_DEFAULT_MAX_CONCURRENCY`） |
 | 语义 | `active < limit` 立即发；否则 FIFO 排队；`finally` 里 `release()` |
 | 与自定义 fetch 的关系 | **无论是否注入 `fetchImpl`，都套闸**（INV-4） |
 | 为什么是 4 | 单 Node 进程 libuv 线程池 4 槽；占满后所有 HTTP handler 排队 |
@@ -1610,14 +1610,14 @@ async dispose(): Promise<void>   // 幂等、不抛
 ```
 
 释放出站句柄（spellbook 的 Agent / 代理连接），清掉会话内存（**不删凭据文件**）。
-在 dsh 插件里必须收口到 `ctx.effect(() => () => { void client.dispose() }, 'lattice-client')`。
+在 dsh 插件里必须收口到 `ctx.effect(() => () => { void client.dispose() }, 'castboard-client')`。
 
 ### 11.7 HTTP 面：统一用发布包的 `createJsonRouter`（本包暂无 HTTP 面）
 
 | 谁有 HTTP 面 | 用什么 |
 |---|---|
 | 本包 `src/server`（参考实现，47 端点） | **保持 Fastify**（已有 118 个用例与严格 schema 校验，换路由框架是独立议题，见 `open-items.zh.md`） |
-| 未来的 dsh 插件（`/lattice` 之类） | **必须**用发布包的 `createJsonRouter` / `jsonRoute` / `sendJson` / `sameOrigin` / `readJsonBody`，**禁止**再手写一套 |
+| 未来的 dsh 插件（`/castboard` 之类） | **必须**用发布包的 `createJsonRouter` / `jsonRoute` / `sendJson` / `sameOrigin` / `readJsonBody`，**禁止**再手写一套 |
 
 > 一句话：**新写的 HTTP 面不许自造 router**。本包的 SDK 半侧没有 HTTP 面，所以这里只登记纪律。
 
@@ -1671,7 +1671,7 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 
 | # | 文案 | 触发 |
 |---|---|---|
-| 1 | `latticeMyInstanceIssues 需要账号：client 没有登录，也没有显式传 userId` | §10.3.4 步 1 |
+| 1 | `castboardMyInstanceIssues 需要账号：client 没有登录，也没有显式传 userId` | §10.3.4 步 1 |
 | 2 | `解析不到 instance（ip:port）：没传，也没解析到本机实例标识` | §10.3.7 / §10.3.16 |
 | 3 | `解析不到 userId：没传，也没从登录会话/环境解析到账号` | §10.3.16 |
 | 4 | `issueCreate 的 assignee 必填（责任人账号）` | §10.3.5 步 1 |
@@ -1687,8 +1687,8 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 | 14 | `permission 必须是 read-only / workspace-write / danger-full-access` | §10.3.12 步 4 |
 | 15 | `issueRouted 的 assignerMeta 必填（诉求内容 JSON）` | §10.3.12 步 5 |
 | 16 | `issueRouted 只能在 accepted / routing 状态下调用，当前 <status>` | §10.3.12 状态门 |
-| 17 | `latticeWorkspacePortal 的 instance 必填（ip:port）—— 要查的是哪台机器上的工作区` | §10.3.16 |
-| 18 | `latticeUpsertWorkspacePortal 需要 workspaceId 与 cwd（portal 形状）` | §10.3.16 |
+| 17 | `castboardWorkspacePortal 的 instance 必填（ip:port）—— 要查的是哪台机器上的工作区` | §10.3.16 |
+| 18 | `castboardUpsertWorkspacePortal 需要 workspaceId 与 cwd（portal 形状）` | §10.3.16 |
 | 19 | `附件不存在：<path>` / `附件是目录，不能上传：<path>` / `附件是 0 字节，会被服务端拒收：<path>` / `附件读盘失败：<path>（<err>）` | §10.3.5 步 11 |
 | 20 | `输出目录不合法：<dir>` / `附件落盘失败：<path>（<err>）` | §10.3.14 |
 | 21 | `评论 <i> 的 commentId 必填（幂等键，重试必须复用）` | §10.3.15 |
@@ -1740,7 +1740,7 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 | 17 | 本机 issue 翻页 + 三条终止 + 本地判据 | §10.3.4 | ✅ |
 | 18 | 逃生口（发端点表外的请求） | D21 + §9.4（`transport.call/callRaw/request/raw`） | ✅ |
 | 19 | 构造注入接缝（fetch / token / 并发 / 超时） | §5.6 | ✅（语义映射，D25） |
-| 20 | 依赖门禁 | **E1 `latticeIssueStatuses`** | ➕ 补成方法（D19/D23） |
+| 20 | 依赖门禁 | **E1 `castboardIssueStatuses`** | ➕ 补成方法（D19/D23） |
 | 21 | 幂等三键（`issueId` / `commentId` / `expectedStatus`） | §8.7 / §10.3.6 / §10.3.15 | ✅ |
 | 22 | 单条 issue 查询 | §9.2（+ E1 批量版） | ✅ |
 | 23 | `dispose()`（幂等、不抛） | §11.6 | ✅ |
@@ -1755,32 +1755,32 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 
 | 旧用法 | 新写法 | 原因 |
 |---|---|---|
-| `createLatticeClient({})` | `createLatticeClient({ baseUrl? })`（同名工厂保留） | 名字与形状保持不变；新增可选 `baseUrl`/`host`/`prefix`/`fetchImpl` |
-| `latticeBaseUrl()` 读 `LATTICE_BASE_URL` | `teamworkBaseUrl()` 读 §4.1 链 | 身份/域名体系换了 |
-| `latticeUserId()` 读 `~/.dsh/.credentials.json` | `client.auth.accountId`（登录后） | 账号来自本协议会话 |
+| `createCastboardClient({})` | `createCastboardClient({ baseUrl? })`（同名工厂保留） | 名字与形状保持不变；新增可选 `baseUrl`/`host`/`prefix`/`fetchImpl` |
+| `castboardBaseUrl()` 读 `CASTBOARD_BASE_URL` | `teamworkBaseUrl()` 读 §4.1 链 | 身份/域名体系换了 |
+| `castboardUserId()` 读 `~/.dsh/.credentials.json` | `client.auth.accountId`（登录后） | 账号来自本协议会话 |
 | `x-auth-token` 鉴权 | `dsh-teamwork-token` + `dsh-teamwork-account` | D4 |
 | `issue.attachment.add([{type:'input'}])` | 不变（SDK 内部映射 `assigner`） | D8 |
-| `comment.add()` 返回 `number` | 返回 `LatticeComment` | D12 |
-| `issue.replace()` 返回 `boolean` | 返回 `LatticeIssue` | D12 |
-| `workspace.upsert()` 返回 `number` | 返回 `LatticeDeviceWorkspace` | D12 |
+| `comment.add()` 返回 `number` | 返回 `CastboardComment` | D12 |
+| `issue.replace()` 返回 `boolean` | 返回 `CastboardIssue` | D12 |
+| `workspace.upsert()` 返回 `number` | 返回 `CastboardDeviceWorkspace` | D12 |
 | `device.sync()` 返回 `number` | 返回 `{synced,deactivated}` | 协议形状 |
 | `issue.list()` 出参 `page` | `page` 与 `pageNum` 都有 | D11 |
 | `file.upload({ name, data, contentType })` | 同签名；`contentType` 仅用于本地推断，协议只认 octet-stream | F1 |
 | `file.downloadPublic()` | 保留（= `download()`） | D14 |
-| `LatticeS3File` | `LatticeFileInfo`（保留 `LatticeS3File` 类型别名指向它） | F1 |
-| `LatticeProjectMember.userId` | `.accountId` | §8.4 |
-| `LatticeDeviceWorkspace.userId` | `.accountId` | §8.4 |
-| `LatticeDevice.dshPatcherVersion` | 不存在 | §8.4 |
+| `CastboardS3File` | `CastboardFileInfo`（保留 `CastboardS3File` 类型别名指向它） | F1 |
+| `CastboardProjectMember.userId` | `.accountId` | §8.4 |
+| `CastboardDeviceWorkspace.userId` | `.accountId` | §8.4 |
+| `CastboardDevice.dshPatcherVersion` | 不存在 | §8.4 |
 | `issueCreateMany({ assigner })` | `assigner` 仍可传，但**必须等于当前登录账号**（D18） | 身份只来自 token |
 | 依赖门禁靠 `client.issue.get()` 的 **404** 判"查不到" | 本协议不按参与方过滤 → `issue.get()` 恒 200，必须显式判 `status` / `assignee`（D19） | 协议不做资源级鉴权 |
 | `errors: 'invalid_issue_id'` 只对 UUID 触发 | 放宽到"非空 + ≤100 + 无控制字符" | D7 |
 
 ### 14.2 保留不变的（零改动）
 
-`createLatticeClient` 的名字与"同步、无 I/O"语义；`LatticeClient` 的 24 个组合方法名与签名；
-`LatticeResult` / `LatticeOk` / `LatticeFail` 三件套与 `latticeOk`/`latticeFail`/`isLatticeOk`/`isLatticeFail`；
+`createCastboardClient` 的名字与"同步、无 I/O"语义；`CastboardClient` 的 24 个组合方法名与签名；
+`CastboardResult` / `CastboardOk` / `CastboardFail` 三件套与 `castboardOk`/`castboardFail`/`isCastboardOk`/`isCastboardFail`；
 五个原子分组结构（`issue` / `device` / `project` / `teamwork` / `file`）；`dispose()`；
-`LATTICE_ENDPOINTS` / `LatticeEndpointName` 的类型用法；`LATTICE_DEFAULT_MAX_CONCURRENCY = 4`。
+`CASTBOARD_ENDPOINTS` / `CastboardEndpointName` 的类型用法；`CASTBOARD_DEFAULT_MAX_CONCURRENCY = 4`。
 
 ### 14.3 新增的（兼容面没有）
 
@@ -1790,10 +1790,10 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 
 ### 14.4 明确不做的（与兼容面一致）
 
-轮询、本地台账（`lattice-link.json` / 评论 jsonl / 游标文件）、执行会话编排、看板 UI、SSE/WebSocket。
+轮询、本地台账（`castboard-link.json` / 评论 jsonl / 游标文件）、执行会话编排、看板 UI、SSE/WebSocket。
 **这一层只做"一次调用一次结果"。**
 
-### 14.5 插件迁移必查清单（`dsh-magica-lattice` 接本 SDK 时逐条对）
+### 14.5 插件迁移必查清单（`dsh-magica-castboard` 接本 SDK 时逐条对）
 
 | # | 检查项 | 旧行为 | 本 SDK 下的正确写法 |
 |---|---|---|---|
@@ -1803,8 +1803,8 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 | 4 | 输入件下载 | `{ type: 'input' }` | 不变（映射成协议 `assigner`）；**不传 `type` 会把产物当输入** |
 | 5 | 产物上传 | `ArtifactUplink` 直传 + `issueFinalize` 的 `attachments` | 不变；两条通道靠 `uploadedFiles` 互斥（SDK 不做互斥，那是台账的事） |
 | 6 | 结算顺序 | 先上传再改状态 | 不变——组合层已保证；**不要**绕到原子层自己拼 |
-| 7 | 实例口径 | `latticeInstanceName()`（magica） | `teamworkInstanceName()`（本包 §12）；它 === `device.host:port` === `assigneeInstance` |
-| 8 | 派活四步 | `latticeMyProjects` → `latticeProjectMembers(id,{manager:true})` → `latticeUserDevices` → `latticeWorkspaceIndexes`/`Portal` | 名字与方法完全不变 |
+| 7 | 实例口径 | `castboardInstanceName()`（magica） | `teamworkInstanceName()`（本包 §12）；它 === `device.host:port` === `assigneeInstance` |
+| 8 | 派活四步 | `castboardMyProjects` → `castboardProjectMembers(id,{manager:true})` → `castboardUserDevices` → `castboardWorkspaceIndexes`/`Portal` | 名字与方法完全不变 |
 | 9 | 状态推进 | `issueRouting` / `issueRouted` / `issueRunning` / `issueFinalize` / `issueAbandon` | 名字完全不变；新增"只在 remote 时回写"由插件判断（SDK 不管） |
 | 10 | 重放提交 | `issueCreateMany` 同 `issueId` | 默认 `onExist:'skip'`（D13）——别让重放把 `accepted` 打回 `pending` |
 | 11 | 错误处理 | 抛异常 / 信封混用 | 统一 `ok:false` + `code`；插件把 `code` 写进日志，不解析 `message` |
@@ -1849,7 +1849,7 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 
 | # | 断言 |
 |---|---|
-| 1 | `Object.keys(LATTICE_ENDPOINTS).length === 48` |
+| 1 | `Object.keys(CASTBOARD_ENDPOINTS).length === 48` |
 | 2 | 每条表项的 `path` 以 `/` 开头、`method` 属于 4 值、`auth` 属于 3 值 |
 | 3 | **分组映射与表键集合完全相等**（`ENDPOINT_OWNER` 覆盖 48 个键，无遗漏无多余）——表与实现漂移立刻红 |
 | 4 | 与 `src/server` 的 47 条路由清单逐条对齐（用 `/version.endpoints[]` 反查：48 表项 → 47 端点，`projectList` 与 `teamworkProjectMine` 同路径） |
@@ -1903,19 +1903,19 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 
 | # | 断言 |
 |---|---|
-| 1 | `latticeMyInstanceIssues` 翻页：造 450 条 issue（跨 2 台实例），断言 `scanned ≥ 450`、`items` 只含本机、`otherInstance`/`unclaimed` 分类正确、`truncated === false` |
+| 1 | `castboardMyInstanceIssues` 翻页：造 450 条 issue（跨 2 台实例），断言 `scanned ≥ 450`、`items` 只含本机、`otherInstance`/`unclaimed` 分类正确、`truncated === false` |
 | 2 | `maxPages: 1` 时 `truncated === true` 且不报错 |
 | 3 | `issueCreate` 带 2 个附件：断言 upload 先于 submit（用服务端请求日志顺序断言）、`attachments.length === 2`、`issue.dependsOn` 是 `string[]` |
 | 4 | `issueCreate` 同 `issueId` 第二次（默认 `onExist:'skip'`）→ `status` 不被重置为 `pending`（**这是 D13 的护栏**） |
 | 5 | `issueClaim`：并发两个 client 抢同一条，恰好一个 `claimed.length===1`，另一个 `failed[0].reason==='status_conflict'` |
 | 6 | `issueFinalize`：附件上传失败（不存在的路径）→ 状态**没变** |
 | 7 | `issueRouted`：状态不是 accepted/routing → 本地 400，零请求；正常路径后 `assigneeTask`/`cwd` 落库且**其它字段未被清空**（D13 的镜像断言） |
-| 8 | `latticeAddIssueComments`：3 条里 1 条 `commentId` 空 → **一条都不发**；3 条都合法 → `written===3` |
-| 9 | `latticeDownloadIssueAttachments`：2 个附件、其中 1 个 fileId 不存在 → 整体 `ok:true`，`downloaded.length===1`、`failed.length===1` |
+| 8 | `castboardAddIssueComments`：3 条里 1 条 `commentId` 空 → **一条都不发**；3 条都合法 → `written===3` |
+| 9 | `castboardDownloadIssueAttachments`：2 个附件、其中 1 个 fileId 不存在 → 整体 `ok:true`，`downloaded.length===1`、`failed.length===1` |
 | 10 | 24 个方法全部可调用一次并返回 `ok:true`（冒烟矩阵） |
 | 11 | `issueCreate({ assigner: '别人' })` → `ok:false` + `invalid_body`，**零请求**（D18） |
 | 12 | `issue.get()` 查别人名下的 issue **返回 200**（D19 的证据）；紧接着断言插件侧门禁用 `status` 判定而不依赖 404 |
-| 13 | `E1 latticeIssueStatuses`：3 个 id（2 个存在 + 1 个不存在）→ `{a:'success', b:'pending', c:null}`；整体失败路径（服务端 500 模拟）→ `code` 透传 |
+| 13 | `E1 castboardIssueStatuses`：3 个 id（2 个存在 + 1 个不存在）→ `{a:'success', b:'pending', c:null}`；整体失败路径（服务端 500 模拟）→ `code` 透传 |
 
 ### 16.5 `tests/sdk-env.test.ts` —— 配置与实例
 
@@ -1950,16 +1950,16 @@ node scripts/sdk-saturate.mjs --url http://10.1.2.3:3939/dsh-teamwork/v1
 | 步 | 角色 | 动作 | 断言 |
 |---|---|---|---|
 | 1 | alice | `auth.register` → `auth.login` | `accountToken` 落盘；`account.globalRole === 'administrator'`（首个账号） |
-| 2 | bob | 另开一个 `LatticeClient`（`persist:false`）注册 | 两个 client 会话互不干扰 |
+| 2 | bob | 另开一个 `CastboardClient`（`persist:false`）注册 | 两个 client 会话互不干扰 |
 | 3 | alice | `teamwork.project.create({name,visibility:'private'})` → `memberAdd(bob,'manager')` | 项目可见性 / 成员角色正确 |
-| 4 | alice | `latticeAddIssueSource({code:'demo-source', pluginName:'demo'})` | 字典里有这条 |
+| 4 | alice | `castboardAddIssueSource({code:'demo-source', pluginName:'demo'})` | 字典里有这条 |
 | 5 | alice | `issueCreate({title, assignee:'bob', assigneeInstance: bobInstance, assignerMeta:{title,detail}, dependsOn: [depId], attachments:[file] })` | `attachments.length===1`；`dependsOn` 是 `string[]` |
-| 6 | bob | `latticeMyInstanceIssues({status:'pending', instance: bobInstance})` | `items` 里正好这条；`otherInstance` 为空 |
+| 6 | bob | `castboardMyInstanceIssues({status:'pending', instance: bobInstance})` | `items` 里正好这条；`otherInstance` 为空 |
 | 7 | alice+bob | 同时 `issueClaim([issueId])` | **恰好一个** `claimed.length===1`，另一个 `status_conflict` |
 | 8 | bob | `issueRouting` → `issueRouted({assigneeTask:'t1', cwd, assignerMeta})` | `status==='routing'`、`assigneeTask==='t1'`；**`title`/`detail`/`dependsOn` 未被清空** |
 | 9 | bob | `issueRunning` → `issueFinalize({status:'success', assigneeMeta, attachments:[out]})` | `status==='success'`；附件 1 条（`type:'output'`） |
-| 10 | alice | `latticeCommentsSince` 拉增量 → `latticeDownloadIssueAttachments(id, dir, {type:'output'})` | 评论能拉到（含 bob 的）；产物落盘字节一致 |
-| 11 | alice | `latticeAddIssueComments(id,[{commentId, content}])` 连发两次同 `commentId` | 第二次仍 `ok:true`，评论条数不变 |
+| 10 | alice | `castboardCommentsSince` 拉增量 → `castboardDownloadIssueAttachments(id, dir, {type:'output'})` | 评论能拉到（含 bob 的）；产物落盘字节一致 |
+| 11 | alice | `castboardAddIssueComments(id,[{commentId, content}])` 连发两次同 `commentId` | 第二次仍 `ok:true`，评论条数不变 |
 | 12 | bob | `teamwork.device.mine()` | 能看到自己上报的设备（`host:port` === `teamworkInstanceName()`） |
 | 13 | 收尾 | `file.remove` + `admin.setRole` + `shutdown` | 各自成功；`dispose()` 后再调 → `login_required` / 明确失败，不抛 |
 
@@ -1969,7 +1969,7 @@ node scripts/sdk-saturate.mjs --url http://10.1.2.3:3939/dsh-teamwork/v1
 ### 16.8 `tests/sdk-live.test.ts` —— **真机联调（M0 阶段已跑通）**
 
 前七节都是"逻辑对不对"；这一节证明"**与真实服务端真的通**"：起真的 Fastify + SQLite + 真 HTTP，
-用 `LatticeTransport` 逐条打协议端点。
+用 `CastboardTransport` 逐条打协议端点。
 
 | 步 | 调用 | 断言（全部在真库上） |
 |---|---|---|
@@ -1992,7 +1992,7 @@ node scripts/sdk-saturate.mjs --url http://10.1.2.3:3939/dsh-teamwork/v1
 
 | 协议真实形状 | 门面形状 | 谁转 |
 |---|---|---|
-| `issueCommentCursor` 回 `{ maxId }` | `number` | 组合层 `latticeCommentCursor()` |
+| `issueCommentCursor` 回 `{ maxId }` | `number` | 组合层 `castboardCommentCursor()` |
 | 附件 `type` 是 `assigner/assignee` | `input/output` | `wire.toWireAttachmentType()` / `fromWireAttachmentType()`（原子分组层） |
 
 ### 16.9 `scripts/sdk-saturate.mjs` —— **SDK 饱和测试（真机，上线前总验收）**
@@ -2046,7 +2046,7 @@ node scripts/sdk-saturate.mjs --url <baseUrl>   # 打已部署服务（见 §16.
 | **M1 原子分组** | ✅ 完成 | `auth-api` / `project` / `device` / `file` / `issue/*`(5) / `teamwork/*`(3) / `ops` / `admin` | `sdk-atomic` 真机通（含两处映射） |
 | **M2 组合层** | ✅ 完成 | `sdk.ts`（24 + E1）/ `client.ts`（8 分组 + 25 方法 + `request`/`dispose`） | `sdk-composite` 真机通（认领仲裁 / 回填不清空 / 收尾顺序 / 评论幂等 / E1） |
 | M3 收口 | ⏳ 待做 | 既有 `TeamworkClient` 薄适配、`tests/**` 全切新 SDK、README 用法段 | 见 §15.2 |
-| M4 插件接入 | ⏳ 待做 | `dsh-magica-lattice` 按 §14.5 十二条清单接入 | 真机双机剧本（§16.7） |
+| M4 插件接入 | ⏳ 待做 | `dsh-magica-castboard` 按 §14.5 十二条清单接入 | 真机双机剧本（§16.7） |
 | **饱和验收** | ✅ 完成 | `tests/sdk-saturate.ts` + `scripts/sdk-saturate.mjs` | **183/183 断言、48/48 端点**（§16.9） |
 
 **当前代码规模**（`src/sdk/**`，28 个文件 / ≈6.6k 行）：
@@ -2072,8 +2072,8 @@ node scripts/sdk-saturate.mjs --url <baseUrl>   # 打已部署服务（见 §16.
 
 | # | 文件 | 内容 | 验收 |
 |---|---|---|---|
-| 1 | `result.ts` | 信封 + `LatticeErrorCode` + 四个构造/守卫 | `sdk-transport` 6.1 表通过 |
-| 2 | `types.ts` | 枚举三件套 + 实体 + `LatticeHealth`/`LatticeVersion` | `tsc --noEmit` 干净 |
+| 1 | `result.ts` | 信封 + `CastboardErrorCode` + 四个构造/守卫 | `sdk-transport` 6.1 表通过 |
+| 2 | `types.ts` | 枚举三件套 + 实体 + `CastboardHealth`/`CastboardVersion` | `tsc --noEmit` 干净 |
 | 3 | `endpoints.ts` | 48 条表 + 三类 | `sdk-endpoints` 断言 1–6 |
 | 4 | `wire.ts` | `seg`/`asMetaString`/`asDependsOnString`/`parseDependsOn`/`normalizeIssue`/`checkIssueId`/`toPositiveIntId`/`toProjectId`/`toDeviceId`/`toAccount`/`toSourceCode`/`toIsoLocal`/`safeJson`/`safeText`/`describeHttpFailure`/`pick` | 单测逐函数 |
 | 5 | `env.ts` | §4 + §12 七个函数 + 缓存 + `getLocalIp` | `sdk-env` 1–5 |
@@ -2099,7 +2099,7 @@ node scripts/sdk-saturate.mjs --url <baseUrl>   # 打已部署服务（见 §16.
 | # | 内容 | 验收 |
 |---|---|---|
 | 16 | `sdk.ts` 校验助手（`validateCreateInput` / `prepareAttachments` / `checkAssignerMetaPayload` / `guard` / `safeJson`） | 纯函数单测 |
-| 17 | 能力块 1–4（`latticeMyProjects` / `latticeProjectMembers` / `latticeUserDevices` / `latticeMyInstanceIssues`） | `sdk-composite` 1–2 |
+| 17 | 能力块 1–4（`castboardMyProjects` / `castboardProjectMembers` / `castboardUserDevices` / `castboardMyInstanceIssues`） | `sdk-composite` 1–2 |
 | 18 | 能力块 5–9（`issueCreate`/`issueCreateMany`/`issueUpdateStatus`/`issueClaim`/`issueAbandon`/`issueRouting`/`issueRunning`/`issueFinalize`/`issueRouted`） | `sdk-composite` 3–7、11 |
 | 19 | 能力块 10–12（来源 / 附件下载 / 评论四件套） | `sdk-composite` 8–9 |
 | 20 | 能力块 13（工作区四件套） | 单测 + `sdk-composite` 10 |
@@ -2123,7 +2123,7 @@ node scripts/sdk-saturate.mjs --url <baseUrl>   # 打已部署服务（见 §16.
 | 28 | `tests/**` 切到新 SDK，删既有实现重复类型 |
 | 29 | `README.md` 的 SDK 用法段落换成本文 §9/§10 示例 |
 | 30 | `scripts/saturate.mjs` 增加"走 SDK"模式（§16.6） |
-| 31 | `dsh-magica-lattice` 按 §14.5 清单接入（12 条逐条对） |
+| 31 | `dsh-magica-castboard` 按 §14.5 清单接入（12 条逐条对） |
 
 ### 每次改动的验证命令
 
@@ -2142,20 +2142,20 @@ pnpm --filter dsh-magica-teamwork build       # lib/index.js + lib/index.d.ts
 | 项 | 为什么不做 |
 |---|---|
 | 轮询 / 定时器 | SDK 无状态（除会话与计数）；轮询归持有 `ctx` 的插件，并收口到 `ctx.effect` |
-| 本地台账 / 游标文件 | 同上（兼容面的 `lattice-link.json` / 评论 jsonl 全在插件侧） |
+| 本地台账 / 游标文件 | 同上（兼容面的 `castboard-link.json` / 评论 jsonl 全在插件侧） |
 | 执行会话编排 | 与 dsh `agents` 服务耦合，属于插件层 |
 | 看板 UI / slot 注册 | 本包不是 dsh 插件（无 `apply` / `inject` / `dsh.bundle`） |
 | 离线队列 / 自动重登 | 离线队列要落盘 + 幂等依赖；重登要用户输密码，SDK 不弹窗 |
 | 资源级鉴权 | 服务端明确不做（信任模型见 `server-design` §9.0）；SDK 也不假装做 |
 | 匿名下载 | 协议没有；`downloadPublic` 只是别名 |
-| 缓存响应 | 一个 `LatticeClient` 只缓存"会话"与"能力表"，业务数据不缓存（缓存策略归调用方） |
+| 缓存响应 | 一个 `CastboardClient` 只缓存"会话"与"能力表"，业务数据不缓存（缓存策略归调用方） |
 | **待决交互（审批 / 提问）通道** | 协议未定：共享库现在只承载 issue / 评论 / 附件 / 关系 / 项目，**没有**"谁在等人"的表。跨机下发时审批与提问传不过去 → 见 [`open-items.zh.md`](./open-items.zh.md) 的 **TODO-1**（补齐后本文 §7.2 会 +6 端点、§9.2 +6 原子方法、§10 +4 组合方法） |
 
 ### 18.2 已知限制（诚实边界）
 
 | 限制 | 影响 | 缓解 |
 |---|---|---|
-| `latticeMyInstanceIssues` 要翻全表 | 库大时慢（每页 ≤200） | `maxPages` + `truncated`；调用方自己控轮询节奏 |
+| `castboardMyInstanceIssues` 要翻全表 | 库大时慢（每页 ≤200） | `maxPages` + `truncated`；调用方自己控轮询节奏 |
 | `issueId` 放宽后可能出现"非法但被接受"的键 | 跨实现时别的服务端可能更严 | 文档写明 1..100 + 无控制字符；建议用 `randomUUID()` |
 | C1 的 upsert 会重置状态 | 重放提交把 `status` 打回 `pending` | 组合层默认 `onExist:'skip'`（D13） |
 | C4 的 `null` 是清空 | 误传 `null` 会清字段 | 组合层只发改动字段；`undefined` 保留 |

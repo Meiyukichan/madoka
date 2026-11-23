@@ -1,4 +1,4 @@
-﻿/** 文件：上传（raw body + 哈希校验 + 大小限制）/ 下载（登录即可）/ 删除（administrator） */
+/** 文件：上传（raw body + 哈希校验 + 大小限制）/ 下载（登录即可）/ 删除（administrator） */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -102,12 +102,12 @@ test('删除：只有 administrator；删完引用一起清、再下 404', async
 
   const info = await bob.files.upload(Buffer.from('x'), { fileName: 'x.txt' })
   const [issueId] = await bob.issues.create([{ title: 't', assignee: 'bob' }])
-  await bob.attachments.add([{ issueId: issueId!, fileId: info.fileId, type: 'assignee' }])
+  await bob.attachments.add([{ targetType: 'issue', targetId: issueId!, fileId: info.fileId, role: 'assignee' }])
 
   await assert.rejects(() => bob.files.remove(info.fileId), isCode('forbidden'))
 
   await admin.files.remove(info.fileId)
-  assert.equal((await bob.attachments.list(issueId!)).length, 0, '附件引用被清掉')
+  assert.equal((await bob.attachments.list('issue', issueId!)).length, 0, '附件引用被清掉')
   await assert.rejects(() => bob.files.download(info.fileId), isCode('file_not_found'))
 })
 

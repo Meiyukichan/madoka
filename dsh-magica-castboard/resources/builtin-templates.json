@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "templates": {
+    "builtin:fix-bug": {
+      "zh": {
+        "name": "修复缺陷",
+        "task": {
+          "title": "修复：",
+          "detail": "## 现象\n\n## 复现步骤\n\n## 期望行为\n\n## 相关代码",
+          "urgency": "normal",
+          "permission": "workspace-write",
+          "execution": { "mode": "queue" },
+          "checklist": ["能稳定复现", "根因清楚", "补了回归测试"]
+        }
+      },
+      "en": {
+        "name": "Fix a bug",
+        "task": {
+          "title": "Fix: ",
+          "detail": "## Symptom\n\n## Steps to reproduce\n\n## Expected behaviour\n\n## Relevant code",
+          "urgency": "normal",
+          "permission": "workspace-write",
+          "execution": { "mode": "queue" },
+          "checklist": ["Reproducible", "Root cause understood", "Regression test added"]
+        }
+      }
+    },
+    "builtin:write-doc": {
+      "zh": {
+        "name": "写设计文档",
+        "task": {
+          "title": "设计文档：",
+          "detail": "## 背景与目标\n\n## 方案设计\n\n## 接口 / 数据结构\n\n## 关键流程\n\n## 风险与取舍\n\n## 验收标准",
+          "urgency": "normal",
+          "permission": "workspace-write",
+          "execution": { "mode": "queue" },
+          "checklist": ["背景与目标清晰", "接口和流程完整", "风险与验收明确"]
+        }
+      },
+      "en": {
+        "name": "Write design doc",
+        "task": {
+          "title": "Design doc: ",
+          "detail": "## Background & goals\n\n## Design\n\n## API / data model\n\n## Key flows\n\n## Risks & trade-offs\n\n## Acceptance criteria",
+          "urgency": "normal",
+          "permission": "workspace-write",
+          "execution": { "mode": "queue" },
+          "checklist": ["Goals clear", "Interfaces and flows complete", "Risks and acceptance explicit"]
+        }
+      }
+    },
+    "builtin:code-review": {
+      "zh": {
+        "name": "代码评审",
+        "task": {
+          "title": "评审：",
+          "detail": "## 改动范围\n\n## 重点看什么\n\n## 已知风险",
+          "urgency": "urgent",
+          "permission": "read-only",
+          "execution": { "mode": "queue" },
+          "checklist": ["覆盖全部改动", "指出阻断问题", "结论可执行"]
+        }
+      },
+      "en": {
+        "name": "Code review",
+        "task": {
+          "title": "Review: ",
+          "detail": "## Scope of changes\n\n## What to focus on\n\n## Known risks",
+          "urgency": "urgent",
+          "permission": "read-only",
+          "execution": { "mode": "queue" },
+          "checklist": ["All changes covered", "Blocking issues flagged", "Actionable conclusion"]
+        }
+      }
+    }
+  }
+}

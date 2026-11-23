@@ -1,0 +1,6 @@
+lib/
+lib-tests/
+.e2e/
+e2e/artifacts/
+node_modules/
+*.log

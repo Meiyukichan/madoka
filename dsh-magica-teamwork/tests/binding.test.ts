@@ -2,8 +2,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { resolveConfig } from '../src/server/config.js'
 import { isLoopbackAddress, isLoopbackHost } from '../src/server/net.js'
+
+// Isolate from the developer's real ~/.dsh/storages/teamwork/config.json.
+process.env.DSH_TEAMWORK_DATA = mkdtempSync(join(tmpdir(), 'tw-binding-'))
 
 test('isLoopbackHost：IPv4 回环段 / localhost / ::1 允许', () => {
   for (const h of ['127.0.0.1', '127.0.0.2', '127.1.2.3', 'localhost', 'LOCALHOST', '::1', '[::1]']) {
