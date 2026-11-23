@@ -59,12 +59,8 @@ export const PANEL_PLUGINS = [
     hint: '消息操作条上的点赞/点踩与反馈弹窗',
     defaultDisabled: true,
   },
-  {
-    id: 'session-log-download',
-    label: 'Session Log 导出',
-    hint: '本地导出会话日志（纯本地、不上传，默认保留）',
-    defaultDisabled: false,
-  },
+  // 注意：session-log-download（本地导出，纯本地不上传）**不在列表里** ——
+  // 用户只要「上报有关」的开关；它保持默认启用。
 ] as const
 
 /**

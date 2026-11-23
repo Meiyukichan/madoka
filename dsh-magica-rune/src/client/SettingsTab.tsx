@@ -31,7 +31,6 @@ const PANEL_KEYS: ReadonlyArray<{ id: string; title: string; hint: string }> = [
   { id: 'ui-settings-session-log', title: 'panel.sessionLogUi', hint: 'panel.sessionLogUiHint' },
   { id: 'message-feedback', title: 'panel.feedbackHost', hint: 'panel.feedbackHostHint' },
   { id: 'ui-message-feedback', title: 'panel.feedbackUi', hint: 'panel.feedbackUiHint' },
-  { id: 'session-log-download', title: 'panel.sessionLogExport', hint: 'panel.sessionLogExportHint' },
 ]
 
 async function readState(): Promise<PanelsPayload | undefined> {

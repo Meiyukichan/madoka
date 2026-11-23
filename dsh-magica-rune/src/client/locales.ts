@@ -44,7 +44,6 @@ export type AbilityLocaleKey =
   | 'panel.sessionLogUi' | 'panel.sessionLogUiHint'
   | 'panel.feedbackHost' | 'panel.feedbackHostHint'
   | 'panel.feedbackUi' | 'panel.feedbackUiHint'
-  | 'panel.sessionLogExport' | 'panel.sessionLogExportHint'
   | 'cat.file' | 'cat.shell' | 'cat.image' | 'cat.agent' | 'cat.job' | 'cat.goal'
   | 'cat.ralph' | 'cat.cordis' | 'cat.mcp' | 'cat.misc' | 'cat.builtin' | 'cat.plugin-other'
   | 'cat.web' | 'cat.workflow' | 'cat.plugin'
@@ -94,8 +93,6 @@ export const zh: Record<AbilityLocaleKey, string> = {
   'panel.feedbackHostHint': '点赞/点踩与 /feedback 的存储与上报',
   'panel.feedbackUi': '消息反馈（UI）',
   'panel.feedbackUiHint': '消息操作条上的点赞/点踩与反馈弹窗',
-  'panel.sessionLogExport': 'Session Log 导出',
-  'panel.sessionLogExportHint': '本地导出会话日志（纯本地、不上传，默认保留）',
   'panel.plugins': '插件页',
   'panel.pluginsHint': '侧栏「插件」行与插件安装页',
   'panel.more': '更多菜单',
@@ -183,8 +180,6 @@ export const en: Record<AbilityLocaleKey, string> = {
   'panel.feedbackHostHint': 'Storage and submission for likes/dislikes and /feedback',
   'panel.feedbackUi': 'Message feedback (UI)',
   'panel.feedbackUiHint': 'Like/dislike buttons and the feedback dialog on assistant messages',
-  'panel.sessionLogExport': 'Session Log export',
-  'panel.sessionLogExportHint': 'Local session-log export (offline only, nothing uploaded; kept enabled by default)',
   error: 'Load failed',
   'cat.file': 'Files',
   'cat.shell': 'Shell',
