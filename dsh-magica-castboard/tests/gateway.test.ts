@@ -5,6 +5,7 @@ import { assertSupportedJsonSchema, validateJsonSchemaValue } from '@deepseek-ai
 
 import { buildGatewayTools } from '../src/host/tools/gateway.ts'
 import type { ToolDefinition } from '../src/host/tools/shared.ts'
+import { INTERACTION_SCHEMA, encodeInteraction } from '../src/shared/interaction-protocol.ts'
 
 const LEGACY_NAMES = [
   'castboard_list',
@@ -37,6 +38,27 @@ function legacyTools(calls: Array<{ name: string; args: Record<string, unknown> 
       calls.push({ name, args })
       if (name === 'castboard_get') return { task: { id: args.id } }
       if (name === 'castboard_issue_state') {
+        if (args.issueId === 'i-2') {
+          return {
+            issue: { id: args.issueId },
+            comments: [{
+              id: 'c-control',
+              authorType: 'system',
+              body: encodeInteraction({
+                schema: INTERACTION_SCHEMA,
+                event: 'requested',
+                interactionId: 'i-1',
+                issueId: 'i-2',
+                sessionId: 's-1',
+                kind: 'question',
+                at: 1,
+                instance: '127.0.0.1:3080',
+                request: { questions: [{ id: 'q-1', question: '选哪个？' }] },
+              }),
+            }],
+            attachments: [],
+          }
+        }
         return { issue: { id: args.issueId }, comments: [{ id: 'c-1' }, { id: 'c-2' }], attachments: [] }
       }
       return { ok: true, name, args }
@@ -97,4 +119,15 @@ test('gateway：comment.get 走 issue state 并截断评论', async () => {
   }
   assert.deepEqual(value.comments.map(item => item.id), ['c-2'])
   assert.deepEqual(calls.at(-1), { name: 'castboard_issue_state', args: { issueId: 'i-1' } })
+})
+
+test('gateway：comment.get 过滤合法控制评论，不把 raw JSON 交给模型', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const tools = buildGatewayTools(legacyTools(calls))
+  const comment = tools.find(tool => tool.name === 'castboard_comment')
+  assert.ok(comment !== undefined)
+  const value = await comment.execute({ capability: 'get', issueId: 'i-2' }, {} as never) as {
+    comments: Array<{ id: string }>
+  }
+  assert.deepEqual(value.comments, [])
 })

@@ -9,6 +9,7 @@
  * @module dsh-magica-castboard/host/exec/interactions
  */
 import type { PendingInteractionRecord } from '../model.ts'
+import type { InteractionQuestionAnswerItem } from '../../shared/interaction-protocol.ts'
 
 export type InteractionKind = 'approval' | 'question'
 
@@ -50,6 +51,12 @@ export interface InteractionFace {
   // sessionId is part of the wire input: the bridge indexes pending work by session.
   answerApproval?: (input: { id: string; sessionId: string; approved: boolean; note?: string }) => Promise<void>
   answerQuestion?: (input: { id: string; sessionId: string; answer: string; selected?: readonly string[] }) => Promise<void>
+  /** Full per-question answers (bridge/tool path); the panel keeps the single-answer method. */
+  answerQuestionFull?: (input: {
+    id: string
+    sessionId: string
+    answers: readonly InteractionQuestionAnswerItem[]
+  }) => Promise<void>
   cancelQuestion?: (input: { id: string; sessionId: string }) => Promise<void>
 }
 
@@ -106,6 +113,12 @@ export class InteractionService {
     return this.cache
   }
 
+  /** Record the close and drop the cached row in one place. */
+  private settle(id: string, outcome: InteractionOutcome): void {
+    this.noteOutcome(id, outcome)
+    this.cache = this.cache.filter(item => item.id !== id)
+  }
+
   /** 记录一次关闭结果；先到先得，不覆盖 `answerRemote` 写入的 answered。 */
   noteOutcome(id: string, outcome: InteractionOutcome): void {
     if (id === '' || this.outcomes.has(id)) return
@@ -130,32 +143,84 @@ export class InteractionService {
   async answerApproval(id: string, approved: boolean, note?: string): Promise<boolean> {
     const target = this.cache.find(item => item.id === id && item.kind === 'approval')
     if (target === undefined) return false
-    await this.deps.face?.answerApproval?.({ id, sessionId: target.sessionId, approved, note })
-    this.noteOutcome(id, 'answered')
-    this.cache = this.cache.filter(item => item.id !== id)
+    const face = this.deps.face
+    if (face?.answerApproval === undefined) return false
+    await face.answerApproval({ id, sessionId: target.sessionId, approved, note })
+    this.settle(id, 'answered')
     return true
   }
 
   async answerQuestion(id: string, answer: string, selected?: readonly string[]): Promise<boolean> {
     const target = this.cache.find(item => item.id === id && item.kind === 'question')
     if (target === undefined) return false
-    await this.deps.face?.answerQuestion?.({
+    const face = this.deps.face
+    if (face?.answerQuestion === undefined) return false
+    await face.answerQuestion({
       id,
       sessionId: target.sessionId,
       answer,
       ...(selected === undefined ? {} : { selected }),
     })
-    this.noteOutcome(id, 'answered')
-    this.cache = this.cache.filter(item => item.id !== id)
+    this.settle(id, 'answered')
+    return true
+  }
+
+  /**
+   * Apply a remote answer without requiring `/state` to have populated the cache.
+   *
+   * @returns `true` when the face accepted it; `false` when the interaction is gone or
+   *   the kind/identity does not match (the caller treats it as stale).
+   * @throws When the face rejects (bridge retries next tick).
+   */
+  async answerRemote(input: {
+    interactionId: string
+    sessionId: string
+    kind: InteractionKind
+    decision?: 'allowed-once' | 'rejected'
+    note?: string
+    answers?: readonly InteractionQuestionAnswerItem[]
+  }): Promise<boolean> {
+    const face = this.deps.face
+    if (face === undefined) return false
+
+    const find = (): PendingInteraction | undefined =>
+      this.cache.find(item => item.id === input.interactionId && item.sessionId === input.sessionId)
+    let target = find()
+    if (target === undefined) {
+      const refresh = await this.refreshResult()
+      if (!refresh.ok) return false
+      target = find()
+    }
+    if (target === undefined || target.kind !== input.kind) return false
+
+    if (input.kind === 'approval') {
+      if (face.answerApproval === undefined || input.decision === undefined) return false
+      await face.answerApproval({
+        id: input.interactionId,
+        sessionId: input.sessionId,
+        approved: input.decision === 'allowed-once',
+        ...(input.note === undefined ? {} : { note: input.note }),
+      })
+    } else {
+      if (face.answerQuestionFull === undefined || input.answers === undefined) return false
+      await face.answerQuestionFull({
+        id: input.interactionId,
+        sessionId: input.sessionId,
+        answers: input.answers,
+      })
+    }
+
+    this.settle(input.interactionId, 'answered')
     return true
   }
 
   async cancelQuestion(id: string): Promise<boolean> {
     const target = this.cache.find(item => item.id === id && item.kind === 'question')
     if (target === undefined) return false
-    await this.deps.face?.cancelQuestion?.({ id, sessionId: target.sessionId })
-    this.noteOutcome(id, 'cancelled')
-    this.cache = this.cache.filter(item => item.id !== id)
+    const face = this.deps.face
+    if (face?.cancelQuestion === undefined) return false
+    await face.cancelQuestion({ id, sessionId: target.sessionId })
+    this.settle(id, 'cancelled')
     return true
   }
 }

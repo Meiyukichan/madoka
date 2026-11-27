@@ -13,6 +13,9 @@ import type { LinkStore } from '../ledger/link-store.ts'
 import type { TaskStore } from '../ledger/task-store.ts'
 import type { ThreadService } from '../pipeline/thread.ts'
 import type { IssueQueryFace } from '../pipeline/sdk-query.ts'
+import type { InteractionProjection } from '../exec/interaction-projection.ts'
+import type { InteractionService } from '../exec/interactions.ts'
+import { interactionTools, type InteractionToolDeps } from './interaction-tools.ts'
 import { issueCommentTools, type CommentDeliveryFace, type IssueCommentToolDeps } from './issue-comment.ts'
 import { issueTaskTools, type IssueTaskToolDeps, type UpstreamIssueComment } from './issue-task.ts'
 import { buildIssueDispatchTools } from './issue-tools.ts'
@@ -58,6 +61,12 @@ export interface CastboardToolDeps {
   upstreamComments?: (issueId: string) => Promise<readonly UpstreamIssueComment[] | undefined>
   /** Absent = comments are stored and polling re-delivers them later. */
   deliverer?: CommentDeliveryFace
+  /** Cross-machine interaction projection; absent = interaction capabilities are not registered. */
+  interactionProjection?: Pick<InteractionProjection, 'of' | 'invalidate'>
+  /** Local pending/answer face for the same-host fast path. */
+  interactions?: Pick<InteractionService, 'list' | 'answerRemote'>
+  /** Cross-machine interaction writes are gated by the comment channel. */
+  interactionEnabled?: () => boolean
   remoteCreate?: DispatchToolDeps['remoteCreate']
   query?: IssueQueryFace
   remoteIssue?: DispatchToolDeps['remoteIssue']
@@ -114,6 +123,7 @@ function dispatchToolDeps(deps: CastboardToolDeps): DispatchToolDeps {
     comments: deps.comments,
     thread: deps.thread,
     links: deps.links,
+    ...(deps.interactionProjection === undefined ? {} : { interactionProjection: deps.interactionProjection }),
     now: deps.now,
     ...(deps.remoteIssue === undefined ? {} : { remoteIssue: deps.remoteIssue }),
     ...(deps.remoteComments === undefined ? {} : { remoteComments: deps.remoteComments }),
@@ -143,11 +153,26 @@ function issueCommentToolDeps(deps: CastboardToolDeps): IssueCommentToolDeps {
   }
 }
 
+/** Interaction tools; absent when the runtime has no projection (tests / degraded hosts). */
+function interactionToolDeps(deps: CastboardToolDeps): InteractionToolDeps | undefined {
+  if (deps.interactionProjection === undefined || deps.interactions === undefined) return undefined
+  return {
+    projection: deps.interactionProjection,
+    thread: deps.thread,
+    interactions: deps.interactions,
+    links: deps.links,
+    tasks: deps.store,
+    ...(deps.interactionEnabled === undefined ? {} : { enabled: deps.interactionEnabled }),
+    now: deps.now,
+  }
+}
+
 /**
- * The four groups merged into one list.
+ * The tool groups merged into one list.
  *
  * The order is the order the model sees: task tools → single-issue conversion → dispatch
- * guidance / queries / batch creation → issue comments. Registration just consumes this array.
+ * guidance / queries / batch creation → issue comments → interactions. Registration just
+ * consumes this array.
  *
  * @param deps - See {@link CastboardToolDeps}.
  */
@@ -156,6 +181,10 @@ export function buildTools(deps: CastboardToolDeps): readonly HostToolDefinition
   const conversionTools = issueTaskTools(issueTaskToolDeps(deps)) as unknown as HostToolDefinition[]
   const dispatchTools = buildIssueDispatchTools(dispatchToolDeps(deps))
   const commentTools = issueCommentTools(issueCommentToolDeps(deps)) as unknown as HostToolDefinition[]
-  const legacy = [...taskTools, ...conversionTools, ...dispatchTools, ...commentTools]
+  const interactionDeps = interactionToolDeps(deps)
+  const interactionToolsList = interactionDeps === undefined
+    ? []
+    : interactionTools(interactionDeps) as unknown as HostToolDefinition[]
+  const legacy = [...taskTools, ...conversionTools, ...dispatchTools, ...commentTools, ...interactionToolsList]
   return buildGatewayTools(legacy as never)
 }

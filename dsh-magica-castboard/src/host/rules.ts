@@ -255,6 +255,12 @@ export function asBoardSettings(raw: unknown): BoardSettings {
     if (typeof source.commentsEnabled !== 'boolean') throw new Error('commentsEnabled must be a boolean')
     settings.commentsEnabled = source.commentsEnabled
   }
+  if (source.interactionReportEnabled !== undefined) {
+    if (typeof source.interactionReportEnabled !== 'boolean') {
+      throw new Error('interactionReportEnabled must be a boolean')
+    }
+    settings.interactionReportEnabled = source.interactionReportEnabled
+  }
   if (source.commentPollMs !== undefined) {
     const value = source.commentPollMs
     if (

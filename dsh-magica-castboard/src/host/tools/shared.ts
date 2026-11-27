@@ -23,6 +23,7 @@ import type {
 } from '../pipeline/attachments.ts'
 import type { IssueQueryFace } from '../pipeline/sdk-query.ts'
 import type { ThreadService } from '../pipeline/thread.ts'
+import type { InteractionProjection } from '../exec/interaction-projection.ts'
 import { canTransition, TASK_STATUSES, type TaskStatus } from '../rules.ts'
 
 export type ParamSpec = Record<string, { type: 'string' | 'number' | 'boolean' | 'array' | 'object'; required?: true; description?: string }>
@@ -107,6 +108,8 @@ export interface ToolDeps {
   tasks: TaskStore
   issues: IssueStore
   comments: CommentStore
+  /** Cross-machine interaction projection for `castboard_issue_state`; absent = omit the field. */
+  interactionProjection?: Pick<InteractionProjection, 'of'>
   now: () => number
   /** Session → workspace (project boundary); when unavailable no boundary check is made. */
   workspaceOf?: (exec: unknown) => string | undefined

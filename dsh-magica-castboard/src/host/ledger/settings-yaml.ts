@@ -28,6 +28,7 @@ const FIELD_ORDER = [
   'portraitRunOnStart',
   'commentsEnabled',
   'commentPollMs',
+  'interactionReportEnabled',
 ] as const satisfies readonly (keyof BoardSettings)[]
 
 const HEADER = [
@@ -38,6 +39,7 @@ const HEADER = [
   '#   portraitRunOnStart 启动时立即补跑一次项目肖像，true / false（出厂 false）',
   '#   commentsEnabled    评论拉取，true / false',
   '#   commentPollMs      评论轮询间隔毫秒，1000..3600000（出厂 5000）',
+  '#   interactionReportEnabled task 执行会话的交互上报，true / false（出厂 true）',
   '#   defaultPermission  新卡默认权限：workspace-write | read-only | danger-full-access',
 ].join('\n')
 

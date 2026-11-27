@@ -9,6 +9,7 @@
  */
 import type { ToolDefinition as HostToolDefinition } from '@deepseek-ai/dsh-tools'
 
+import { decodeInteraction, isInteractionComment } from '../../shared/interaction-protocol.ts'
 import type { ToolDefinition as HandlerDefinition } from './shared.ts'
 import {
   CASTBOARD_COMMENT_DESCRIPTION,
@@ -50,6 +51,8 @@ const ISSUE_CAPABILITIES: readonly GatewayCapability[] = [
   { capability: 'create', handler: 'castboard_issues_create' },
   { capability: 'state', handler: 'castboard_issue_state', stripComments: true },
   { capability: 'links', handler: 'castboard_issue_links' },
+  { capability: 'interactions', handler: 'castboard_interactions_list' },
+  { capability: 'answer_interaction', handler: 'castboard_interaction_answer' },
   { capability: 'convert', handler: 'castboard_issue_task' },
 ]
 
@@ -119,7 +122,17 @@ function commentRead(value: unknown, limit: unknown): unknown {
   const max = typeof limit === 'number' && Number.isFinite(limit)
     ? Math.max(1, Math.min(200, Math.floor(limit)))
     : 50
-  return { comments: all.slice(-max), attachments: record.attachments ?? [] }
+  const visible = all.filter(row => {
+    if (typeof row !== 'object' || row === null) return true
+    const comment = row as { authorType?: string; body?: unknown }
+    if (typeof comment.body !== 'string') return true
+    if (!isInteractionComment({ authorType: comment.authorType, body: comment.body })) return true
+    const decoded = decodeInteraction(comment.body)
+    // Malformed control-like comments are text (parse-failure fallback); valid/unsupported
+    // ones are represented by `castboard_issue interactions`, not raw JSON here.
+    return !decoded.ok && decoded.reason === 'malformed'
+  })
+  return { comments: visible.slice(-max), attachments: record.attachments ?? [] }
 }
 
 function stripComments(value: unknown): unknown {

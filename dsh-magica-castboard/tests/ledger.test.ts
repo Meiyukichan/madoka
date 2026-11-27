@@ -125,6 +125,30 @@ test('ThreadService：add 补全作者与方向，落盘后触发投递与上云
   assert.equal(system?.authorType, 'system')
   assert.equal(system?.role, 'assignee')
   assert.equal(system?.systemKey, 'sys.test')
+
+  const control = await thread.addControl(ISSUE, {
+    id: 'c-control',
+    body: '{"schema":"castboard.interaction/v1"}',
+    role: 'assigner',
+    threadId: 'session-1',
+    createdAt: 3_000,
+    systemKey: 'castboard.interaction.answered',
+  })
+  assert.equal(control?.authorType, 'system')
+  assert.equal(control?.role, 'assigner')
+  assert.equal(control?.createdAt, 3_000)
+
+  const duplicate = await thread.addControl(ISSUE, {
+    id: 'c-control',
+    body: '{"schema":"castboard.interaction/v1"}',
+    role: 'assigner',
+  })
+  assert.equal(duplicate, undefined, '同 id 幂等')
+
+  await assert.rejects(
+    () => thread.addControl(ISSUE, { body: 'x'.repeat(4_001), role: 'assignee' }),
+    /control comment too large/,
+  )
 })
 
 test('ThreadService：deliver:false 跳过投递，ingest 落 remote 且不再上云', async (t) => {

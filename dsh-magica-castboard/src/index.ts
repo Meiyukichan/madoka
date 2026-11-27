@@ -37,6 +37,9 @@ import { SchedulerService } from './host/dispatch/scheduler.ts'
 import { AcceptanceRunner } from './host/exec/acceptance-runner.ts'
 import { ExecutionService, type SessionsFace } from './host/exec/engine.ts'
 import { InteractionCoordinator } from './host/exec/interaction-coordinator.ts'
+import { InteractionBridge } from './host/exec/interaction-bridge.ts'
+import { InteractionProjection } from './host/exec/interaction-projection.ts'
+import { InteractionReporter } from './host/exec/interaction-reporter.ts'
 import { InteractionService, type InteractionFace, type InteractionOutcome, type PendingInteraction } from './host/exec/interactions.ts'
 import { createSpellbookSessions } from './host/exec/spellbook-sessions.ts'
 import { backfillTaskSources } from './host/exec/source-backfill.ts'
@@ -86,7 +89,7 @@ import { portraitFileWritten } from './host/portrait/runner.ts'
 import { resolveDefaultModel, type ResolvedModel } from './host/shared/default-model.ts'
 import { eventLog } from './host/shared/event-log.ts'
 import { ROUTE_PREFIX, ISSUE_SOURCE_DSH } from './shared/wire.ts'
-import { maxConcurrentOf } from './host/rules.ts'
+import { commentsEnabled, maxConcurrentOf } from './host/rules.ts'
 import type { CreateIssueBody, PendingInteractionRecord } from './host/model.ts'
 import { buildTools, type CastboardToolDeps, type IssueStateAttachment, type UpstreamIssueComment } from './host/tools/index.ts'
 import { tracePayload, workspaceFace, type ExecutionFace, type WorkspaceFace } from './host/tools/task-tools.ts'
@@ -287,6 +290,7 @@ export interface CastboardRuntime {
   execution: ExecutionService
   acceptance: AcceptanceRunner
   interactions: InteractionService
+  interactionProjection: InteractionProjection
   workspaces: WorkspaceFace
   routes: readonly Route[]
   now: () => number
@@ -718,15 +722,35 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     face: createInteractionFace(options.ctx),
   })
 
-  // Skeleton scheduler: the real refresh -> reconcile -> report pass lands with the
-  // interaction protocol. For now it proves the event-driven wake + safety fallback.
+  // Interaction reporter: event-driven wake + safety tick from the coordinator below.
+  const projection = new InteractionProjection({
+    commentsOf: issueId => thread.list(issueId),
+  })
+  const reporter = new InteractionReporter({
+    interactions,
+    tasks,
+    links,
+    thread,
+    projection,
+    settings: () => settings.get(),
+    instance: () => deviceInstance,
+    now: clock,
+    log: noteAny,
+  })
+  const bridge = new InteractionBridge({
+    interactions,
+    tasks,
+    links,
+    thread,
+    enabled: () => commentsEnabled(settings.get()),
+    log: noteAny,
+  })
   const coordinator = new InteractionCoordinator({
     run: async () => {
       const refresh = await interactions.refreshResult()
       if (!refresh.ok) return
-      if (refresh.items.length > 0) {
-        note('info', 'interaction-coordinator-pending', String(refresh.items.length))
-      }
+      const applied = await bridge.reconcile(refresh.items)
+      await reporter.tick(applied, refresh)
     },
     log: (event, error) => note('warn', event, errorText(error)),
   })
@@ -808,10 +832,17 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     read: () => readStrategyCustom(strategyCustomFile),
     replace: async (raw: unknown) => writeStrategyCustom(strategyCustomFile, normalizeStrategies(raw)),
   }
+  const settingsSignature = (): string => JSON.stringify(settings.stored())
   const settingsFace = {
     read: () => settings.read(),
     stored: () => settings.stored(),
-    write: (raw: unknown) => settings.write(raw),
+    write: async (raw: unknown) => {
+      const saved = await settings.write(raw)
+      // Reporter/bridge re-read settings every tick; wake now so a toggle (especially
+      // commentsEnabled) takes effect without waiting for the 30s safety tick.
+      coordinator.wake('settings')
+      return saved
+    },
   }
   const reload = async (): Promise<void> => {
     await tasks.reloadIfChanged()
@@ -819,7 +850,9 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     await links.reloadIfChanged()
     // Settings are hand-editable and tiny; re-read on every read request so an edit in an
     // editor takes effect on the next poll instead of at the next restart.
+    const before = settingsSignature()
     await settings.read()
+    if (settingsSignature() !== before) coordinator.wake('settings')
   }
 
   const routes = createRoutes({
@@ -860,6 +893,7 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
           }
         },
       }),
+    ...(options.faces?.issueList === undefined ? {} : { issueList: options.faces.issueList }),
     ...(options.faces?.abandon === undefined
       ? {}
       : { abandonRemote: (issueIds: readonly string[]) => options.faces!.abandon!(issueIds) }),
@@ -1010,6 +1044,10 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
       thread,
       deliverer,
       cursor: pullCursor,
+      onIngested: async anchorId => {
+        projection.invalidate(anchorId)
+        coordinator.wake('ingested')
+      },
       enabled: () => remoteEnabled && settings.get().commentsEnabled !== false,
       canPoll: () => lease.isOwner(),
       now: clock,
@@ -1373,6 +1411,7 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     execution,
     acceptance,
     interactions,
+    interactionProjection: projection,
     workspaces,
     routes,
     now: clock,
@@ -1462,6 +1501,9 @@ export function toolDepsFor(runtime: CastboardRuntime): CastboardToolDeps {
     issues: runtime.issues,
     comments: runtime.comments,
     links: runtime.links,
+    interactionProjection: runtime.interactionProjection,
+    interactions: runtime.interactions,
+    interactionEnabled: () => commentsEnabled(runtime.settings.get()),
     resolveWorkspace: runtime.resolveWorkspaceForTools,
     upstreamComments: runtime.upstreamComments,
     ...(runtime.remoteIssue === undefined ? {} : { remoteIssue: runtime.remoteIssue }),
@@ -1784,6 +1826,17 @@ function createInteractionFace(host?: unknown): InteractionFace {
           ...(custom === '' || selected.includes(custom) ? {} : { custom }),
         }
       })
+      const result = bridge.answerQuestion?.(input.sessionId, input.id, { answers })
+      if (result === undefined) throw new Error('spellbook 未提供 answerQuestion')
+      if (result !== 'answered') throw new Error(`提问应答失败：${result}`)
+    },
+    answerQuestionFull: async input => {
+      const bridge = await bridgeOf('交互应答不可用（缺 spellbook）')
+      const answers = input.answers.map(item => ({
+        id: item.questionId,
+        selected: [...(item.selected ?? [])],
+        ...(item.custom === undefined || item.custom === '' ? {} : { custom: item.custom }),
+      }))
       const result = bridge.answerQuestion?.(input.sessionId, input.id, { answers })
       if (result === undefined) throw new Error('spellbook 未提供 answerQuestion')
       if (result !== 'answered') throw new Error(`提问应答失败：${result}`)

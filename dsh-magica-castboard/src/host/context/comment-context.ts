@@ -14,6 +14,7 @@
  * @module dsh-magica-castboard/host/context/comment-context
  */
 import type { ThreadComment } from '../model.ts'
+import { interactionLinesForComment } from './interaction-context.ts'
 import { escapeXml, escapeXmlAttr } from './xml-escape.ts'
 
 export type CommentReplySide = 'assigner' | 'assignee'
@@ -56,6 +57,11 @@ export function commentsXml(
     `  <reply role="${side}">Reply with castboard_comment (capability="add"); this issue_id is the comment target.</reply>`,
   ]
   for (const comment of comments) {
+    const interaction = interactionLinesForComment(comment, anchorId, side, '  ')
+    if (interaction !== undefined) {
+      lines.push(...interaction)
+      continue
+    }
     const attrs = [
       ...(comment.role === null ? [] : [`role="${comment.role}"`]),
       `by="${comment.authorType}"`,

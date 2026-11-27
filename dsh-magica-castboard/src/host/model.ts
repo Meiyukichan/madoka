@@ -87,6 +87,8 @@ export type BoardSettings = {
   /** Turning this off only stops receiving; local comments are still written and uploaded. */
   commentsEnabled?: boolean
   commentPollMs?: number
+  /** Report task-session interactions as issue control comments. */
+  interactionReportEnabled?: boolean
 }
 
 export const MIN_MAX_CONCURRENT = 1

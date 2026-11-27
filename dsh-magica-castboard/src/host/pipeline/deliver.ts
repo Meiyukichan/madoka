@@ -36,6 +36,7 @@ import { ISSUE_COMMENTS_SECTION } from '../context/sections.ts'
 import { ASSIGNER_WAKE_INSTRUCTION, WAKE_INSTRUCTION } from '../context/comment-instruction.ts'
 import type { CommentOrigin, ThreadComment } from '../ledger/comment-store.ts'
 import { isIssueAnchor, type LinkStore } from '../ledger/link-store.ts'
+import { isInteractionDeliverable } from './interaction-delivery.ts'
 import {
   COMMENT_SIDES,
   oppositeSide,
@@ -163,9 +164,11 @@ export class CommentDeliverer {
     comments: readonly ThreadComment[],
     options: DeliverOptions = {},
   ): Promise<void> {
-    // System messages are a trace only and take no delivery tier.
-    const human = comments.filter(comment => comment.authorType !== 'system')
-    if (human.length === 0) return
+    // System messages are traces only, except interaction control comments, which
+    // `isInteractionDeliverable` lets through the narrow gate.
+    const deliverable = comments.filter(comment =>
+      comment.authorType !== 'system' || isInteractionDeliverable(comment, anchorId))
+    if (deliverable.length === 0) return
 
     const link = this.deps.links.get(anchorId)
     if (link === undefined) {
@@ -175,10 +178,10 @@ export class CommentDeliverer {
 
     // A batch comes from one write and has one direction; polling may bucket both ends together for an issue, in which
     // case the direction follows the newest comment (matching the batch semantics the deliverer receives).
-    const latest = human[human.length - 1]!
+    const latest = deliverable[deliverable.length - 1]!
     const side = oppositeSide(latest.role)
     const sessionId = targetSessionId(link, latest.role)
-    const since = earliest(human)
+    const since = earliest(deliverable)
     if (sessionId === undefined) {
       // The relation exists but the target column is not written yet (an execution session returns its id only after start()).
       // This batch must not be lost: record the debt and let redelivery send it once that side's session is registered.
@@ -193,7 +196,7 @@ export class CommentDeliverer {
     }
 
     // Echo guard: the session that wrote the comment already has it, so do not deliver it back.
-    const foreign = human.filter(comment => comment.threadId !== sessionId)
+    const foreign = deliverable.filter(comment => comment.threadId !== sessionId)
     if (foreign.length === 0) {
       this.log('info', 'deliver.self-skip', { anchorId, sessionId })
       return
@@ -238,14 +241,17 @@ export class CommentDeliverer {
           this.log('warn', 'deliver.retry-read-failed', { anchorId, error: errorText(error) })
           continue
         }
-        // Redeliver only comments headed to this side and still inside the owed range; system messages and echoes are excluded.
+        // Redeliver only comments headed to this side and still inside the owed range; ordinary
+        // system messages and echoes are excluded, interaction control comments are allowed.
         const covered = this.deps.coveredUntil?.(anchorId) ?? 0
-        const pending = unique(all.filter(comment =>
-          comment.authorType !== 'system'
-          && targetsSide(comment, side)
-          && comment.createdAt >= since
-          && (covered === 0 || comment.createdAt > covered)
-          && comment.threadId !== sessionId))
+        const pending = unique(all.filter(comment => {
+          const interaction = isInteractionDeliverable(comment, anchorId)
+          return (comment.authorType !== 'system' || interaction)
+            && targetsSide(comment, side)
+            && comment.createdAt >= since
+            && (covered === 0 || interaction || comment.createdAt > covered)
+            && comment.threadId !== sessionId
+        }))
         this.noteAttempt(anchorId, side)
         if (pending.length === 0) {
           // Nothing left to redeliver (comments cleaned up / timestamp stale) -> clear the debt instead of spinning every tick.
@@ -359,10 +365,12 @@ export class CommentDeliverer {
     comments: readonly ThreadComment[],
   ): Promise<boolean> {
     const uniqueBatch = unique(comments.filter(comment =>
-      comment.authorType !== 'system' && comment.threadId !== sessionId))
+      (comment.authorType !== 'system' || isInteractionDeliverable(comment, anchorId))
+      && comment.threadId !== sessionId))
     const covered = this.deps.coveredUntil?.(anchorId) ?? 0
     const batch = covered > 0
-      ? uniqueBatch.filter(comment => comment.createdAt > covered)
+      ? uniqueBatch.filter(comment =>
+        isInteractionDeliverable(comment, anchorId) || comment.createdAt > covered)
       : uniqueBatch
     if (batch.length === 0) {
       if (uniqueBatch.length > 0) {

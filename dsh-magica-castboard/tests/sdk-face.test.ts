@@ -282,6 +282,7 @@ test('只实现部分方法 → 其余记进 missing', async () => {
     'issueAttachmentList',
     'issueComments',
     'issueGet',
+    'issueList',
     'issues',
     'portrait',
     'projects',
@@ -479,4 +480,29 @@ test('类方法绑定：SDK 是 class 实例方法（用 this.transport），必
   assert.ok(faces.comments !== undefined)
   const page = await faces.comments!.listSince({ limit: 10 })
   assert.deepEqual(page.items, [])
+})
+
+test('issueList 面：拆响应信封并映射 issueId / updatedAt', async () => {
+  const client: CastboardClientLike = {
+    issue: {
+      list: async () => ({
+        ok: true,
+        data: {
+          items: [
+            { issueId: 'i-1', title: '需求', status: 'pending', assigner: 'a-1', updatedAt: '2026-01-02T03:04:05.000Z' },
+            { id: 'i-2', title: '采纳', status: 'success', assignee: 'a-1', urgency: 'urgent' },
+          ],
+        },
+      }),
+    },
+  }
+  const faces = await createSdkFaces({ instance: 'x', load: async () => ({ createCastboardClient: () => client }) })
+  const rows = await faces.issueList!({ pageNum: 1, pageSize: 200 })
+  assert.deepEqual(rows, [
+    {
+      issueId: 'i-1', title: '需求', status: 'pending', assigner: 'a-1',
+      updatedAt: Date.parse('2026-01-02T03:04:05.000Z'),
+    },
+    { issueId: 'i-2', title: '采纳', status: 'success', assignee: 'a-1', urgency: 'urgent' },
+  ])
 })

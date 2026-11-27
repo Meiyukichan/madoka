@@ -56,6 +56,8 @@ export const CASTBOARD_ISSUE_DESCRIPTION = [
   '- create: create 1..20 issues for other people / dsh instances.',
   '- state: read one issue record and its materialized attachments.',
   '- links: inspect the issue ↔ task ↔ session link and unread comment state.',
+  '- interactions: list open (or recent closed) approvals / questions for an issue.',
+  '- answer_interaction: answer a pending approval / question.',
   '- convert: turn one accepted/routing issue into a task.',
 ].join('\n')
 
@@ -65,7 +67,7 @@ export const CASTBOARD_TEAMWORK_DESCRIPTION = [
   'Capabilities:',
   '- groups: list the projects/groups the current user belongs to.',
   '- group_members: list permission-filtered members of one project.',
-  "- devices: list one account's online dsh devices.",
+  "- devices: list one account's online dsh devices. Pass userId (or account); omit only for the local user.",
   '- workspaces: read project indexes or one workspace portrait.',
 ].join('\n')
 
@@ -197,6 +199,35 @@ export const CASTBOARD_ISSUE_SCHEMA = tool([
     taskId: string("Task id; resolved through the task's issueId."),
     sessionId: string('Session id; scans both session columns.'),
   }),
+  branch('interactions', 'List open and recent interactions for one issue.', {
+    issueId: string('Issue UUID.'),
+    includeClosed: boolean('Include completed interactions. Default false.'),
+    limit: integer('Max recent interactions to return, 1..100. Default 20.'),
+  }, ['issueId']),
+  branch('answer_interaction', 'Answer a pending approval or question.', {
+    issueId: string('Issue UUID.'),
+    interactionId: string('Interaction id from the injected <interaction>.'),
+    decision: {
+      type: 'string',
+      enum: ['allowed-once', 'rejected'],
+      description: 'Approval only.',
+    },
+    answers: {
+      type: 'array',
+      description: 'Question answers; one per question id.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          questionId: string('Question id.'),
+          selected: stringArray('Selected option labels.', 'Option label.'),
+          custom: string('Free-text answer.'),
+        },
+        required: ['questionId'],
+      },
+    },
+    note: string('Optional note for approval.'),
+  }, ['issueId', 'interactionId']),
   branch('convert', 'Convert one accepted or routing issue into a task.', {
     issueId: string('Issue UUID; must be accepted or routing.'),
     title: string('Task title; keep it identical to the issue title.'),
@@ -263,6 +294,7 @@ export const CASTBOARD_TEAMWORK_SCHEMA = tool([
   }, ['projectId']),
   branch('devices', "List one account's online dsh devices.", {
     userId: string('Account whose devices to list; omit for the local user.'),
+    account: string('Compatibility alias for userId.'),
   }),
   branch('workspaces', 'Read project indexes.', {
     type: { type: 'string', enum: ['index'], description: 'Read project indexes.' },

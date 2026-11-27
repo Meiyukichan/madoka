@@ -14,14 +14,20 @@
 import { IconChecklistOutlineRegular, IconTrashOutlineRegular, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useRef, useState } from 'react'
 
-import type { BoardSettings } from '../../../shared/wire.ts'
+import type { BoardSettings, ThreadComment } from '../../../shared/wire.ts'
 import { ActionButton, Dropdown, Sheet, Tip } from '../../kit/index.ts'
 import type { AcceptanceEntry, DispatchedRow, IssueTargets, RouterStrategyEntry, WorkspaceNoteEntry } from '../../data/index.ts'
 import type { BoardStore } from '../../data/state/index.ts'
 import type { Translate } from '../../labels/index.ts'
 import { stampTime, templateName } from '../../data/derive/index.ts'
+import { controlCommentText } from '../interactions/control-comment.ts'
 
 // ─── 我派出去的 ──────────────────────────────────────────────────────
+
+type DiscussionComment = Pick<ThreadComment, 'id' | 'body' | 'createdAt' | 'role'> & {
+  /** Local optimistic rows use `user`; server rows use `human`/`agent`/`system`. */
+  authorType?: string
+}
 
 /** 已派发（本机有卡的 issue 关联任务）。 */
 export function DispatchedSheet({ store, t }: { store: BoardStore; t: Translate }) {
@@ -29,7 +35,7 @@ export function DispatchedSheet({ store, t }: { store: BoardStore; t: Translate 
   const [truncated, setTruncated] = useState(false)
   const [offline, setOffline] = useState(false)
   const [open, setOpen] = useState<string | undefined>(undefined)
-  const [thread, setThread] = useState<readonly { id: string; body: string; createdAt: number; role: string }[] | undefined>(undefined)
+  const [thread, setThread] = useState<readonly DiscussionComment[] | undefined>(undefined)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const links = store.getSnapshot().issueLinks
@@ -50,7 +56,7 @@ export function DispatchedSheet({ store, t }: { store: BoardStore; t: Translate 
     let live = true
     setThread(undefined)
     void store.issueThread(anchor).then(comments => {
-      if (live) setThread(comments as unknown as { id: string; body: string; createdAt: number; role: string }[])
+      if (live) setThread(comments)
     }).catch(() => { if (live) setThread([]) })
     return () => { live = false }
   }, [open, store])
@@ -60,7 +66,7 @@ export function DispatchedSheet({ store, t }: { store: BoardStore; t: Translate 
     if (body === '' || busy) return
     setBusy(true)
     void store.commentIssue(issueId, body).then(comment => {
-      setThread(current => [...(current ?? []), { id: comment.id, body, createdAt: Date.now(), role: 'assigner' }])
+      setThread(current => [...(current ?? []), { id: comment.id, body, createdAt: Date.now(), role: 'assigner', authorType: 'user' }])
       setDraft('')
     }).finally(() => { setBusy(false) })
   }
@@ -87,15 +93,18 @@ export function DispatchedSheet({ store, t }: { store: BoardStore; t: Translate 
               <div className="lt-discussion">
                 {thread === undefined && <span className="lt-note">{t('dispatched.loading')}</span>}
                 {thread !== undefined && thread.length === 0 && <span className="lt-note">{t('issue.discussEmpty')}</span>}
-                {(thread ?? []).map(comment => (
-                  <div key={comment.id} className="lt-discussion-row" data-role={comment.role}>
-                    <div className="lt-discussion-head">
-                      <span className="lt-tag" data-tone={comment.role}>{comment.role === 'assignee' ? t('issue.byAssignee') : t('issue.byAssigner')}</span>
-                      <span className="lt-discussion-at">{stampTime(comment.createdAt)}</span>
+                {(thread ?? []).map(comment => {
+                  const control = controlCommentText(comment, t)
+                  return (
+                    <div key={comment.id} className="lt-discussion-row" data-role={comment.role}>
+                      <div className="lt-discussion-head">
+                        <span className="lt-tag" data-tone={comment.role}>{comment.role === 'assignee' ? t('issue.byAssignee') : t('issue.byAssigner')}</span>
+                        <span className="lt-discussion-at">{stampTime(comment.createdAt)}</span>
+                      </div>
+                      <div className="lt-discussion-body">{control ?? comment.body}</div>
                     </div>
-                    <div className="lt-discussion-body">{comment.body}</div>
-                  </div>
-                ))}
+                  )
+                })}
                 <div className="lt-row">
                   <Input className="lt-input" value={draft} placeholder={t('issue.discussPlaceholder')} maxLength={4000} onChange={event => { setDraft(event.target.value) }} onKeyDown={event => {
                     if (event.key !== 'Enter') return

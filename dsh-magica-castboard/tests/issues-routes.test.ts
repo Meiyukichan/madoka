@@ -120,6 +120,26 @@ test('GET /issues：列出本地镜像的待规划，可用 status 过滤', asyn
   assert.deepEqual((done.value as { items: Array<{ id: string }> }).items.map(item => item.id), [doneId])
 })
 
+test('GET /issues/mine：优先云端列表并按账号过滤，缺 face 回退本地', async (t) => {
+  const cloudDeps = makeDeps(tempRoot(t), {
+    auth: { status: () => ({ state: 'authenticated', accountId: 'me' }) } as never,
+    issueList: async () => [
+      { issueId: 'mine-1', title: '我创建的', status: 'pending', assigner: 'me', updatedAt: 10 },
+      { issueId: 'other-1', title: '别人的', status: 'pending', assigner: 'other', assignee: 'other' },
+    ],
+  })
+  const cloud = await call(issuesRoutes(cloudDeps), 'GET', '/issues/mine')
+  assert.deepEqual(cloud.value, {
+    items: [{ id: 'mine-1', title: '我创建的', status: 'pending', updatedAt: 10 }],
+  })
+
+  const localDeps = makeDeps(tempRoot(t))
+  const localId = await seedIssue(localDeps)
+  const local = await call(issuesRoutes(localDeps), 'GET', '/issues/mine')
+  const localItems = (local.value as { items: Array<{ id: string }> }).items
+  assert.deepEqual(localItems.map(item => item.id), [localId])
+})
+
 test('GET /issues/:id 与 /state：本地镜像详情、评论与 404', async (t) => {
   const deps = makeDeps(tempRoot(t))
   const routes = issuesRoutes(deps)

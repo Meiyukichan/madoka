@@ -8,6 +8,7 @@ import { castboardTools } from '../src/host/tools/task-tools.ts'
 import { buildIssueDispatchTools } from '../src/host/tools/issue-tools.ts'
 import { issueTaskTools } from '../src/host/tools/issue-task.ts'
 import { issueCommentTools } from '../src/host/tools/issue-comment.ts'
+import { buildTools } from '../src/host/tools/index.ts'
 import { TaskStore } from '../src/host/ledger/task-store.ts'
 import { IssueStore } from '../src/host/ledger/issue-store.ts'
 import { LinkStore } from '../src/host/ledger/link-store.ts'
@@ -129,6 +130,76 @@ test('工具注册：任务 10 个、issue 8 个、转换 1 个、评论 1 个�
     tasks: rootless.tasks,
     thread: rootless.thread,
   })[0]?.name, 'castboard_issue_comment_add')
+})
+
+test('castboard_issue_devices：省略 userId 查本机，account 是兼容别名', async (t) => {
+  const kit = fixture(tempRoot(t))
+  const calls: string[] = []
+  const tool = byName(buildIssueDispatchTools({
+    tasks: kit.tasks,
+    issues: kit.issues,
+    comments: kit.comments,
+    thread: kit.thread,
+    now: () => 1_000,
+    instance: () => '127.0.0.1:3080',
+    query: {
+      groups: async () => [],
+      groupMembers: async () => [],
+      devices: async userId => {
+        calls.push(userId)
+        return [{ id: '127.0.0.1:3080', label: '127.0.0.1:3080' }]
+      },
+      workspaces: async () => [],
+    },
+  }), 'castboard_issue_devices')
+
+  const local = await tool.execute({}, execContext()) as {
+    ok: boolean
+    userId?: string
+    instances: readonly unknown[]
+  }
+  assert.equal(calls[0], '')
+  assert.equal(local.ok, true)
+  assert.equal(local.userId, undefined)
+  assert.equal(local.instances.length, 1)
+
+  const alias = await tool.execute({ account: 'yukino' }, execContext()) as {
+    ok: boolean
+    userId?: string
+  }
+  assert.equal(calls[1], 'yukino')
+  assert.equal(alias.userId, 'yukino')
+})
+
+test('工具注册：有 interaction deps 时 castboard_issue 注册 interactions 能力', async (t) => {
+  const kit = fixture(tempRoot(t))
+  const tools = buildTools({
+    store: kit.tasks,
+    workspaces: workspaces(),
+    thread: kit.thread,
+    issues: kit.issues,
+    comments: kit.comments,
+    links: kit.links,
+    now: () => 1_000,
+    resolveWorkspace: async () => undefined,
+    interactionProjection: {
+      of: async () => [],
+      invalidate: () => {},
+    },
+    interactions: {
+      list: () => [],
+      answerRemote: async () => false,
+    },
+  })
+  const issue = byName(tools, 'castboard_issue')
+  const result = await issue.execute({
+    capability: 'interactions',
+    issueId: '11111111-1111-4111-8111-111111111111',
+  }, execContext())
+  assert.deepEqual(result, {
+    issueId: '11111111-1111-4111-8111-111111111111',
+    interactions: [],
+  })
 })
 
 test('castboard_create：校验项目、清单与来源 issue', async (t) => {

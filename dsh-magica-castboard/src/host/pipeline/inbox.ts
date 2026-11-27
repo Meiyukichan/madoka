@@ -88,6 +88,13 @@ export interface IssueCommentInboxDeps {
   readonly thread: CommentIngestFace
   readonly deliverer: CommentDelivererFace
   readonly cursor: CommentCursorFace
+  /**
+   * Wake the interaction coordinator after new rows are persisted.
+   *
+   * Correctness still comes from the coordinator's reconcile pass; this only removes the
+   * extra polling delay for a remote `answered` comment.
+   */
+  readonly onIngested?: (anchorId: string, added: readonly ThreadComment[]) => Promise<void>
   /** Channel switch (board setting `commentsEnabled`); enabled by default. */
   readonly enabled?: () => boolean
   /**
@@ -214,6 +221,7 @@ export class IssueCommentInbox {
     const ingested = await this.ingestByAnchor(fresh)
     // Any anchor failing to persist means the cursor does not advance; the next tick re-pulls and successful anchors deduplicate by id.
     if (!ingested.failed) this.deps.cursor.advance(page.nextSinceId)
+    await this.notifyIngested(ingested.added)
     const delivered = await this.deliverByAnchor(ingested.added)
 
     const result: InboxTickResult = {
@@ -326,6 +334,25 @@ export class IssueCommentInbox {
       }
     }
     return delivered
+  }
+
+  /**
+   * Notify the coordinator after persistence, before delivery.
+   *
+   * Failures only log: the comments are already stored, and the coordinator's safety tick
+   * still reconciles them.
+   */
+  private async notifyIngested(added: ReadonlyMap<string, ThreadComment[]>): Promise<void> {
+    const hook = this.deps.onIngested
+    if (hook === undefined) return
+    for (const [anchorId, rows] of added) {
+      if (rows.length === 0) continue
+      try {
+        await hook(anchorId, rows)
+      } catch (error) {
+        this.log('warn', 'inbox.on-ingested-failed', { anchorId, error: errorText(error) })
+      }
+    }
   }
 
   private fail(event: string, error: unknown): void {

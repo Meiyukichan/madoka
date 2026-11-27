@@ -17,6 +17,7 @@ import type { BoardStore } from '../../data/state/index.ts'
 import { ActionButton, MarkdownBody, Sheet } from '../../kit/index.ts'
 import type { Translate } from '../../labels/index.ts'
 import { OUTCOME_LABEL, TRIGGER_LABEL, durationText, shortSession, stampTime } from '../../data/derive/index.ts'
+import { controlCommentText } from '../interactions/control-comment.ts'
 
 /** 一个带图标的小信息块。 */
 export function Chip({ icon, children, tone, title }: { icon?: ReactNode; children: ReactNode; tone?: string; title?: string }) {
@@ -162,9 +163,14 @@ function IssueStateSheet({ id, store, t, onClose }: { id: string; store: BoardSt
             <div className="lt-card-block">
               <div className="lt-block-label">{t('detail.issueStateComments')}<span className="lt-block-meta">{state.value.comments?.length ?? 0}</span></div>
               <div className="lt-checklist">
-                {(state.value.comments ?? []).map(comment => (
-                  <div className="lt-checklist-item" key={comment.id} data-done="true"><span className="lt-checklist-text">{comment.body}</span></div>
-                ))}
+                {(state.value.comments ?? []).map(comment => {
+                  const control = controlCommentText(comment, t)
+                  return (
+                    <div className="lt-checklist-item" key={comment.id} data-done="true">
+                      <span className="lt-checklist-text">{control ?? comment.body}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -175,6 +181,17 @@ function IssueStateSheet({ id, store, t, onClose }: { id: string; store: BoardSt
 }
 
 export function CommentBubble({ comment, t }: { comment: ThreadComment; t: Translate }) {
+  const control = controlCommentText(comment, t)
+  if (control !== undefined) {
+    return (
+      <div className="lt-bubble" data-from="system">
+        <div className="lt-bubble-main">
+          <div className="lt-bubble-meta"><b>castboard</b><span>{stampTime(comment.createdAt)}</span></div>
+          <div className="lt-bubble-body">{control}</div>
+        </div>
+      </div>
+    )
+  }
   const byAgent = comment.authorType === 'agent'
   return (
     <div className="lt-bubble" data-from={byAgent ? 'agent' : 'user'}>

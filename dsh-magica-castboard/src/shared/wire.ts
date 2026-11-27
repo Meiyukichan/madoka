@@ -210,6 +210,7 @@ export interface BoardSettings {
   portraitRunOnStart: boolean
   commentsEnabled: boolean
   commentPollMs: number
+  interactionReportEnabled: boolean
 }
 
 /** 设置默认值（空设置对象 = 出厂默认）。 */
@@ -220,6 +221,7 @@ export const DEFAULT_SETTINGS: BoardSettings = {
   portraitRunOnStart: false,
   commentsEnabled: true,
   commentPollMs: 5000,
+  interactionReportEnabled: true,
 }
 
 /** 设置取值范围（越界 400，不钳制）。 */

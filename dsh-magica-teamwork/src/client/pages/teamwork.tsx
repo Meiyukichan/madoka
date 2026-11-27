@@ -173,7 +173,7 @@ export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
       const [myProjects, projects, issues, devices, auth] = await Promise.all([
         request<TeamworkProject[]>(base, '/projects/mine').catch(() => []),
         request<{ items?: TeamworkProject[] }>(base, '/projects?pageNum=1&pageSize=100').catch(() => ({ items: [] })),
-        request<{ items?: TeamworkIssueRow[] }>(base, '/issues').catch(() => ({ items: [] })),
+        request<{ items?: TeamworkIssueRow[] }>(base, '/issues/mine').catch(() => ({ items: [] })),
         request<{ items?: TeamworkDevice[] }>(base, '/devices/mine').catch(() => ({ items: [] })),
         request<{ globalRole?: string; accountId?: string }>(base, '/auth').catch(() => undefined),
       ])
@@ -397,7 +397,8 @@ export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
   const openIssue = async (issue: TeamworkIssueRow): Promise<void> => {
     setIssueDetail(issue)
     try {
-      const detail = await request<Record<string, unknown>>(base, `/issues/${encodeURIComponent(issue.id)}`)
+      const state = await request<{ issue?: Record<string, unknown> }>(base, `/issues/${encodeURIComponent(issue.id)}/state`)
+      const detail = state.issue ?? {}
       const meta = typeof detail['assignerMeta'] === 'string'
         ? (() => { try { return JSON.parse(detail['assignerMeta']) as Record<string, unknown> } catch { return undefined } })()
         : undefined

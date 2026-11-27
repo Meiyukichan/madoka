@@ -11,6 +11,7 @@ import { normalizeIssueSource } from '../../shared/wire.ts'
 import type { TaskRecord, ThreadComment } from '../model.ts'
 import { effectivePrompt } from '../ledger/task-derive.ts'
 import { TASK_CONTEXT_SECTION, TASK_PROTOCOL_SECTION } from './sections.ts'
+import { interactionLinesForComment } from './interaction-context.ts'
 import { escapeXml, escapeXmlAttr } from './xml-escape.ts'
 import { commentAttachmentLines, type CommentAttachmentRef } from './comment-context.ts'
 
@@ -174,6 +175,11 @@ export function castboardTaskContext(
   if (comments.length > 0) {
     lines.push(`<comments count="${comments.length}">`)
     for (const comment of comments) {
+      const interaction = interactionLinesForComment(comment, task.issueId ?? task.id, 'assignee', '  ')
+      if (interaction !== undefined) {
+        lines.push(...interaction)
+        continue
+      }
       // `authorType` is the source of truth; `threadId` is delivery bookkeeping, not context.
       const by = comment.authorType
       // Dispatcher vs executor changes what the same sentence means; rows written

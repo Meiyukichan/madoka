@@ -1,6 +1,6 @@
 # Castboard 交互事件上报、跨机同步与应答 —— 实施计划
 
-> 状态：**设计稿，部分实现**。第一刀已落：spellbook `magica/interaction-changed` 事件 + castboard `InteractionCoordinator` 骨架（事件唤醒 + 安全拍）。协议 / projection / 上报 / 应答仍待实现。
+> 状态：**已实现 v1**。协议 / projection / 渲染 / addControl / 投递窄口子 / Coordinator reporter / bridge / full answers / 工具 / 设置 / 客户端摘要均已落地；`commentsEnabled=false` 同时停 reporter/bridge/tool answer；castboard 测试 **342/342** 通过，typecheck 与 build 通过。
 > 协议 v1 已定：控制评论的 body 是**纯 JSON**，不再使用 marker 包裹。
 > 范围：`dsh-magica-castboard` 的 issue / task / comment / interaction 链路。
 > 不涉及：0.1.2 的 `dsh-magica-index`、`dsh-magica-im`、magica 兼容、云端新增表。
@@ -1228,10 +1228,8 @@ for (const item of items) {
 ```ts
 for (const [interactionId, previous] of known) {
   if (current.has(interactionId)) continue
-  // seeded = 重启恢复；没有本地 apply 证据，不能谎报 answered
-  const outcome = previous.seeded
-    ? 'expired'
-    : outcomeOf(interactionId) ?? projectionOutcome(previous) ?? 'unknown'
+  // 本地 apply 证据优先；seeded 只表示“本进程没有证据”。
+  const outcome = outcomeOf(interactionId) ?? (previous.seeded ? 'expired' : 'unknown')
   const event = buildCompletedEvent(previous, outcome)
   await thread.addControl(previous.issueId, {
     id: interactionCommentId(event),
@@ -1245,10 +1243,10 @@ for (const [interactionId, previous] of known) {
 }
 ```
 
-- `outcomeOf` 来自 `InteractionService`（同一进程内的 answer/cancel）；
-- `projectionOutcome` 从评论流里的 `answered` / `completed` 取；
-- `seeded` 的条目来自重启恢复：projection 里的 `answered` 只能证明“有人答过”，不能证明 source host 已经 apply；重启后统一按 `expired` 收口，避免谎报；
-- 拿不到 outcome 的普通条目写 `unknown`；
+- `outcomeOf` 来自 `InteractionService`（同一进程内的 answer/cancel/answerRemote）；
+- `seeded` 的条目来自重启恢复：没有本地 apply 证据时按 `expired` 收口，避免谎报；
+- 如果同一进程内已经 apply（`outcomeOf` 有值），即使 known 是 seeded，也写真实 outcome；
+- 拿不到 outcome 且不是 seeded 的普通条目写 `unknown`；
 - 写成功（或 id 已存在）才删除 `known`。
 
 ### 9.7 重启
@@ -1618,7 +1616,7 @@ if (source.interactionReportEnabled !== undefined) {
 | 关闭 | 不再上报新交互；已上报的继续正常 completed |
 | 重新开启 | 下一拍扫描当前 pending，未上报过的补 requested |
 
-`commentsEnabled` 与 `interactionReportEnabled` 的关系：**待拍板**。建议 reporter 也受 `commentsEnabled` 约束，避免“request 写得出去、answer 回不来”的黑洞；如果产品希望解耦，则只在 UI 里提示。
+`commentsEnabled` 与 `interactionReportEnabled` 的关系：**已定**。`commentsEnabled=false` 时，跨机交互的写路径全部停：reporter 不写 requested/completed，bridge 不 apply 远端 answer，`answer_interaction` 工具拒绝应答；已上报的 `known` 保留，重新打开后补 requested/completed。面板的本地应答不经过评论通道，不受影响。这样避免“request 写得出去、answer 回不来”的黑洞。
 
 ---
 
@@ -1805,7 +1803,7 @@ if (source.interactionReportEnabled !== undefined) {
 ## 16. 待拍板
 
 1. `interactionReportEnabled` 默认开还是关？建议 **开**。
-2. `commentsEnabled=false` 时 reporter 是否也停？建议 **停**，避免只写不收。
+2. `commentsEnabled=false` 时 reporter 是否也停？**已定：停**；bridge 与 `answer_interaction` 工具同样停，避免只写不收。
 3. 关闭开关时，已上报 pending 是继续正常 completed，还是发 `completed(reporting_disabled)`？建议 **继续正常 completed**。
 4. 子代理会话的交互是否上报？当前按“不扩散”**不报**。
 5. 多题回答是否必须全部作答？建议工具侧 **强制全答**。

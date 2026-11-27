@@ -14,6 +14,12 @@ import { CommentStore } from '../src/host/ledger/comment-store.ts'
 import { PublishCursorStore } from '../src/host/ledger/cursors.ts'
 import { ThreadService } from '../src/host/pipeline/thread.ts'
 import type { ThreadComment } from '../src/host/model.ts'
+import {
+  INTERACTION_SCHEMA,
+  encodeInteraction,
+  type AnsweredQuestionEvent,
+  type RequestedQuestionEvent,
+} from '../src/shared/interaction-protocol.ts'
 import { tempRoot, threadComment } from './helpers.ts'
 
 const ISSUE = '11111111-1111-4111-8111-111111111111'
@@ -625,5 +631,105 @@ test('附件：投递前等待远端评论附件同步，本地评论不重复�
 
   assert.deepEqual(synced, ['c-remote'])
   assert.deepEqual(events, ['sync:c-remote', 'push'])
+  assert.equal(live.pushed.length, 1)
+})
+
+const interactionRequest: RequestedQuestionEvent = {
+  schema: INTERACTION_SCHEMA,
+  event: 'requested',
+  interactionId: 'i-1',
+  issueId: ISSUE,
+  sessionId: 'executor',
+  kind: 'question',
+  at: 1_730_000_000_000,
+  instance: '127.0.0.1:3080',
+  request: { questions: [{ id: 'q-1', question: '选哪个？' }] },
+}
+
+function interactionComment(
+  event: RequestedQuestionEvent | AnsweredQuestionEvent,
+  overrides: Partial<ThreadComment> = {},
+): ThreadComment {
+  return threadComment({
+    id: overrides.id ?? `c-${event.interactionId}`,
+    body: encodeInteraction(event),
+    role: event.event === 'answered' ? 'assigner' : 'assignee',
+    authorType: 'system',
+    threadId: event.sessionId,
+    createdAt: event.at,
+    ...overrides,
+  })
+}
+
+test('交互投递：requested 走窄口子注入 dispatcher，普通 system 仍跳过', async (t) => {
+  const root = tempRoot(t)
+  const links = new LinkStore({ dir: root })
+  await links.patch(ISSUE, { assignerSessionId: 'dispatcher', assigneeSessionId: 'executor' })
+  const live = liveSession(true)
+  const deliverer = new CommentDeliverer({
+    links,
+    liveSession: () => live.live,
+    mergeWindowMs: 0,
+  })
+
+  await deliverer.deliver('remote', ISSUE, [interactionComment(interactionRequest)])
+  assert.equal(live.pushed.length, 1)
+  const text = live.pushed[0]?.[0]?.text ?? ''
+  assert.ok(text.includes('<interaction id="i-1" kind="question" status="pending"'))
+  assert.ok(!text.includes('"schema"'))
+
+  await deliverer.deliver('remote', ISSUE, [
+    threadComment({ id: 'c-trace', body: 'execution failed', role: 'assignee', authorType: 'system' }),
+  ])
+  assert.equal(live.pushed.length, 1, '普通 system trace 不投递')
+})
+
+test('交互投递：answered 不注入，malformed 控制评论按文本注入', async (t) => {
+  const root = tempRoot(t)
+  const links = new LinkStore({ dir: root })
+  await links.patch(ISSUE, { assignerSessionId: 'dispatcher', assigneeSessionId: 'executor' })
+  const live = liveSession(true)
+  const deliverer = new CommentDeliverer({
+    links,
+    liveSession: () => live.live,
+    mergeWindowMs: 0,
+  })
+
+  const answered: AnsweredQuestionEvent = {
+    ...interactionRequest,
+    event: 'answered',
+    at: interactionRequest.at + 1,
+    by: { role: 'assigner', sessionId: 'dispatcher' },
+    answer: { answers: [{ questionId: 'q-1', selected: ['a'] }] },
+  }
+  await deliverer.deliver('remote', ISSUE, [interactionComment(answered)])
+  assert.equal(live.pushed.length, 0, 'answered 是传输层，不注入执行会话')
+
+  await deliverer.deliver('remote', ISSUE, [
+    threadComment({
+      id: 'c-broken',
+      body: '{"schema":"castboard.interaction/v1",',
+      role: 'assignee',
+      authorType: 'system',
+      threadId: 'executor',
+    }),
+  ])
+  assert.equal(live.pushed.length, 1)
+  assert.ok((live.pushed[0]?.[0]?.text ?? '').includes('{"schema":"castboard.interaction/v1",'))
+})
+
+test('交互投递：coveredUntil 不吞 requested', async (t) => {
+  const root = tempRoot(t)
+  const links = new LinkStore({ dir: root })
+  await links.patch(ISSUE, { assignerSessionId: 'dispatcher', assigneeSessionId: 'executor' })
+  const live = liveSession(true)
+  const deliverer = new CommentDeliverer({
+    links,
+    liveSession: () => live.live,
+    mergeWindowMs: 0,
+    coveredUntil: () => interactionRequest.at + 10_000,
+  })
+
+  await deliverer.deliver('remote', ISSUE, [interactionComment(interactionRequest)])
   assert.equal(live.pushed.length, 1)
 })

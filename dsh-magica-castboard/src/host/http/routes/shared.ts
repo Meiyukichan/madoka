@@ -156,6 +156,7 @@ export const ENDPOINTS: readonly string[] = [
   'POST /tasks/:id/archive-sessions',
   'POST /tasks/:id/delete',
   'GET /issues',
+  'GET /issues/mine',
   'GET /issues/dispatched',
   'POST /issues',
   'GET /issues/:id',

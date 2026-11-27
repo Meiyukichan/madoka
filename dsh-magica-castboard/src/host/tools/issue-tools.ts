@@ -798,15 +798,16 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
       async execute(args) {
         try {
           const raw = args as { userId?: unknown; account?: unknown }
-          const userId = optionalText(raw.userId, 'userId') ?? optionalText(raw.account, 'account')
-          if (userId === undefined) throw new Error('userId 必填（或传兼容别名 account）')
+          // Empty string is the SDK face's documented "query myself" value; the gateway
+          // schema and description both allow omitting the account.
+          const userId = optionalText(raw.userId, 'userId') ?? optionalText(raw.account, 'account') ?? ''
           const query = deps.query
           if (query === undefined) return json(degraded('共享库未接入（缺 SDK 查询面）'))
           const result = await queryOrDegrade(() => query.devices(userId))
           if (result.degraded) return json(degraded(result.reason))
           return json({
             ok: true,
-            userId,
+            ...(userId === '' ? {} : { userId }),
             localInstance: localInstance(deps),
             instances: result.value,
           })
@@ -984,6 +985,14 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
               : attachments.length === 0
                 ? '这条 issue 当前没有附件。'
                 : '附件已同步到本地，路径见 attachments。'
+          let interactions: readonly unknown[] | undefined
+          if (deps.interactionProjection !== undefined) {
+            try {
+              interactions = await deps.interactionProjection.of(issueId)
+            } catch (error) {
+              warn('issue-state-interactions-failed', `${issueId}: ${messageOf(error)}`)
+            }
+          }
           return json({
             ok: true,
             issueId,
@@ -994,6 +1003,7 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
             ...(link === undefined ? {} : { link }),
             mySide,
             attachments,
+            ...(interactions === undefined ? {} : { interactions }),
             ...(downloadedTo === undefined ? {} : { downloadedTo }),
             ...(downloadError === undefined ? {} : { downloadError }),
             ...(failed.length > 0 ? { failed } : {}),

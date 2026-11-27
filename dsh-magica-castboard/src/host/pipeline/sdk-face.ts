@@ -61,6 +61,7 @@ export interface CastboardClientLike {
   issueAttachmentAdd?: AnyFn
   issue?: {
     get?: AnyFn
+    list?: AnyFn
     workspaces?: { list?: AnyFn }
     attachments?: { add?: AnyFn; list?: AnyFn }
     attachment?: { add?: AnyFn; list?: AnyFn }
@@ -188,6 +189,16 @@ export interface IssueSourcesFace {
   isRegistered(code: string): Promise<boolean>
 }
 
+export interface SdkIssueSummary {
+  issueId: string
+  title: string
+  status: string
+  urgency?: string
+  assignee?: string
+  assigner?: string
+  updatedAt?: number
+}
+
 export interface SdkFaces {
   /** Data-plane reachability failure (remote domain down, DNS, timeout, invalid domain). */
   connectionIssue?: string
@@ -220,6 +231,14 @@ export interface SdkFaces {
   }) => Promise<void>
   /** Cloud record of one issue (used when local has none). */
   issueGet?: (id: string) => Promise<Record<string, unknown> | undefined>
+  /** Cloud issue list (teamwork project-management view). */
+  issueList?: (query: {
+    pageNum?: number
+    pageSize?: number
+    status?: string
+    projectId?: number
+    keyword?: string
+  }) => Promise<readonly SdkIssueSummary[]>
   /** Comments of one issue (ascending time). */
   issueComments?: (id: string) => Promise<readonly SdkIssueComment[]>
   /** Cloud attachment metadata for one target (`role` omitted = both roles). */
@@ -938,6 +957,36 @@ export async function createSdkFaces(options: {
     }
   } else {
     missing.push('issueGet')
+  }
+
+  if (typeof client.issue?.list === 'function') {
+    faces.issueList = async query => {
+      const page = await call<{ items?: readonly Record<string, unknown>[] } | undefined>(
+        client.issue?.list as AnyFn,
+        query,
+      )
+      const rows = Array.isArray(page) ? page : Array.isArray(page?.items) ? page.items : []
+      return rows.flatMap((row): SdkIssueSummary[] => {
+        const issueId = typeof row.issueId === 'string'
+          ? row.issueId
+          : typeof row.id === 'string' ? row.id : ''
+        if (issueId === '') return []
+        const updatedAt = typeof row.updatedAt === 'string'
+          ? Date.parse(row.updatedAt)
+          : typeof row.updatedAt === 'number' ? row.updatedAt : undefined
+        return [{
+          issueId,
+          title: String(row.title ?? ''),
+          status: String(row.status ?? ''),
+          ...(typeof row.urgency === 'string' ? { urgency: row.urgency } : {}),
+          ...(typeof row.assignee === 'string' ? { assignee: row.assignee } : {}),
+          ...(typeof row.assigner === 'string' ? { assigner: row.assigner } : {}),
+          ...(updatedAt !== undefined && Number.isFinite(updatedAt) ? { updatedAt } : {}),
+        }]
+      })
+    }
+  } else {
+    missing.push('issueList')
   }
 
   if (typeof client.castboardIssueComments === 'function') {

@@ -48,6 +48,11 @@ export interface CommentDraft {
   authorType?: ThreadCommentAuthorType
 }
 
+/** A control comment authored by castboard; `authorType` is always `system`. */
+export interface ControlCommentDraft extends Omit<CommentDraft, 'authorType'> {
+  readonly role: CommentSide
+}
+
 export interface ThreadServiceDeps {
   readonly links: LinkStore
   readonly comments: CommentStore
@@ -234,6 +239,28 @@ export class ThreadService {
       warn('system-comment-failed', `${anchorId}: ${reasonOf(error)}`)
       return undefined
     }
+  }
+
+  /**
+   * Write a control comment (`requested` / `answered` / `completed`).
+   *
+   * Unlike {@link addSystem}, the caller owns the direction (`assigner` for answers,
+   * `assignee` for requests/completions). Errors are not swallowed: the coordinator must
+   * see a failed write and retry it instead of recording the event as reported.
+   *
+   * @param anchorId - Issue anchor.
+   * @param draft - Body and direction; `authorType` is fixed to `system`.
+   * @returns The persisted row; `undefined` when the id already exists.
+   * @throws When the body is too large or persistence fails.
+   */
+  async addControl(
+    anchorId: string,
+    draft: ControlCommentDraft,
+  ): Promise<ThreadComment | undefined> {
+    if (draft.body.length > MAX_COMMENT_BODY) {
+      throw new Error(`control comment too large: ${draft.body.length}`)
+    }
+    return this.add(anchorId, { ...draft, authorType: 'system' })
   }
 
   /**

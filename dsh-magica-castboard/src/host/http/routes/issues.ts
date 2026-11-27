@@ -23,6 +23,7 @@ import {
 } from '../../ledger/issue-validate.ts'
 import { asPermission, asUrgency, normalizeBody } from '../../rules.ts'
 import { objectBody, queryValue, type RouteDeps } from './shared.ts'
+import type { SdkIssueSummary } from '../../pipeline/sdk-face.ts'
 
 export interface IssueRouteCapabilities {
   workspaces?: { get: (workspaceId: string) => unknown }
@@ -30,6 +31,13 @@ export interface IssueRouteCapabilities {
   issueBrief?: (issueId: string) => Promise<{ title?: string; status?: string; urgency?: string; assignee?: string } | undefined>
   createRemote?: (draft: CreateIssueBody) => Promise<{ issueId: string; assignee: string }>
   abandonRemote?: (issueIds: readonly string[]) => Promise<void>
+  issueList?: (query: {
+    pageNum?: number
+    pageSize?: number
+    status?: string
+    projectId?: number
+    keyword?: string
+  }) => Promise<readonly SdkIssueSummary[]>
   taskExists?: (taskId: string) => boolean
 }
 
@@ -169,6 +177,43 @@ export function issuesRoutes(deps: IssueRouteDeps): readonly Route[] {
       method: 'GET',
       path: '/issues/dispatched',
       handler: () => listDispatched(deps),
+    },
+
+    {
+      method: 'GET',
+      path: '/issues/mine',
+      handler: async () => {
+        const local = (): { items: Array<Record<string, unknown>> } => ({
+          items: deps.issues.pending().map(item => ({
+            id: item.id,
+            title: item.title,
+            status: item.status,
+            urgency: item.urgency,
+            updatedAt: item.updatedAt,
+          })),
+        })
+        if (deps.issueList === undefined) return local()
+        let rows: readonly SdkIssueSummary[]
+        try {
+          rows = await deps.issueList({ pageNum: 1, pageSize: 200 })
+        } catch (error) {
+          warn('issue-mine-list-failed', errorText(error))
+          return local()
+        }
+        const accountId = deps.auth?.status().accountId
+        return {
+          items: rows
+            .filter(row => accountId === undefined || row.assigner === accountId || row.assignee === accountId)
+            .map(row => ({
+              id: row.issueId,
+              title: row.title,
+              status: row.status,
+              ...(row.urgency === undefined ? {} : { urgency: row.urgency }),
+              ...(row.assignee === undefined ? {} : { assignee: row.assignee }),
+              ...(row.updatedAt === undefined ? {} : { updatedAt: row.updatedAt }),
+            })),
+        }
+      },
     },
 
     {

@@ -68,12 +68,14 @@ export function SettingsSheet({ store, t, lang }: { store: BoardStore; t: Transl
     portraitRunOnStart: false,
     commentsEnabled: true,
     commentPollMs: 5000,
+    interactionReportEnabled: true,
   }
   const [conc, setConc] = useState(String(settings.maxConcurrent))
   const [auto, setAuto] = useState(settings.autoRoute)
   const [portraitOnStart, setPortraitOnStart] = useState(settings.portraitRunOnStart)
   const [comments, setComments] = useState(settings.commentsEnabled)
   const [poll, setPoll] = useState(String(settings.commentPollMs))
+  const [report, setReport] = useState(settings.interactionReportEnabled ?? true)
   const [notes, setNotes] = useState<NoteRow[]>([])
   const [strategies, setStrategies] = useState<StrategyRow[]>([])
   const [accepts, setAccepts] = useState<AcceptRow[]>([])
@@ -96,7 +98,7 @@ export function SettingsSheet({ store, t, lang }: { store: BoardStore; t: Transl
   const pollValid = Number.isInteger(parsedPoll) && parsedPoll >= 1000 && parsedPoll <= 3_600_000
   const dupStrategy = duplicateTitles(strategies.map(row => ({ title: row.name })))
   const dupAccept = duplicateTitles(accepts.map(row => ({ title: row.title })))
-  const baseDirty = !concValid ? false : parsedConc !== settings.maxConcurrent || auto !== settings.autoRoute || portraitOnStart !== settings.portraitRunOnStart || comments !== settings.commentsEnabled || parsedPoll !== settings.commentPollMs
+  const baseDirty = !concValid ? false : parsedConc !== settings.maxConcurrent || auto !== settings.autoRoute || portraitOnStart !== settings.portraitRunOnStart || comments !== settings.commentsEnabled || parsedPoll !== settings.commentPollMs || report !== (settings.interactionReportEnabled ?? true)
   const notesDirty = state.workspaceNotes !== undefined && !sameRecord(
     Object.fromEntries(notes.filter(row => row.workspaceId !== '' && row.description.trim() !== '').map(row => [row.workspaceId, row.description.trim()])),
     Object.fromEntries((state.workspaceNotes ?? []).map(row => [row.workspaceId, row.description ?? ''])),
@@ -122,6 +124,7 @@ export function SettingsSheet({ store, t, lang }: { store: BoardStore; t: Transl
           portraitRunOnStart: portraitOnStart,
           commentsEnabled: comments,
           commentPollMs: parsedPoll,
+          interactionReportEnabled: report,
         }) && ok
       }
       if (notesDirty) {
@@ -218,6 +221,13 @@ export function SettingsSheet({ store, t, lang }: { store: BoardStore; t: Transl
                 {pollValid ? t('settings.commentsIntervalNote', { ms: String(parsedPoll) }) : t('settings.commentsIntervalInvalid', { min: '1000', max: '3600000' })}
               </span>
             </div>
+
+            <h4>{t('settings.interactionReportHeading')}</h4>
+            <label className="lt-toggle">
+              <input type="checkbox" checked={report} onChange={event => { setReport(event.target.checked) }} />
+              <span>{report ? t('settings.interactionReportOn') : t('settings.interactionReportOff')}</span>
+            </label>
+            <span className="lt-note">{t('settings.interactionReportHint')}</span>
           </section>
 
           <section className="lt-settings-section" hidden={tab !== 'workspaces'}>
