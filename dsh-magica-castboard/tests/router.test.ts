@@ -435,6 +435,39 @@ test('直通：先准备现场材料；依赖阻塞时同拍跳到下一条', as
   assert.equal((await issues.get(runnable.id))?.status, 'pending')
 })
 
+test('runtime issue 永远不进入 router（交给 RuntimeCommandWorker）', async (t) => {
+  const root = tempRoot(t)
+  const issues = new IssueStore({ dir: root })
+  const runtime = await createIssue(issues, { urgency: 'runtime', createdAt: 1 })
+  let opened = 0
+  const service = new IssueRouterService({
+    issues,
+    now: fixedNow,
+    timers: fakeTimers(),
+    log: () => {},
+    openSession: async () => { opened += 1; return fakeSession('session-1').face },
+  })
+  await service.tick()
+  assert.equal(opened, 0)
+  assert.equal((await issues.get(runtime.id))?.status, 'pending')
+})
+
+test('runtime issue 在 routing 时不被 router 复位（由 RuntimeCommandWorker 收尾）', async (t) => {
+  const root = tempRoot(t)
+  const issues = new IssueStore({ dir: root })
+  const runtime = await createIssue(issues, { urgency: 'runtime', createdAt: 1 })
+  await issues.update(runtime.id, draft => { draft.status = 'routing' })
+  const service = new IssueRouterService({
+    issues,
+    now: fixedNow,
+    timers: fakeTimers(),
+    log: () => {},
+    openSession: async () => fakeSession('session-1').face,
+  })
+  await service.tick()
+  assert.equal((await issues.get(runtime.id))?.status, 'routing')
+})
+
 test('自动规划关闭与租约主人闸门：一拍都不派', async (t) => {
   const root = tempRoot(t)
   const issues = new IssueStore({ dir: root })

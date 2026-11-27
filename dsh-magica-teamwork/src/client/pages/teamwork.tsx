@@ -56,12 +56,23 @@ export interface TeamworkIssueDetail extends TeamworkIssueRow {
   assignerMeta?: unknown
 }
 
+export interface TeamworkComment {
+  id: string
+  body: string
+  createdAt: number
+  role?: string | null
+  authorType?: string
+  author?: string
+}
+
 export interface TeamworkPanelProps {
   /** 宿主 locale 的翻译函数。 */
   t: (key: string, params?: Record<string, string | number>) => string
   lang?: 'zh' | 'en'
   /** API 前缀，默认与 castboard 客户端一致。 */
   apiBase?: string
+  /** 宿主的交互控制评论渲染器与稳定去重键；undefined 时按普通评论显示。 */
+  describeComment?: (comment: TeamworkComment) => { key: string; node: ReactNode } | undefined
 }
 
 interface PageData {
@@ -73,8 +84,6 @@ interface PageData {
 
 const PAGE_KEYS: readonly TeamworkPanelPage[] = ['my-projects', 'my-issues', 'my-devices', 'projects']
 
-const cell: React.CSSProperties = { padding: '8px 10px', borderBottom: '0.5px solid var(--dsw-alias-border-l2)', textAlign: 'left' }
-const headCell: React.CSSProperties = { ...cell, color: 'var(--dsw-alias-label-tertiary)', fontSize: 12, fontWeight: 500 }
 const cardStyle: React.CSSProperties = {
   display: 'grid',
   gap: 6,
@@ -116,6 +125,61 @@ function formatTime(value: string | number | undefined, lang: 'zh' | 'en'): stri
   const ms = typeof value === 'number' ? value : Date.parse(value)
   if (!Number.isFinite(ms)) return String(value)
   return new Date(ms).toLocaleString(lang === 'en' ? 'en-US' : 'zh-CN', { hour12: false })
+}
+
+function formatIssueWhen(value: string | number | undefined): string {
+  if (value === undefined || value === '') return '—'
+  const ms = typeof value === 'number' ? value : Date.parse(value)
+  if (!Number.isFinite(ms)) return String(value)
+  const date = new Date(ms)
+  const pad = (part: number): string => String(part).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function issueStatusTone(status: string): string {
+  if (status === 'success') return 'ok'
+  if (status === 'failed') return 'error'
+  if (status === 'running') return 'warn'
+  if (status === 'accepted') return 'info'
+  if (status === 'routing') return 'brand'
+  return 'muted'
+}
+
+function issueUrgencyTone(urgency: string): string {
+  if (urgency === 'urgent') return 'error'
+  if (urgency === 'direct') return 'warn'
+  if (urgency === 'runtime') return 'brand'
+  return 'muted'
+}
+
+function mergeComments(
+  describe: TeamworkPanelProps['describeComment'],
+  ...groups: readonly (readonly TeamworkComment[])[]
+): TeamworkComment[] {
+  const byKey = new Map<string, TeamworkComment>()
+  for (const group of groups) {
+    for (const comment of group) {
+      const key = describe?.(comment)?.key ?? `id:${comment.id}`
+      if (key !== '' && !byKey.has(key)) byKey.set(key, comment)
+    }
+  }
+  return [...byKey.values()].sort((left, right) => left.createdAt - right.createdAt)
+}
+
+function commentAuthorLabel(
+  comment: TeamworkComment,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  if (comment.authorType === 'system') return t('teamwork.issue.commentSystem')
+  if (comment.authorType === 'agent') {
+    if (comment.role === 'assignee') return t('issue.byAssignee')
+    if (comment.role === 'assigner') return t('issue.byAssigner')
+    return t('teamwork.issue.commentAgent')
+  }
+  if (comment.author !== undefined && comment.author.trim() !== '') return comment.author
+  if (comment.role === 'assignee') return t('issue.byAssignee')
+  if (comment.role === 'assigner') return t('issue.byAssigner')
+  return t('detail.comments.user')
 }
 
 export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
@@ -164,6 +228,9 @@ export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
   const [busy, setBusy] = useState(false)
   const [role, setRole] = useState<string | undefined>(undefined)
   const [issueDetail, setIssueDetail] = useState<TeamworkIssueDetail | undefined>(undefined)
+  const [issueComments, setIssueComments] = useState<TeamworkComment[]>([])
+  const [issueCommentDraft, setIssueCommentDraft] = useState('')
+  const [issueCommentBusy, setIssueCommentBusy] = useState(false)
 
   const notify = (text: string): void => { setToastText({ id: Date.now(), text }) }
 
@@ -396,8 +463,19 @@ export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
 
   const openIssue = async (issue: TeamworkIssueRow): Promise<void> => {
     setIssueDetail(issue)
+    setIssueComments([])
+    setIssueCommentDraft('')
     try {
-      const state = await request<{ issue?: Record<string, unknown> }>(base, `/issues/${encodeURIComponent(issue.id)}/state`)
+      const [state, cloud] = await Promise.all([
+        request<{ issue?: Record<string, unknown>; comments?: TeamworkComment[] }>(
+          base,
+          `/issues/${encodeURIComponent(issue.id)}/state`,
+        ),
+        request<{ comments?: TeamworkComment[] }>(
+          base,
+          `/issues/${encodeURIComponent(issue.id)}/cloud-comments`,
+        ).catch(() => ({ comments: [] })),
+      ])
       const detail = state.issue ?? {}
       const meta = typeof detail['assignerMeta'] === 'string'
         ? (() => { try { return JSON.parse(detail['assignerMeta']) as Record<string, unknown> } catch { return undefined } })()
@@ -412,7 +490,28 @@ export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
         ...(typeof detail['createdAt'] === 'string' ? { createdAt: detail['createdAt'] } : {}),
         ...(meta === undefined ? {} : { assignerMeta: meta }),
       })
+      setIssueComments(mergeComments(props.describeComment, state.comments ?? [], cloud.comments ?? []))
     } catch { /* row snapshot is enough */ }
+  }
+
+  const sendIssueComment = async (): Promise<void> => {
+    const target = issueDetail
+    const body = issueCommentDraft.trim()
+    if (target === undefined || body === '' || issueCommentBusy) return
+    setIssueCommentBusy(true)
+    try {
+      const added = await request<TeamworkComment>(
+        base,
+        `/issues/${encodeURIComponent(target.id)}/comment`,
+        { method: 'POST', body: JSON.stringify({ body }) },
+      )
+      setIssueComments(current => mergeComments(props.describeComment, current, [added]))
+      setIssueCommentDraft('')
+    } catch (cause) {
+      notify(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setIssueCommentBusy(false)
+    }
   }
 
   const createDevice = async (): Promise<void> => {
@@ -635,24 +734,40 @@ export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
             />
           </div>
           {issueItems.length === 0 ? <Empty text={props.t('teamwork.issues.empty')} /> : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead><tr><th style={headCell}>{props.t('teamwork.issue.title')}</th><th style={headCell}>{props.t('teamwork.issue.status')}</th><th style={headCell}>{props.t('teamwork.issue.assignee')}</th><th style={headCell}>{props.t('teamwork.issue.updated')}</th></tr></thead>
-                <tbody>
-                  {issueItems.map(issue => (
-                    <tr
-                      key={issue.id}
-                      onClick={() => { void openIssue(issue) }}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td style={cell}>{issue.title ?? issue.id.slice(0, 8)}</td>
-                      <td style={cell}>{statusLabel(issue.status)}</td>
-                      <td style={cell}>{issue.assignee ?? '—'}</td>
-                      <td style={cell}>{formatTime(issue.updatedAt, lang)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="dsh-atw-issue-list">
+              {issueItems.map(issue => (
+                <div
+                  className="dsh-atw-issue-row"
+                  key={issue.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { void openIssue(issue) }}
+                  onKeyDown={event => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    void openIssue(issue)
+                  }}
+                >
+                  <div className="dsh-atw-issue-main">
+                    <div className="dsh-atw-issue-title">{issue.title ?? issue.id.slice(0, 8)}</div>
+                    <div className="dsh-atw-issue-meta">
+                      <span>{issue.id.slice(0, 8)}</span>
+                      <span>·</span>
+                      <span>{formatIssueWhen(issue.updatedAt)}</span>
+                    </div>
+                  </div>
+                  <div className="dsh-atw-issue-chips">
+                    {issue.urgency === undefined ? null : (
+                      <span className="dsh-atw-issue-chip" data-tone={issueUrgencyTone(issue.urgency)}>
+                        {props.t(`urgency.${issue.urgency}`)}
+                      </span>
+                    )}
+                    <span className="dsh-atw-issue-chip" data-tone={issueStatusTone(issue.status)}>
+                      {statusLabel(issue.status)}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </>
@@ -1005,37 +1120,106 @@ export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
         </div>
       </Modal>
 
-      <Modal
-        open={issueDetail !== undefined}
-        onClose={() => { setIssueDetail(undefined) }}
-        title={issueDetail?.title ?? ''}
-        closeLabel={props.t('common.close')}
-        footer={<Button variant="primary" onClick={() => { setIssueDetail(undefined) }}>{props.t('common.close')}</Button>}
-      >
-        {issueDetail === undefined ? null : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <Tag tone={issueDetail.status === 'success' ? 'success' : issueDetail.status === 'failed' || issueDetail.status === 'abandoned' ? 'danger' : 'info'}>
-                {statusLabel(issueDetail.status)}
-              </Tag>
-              {issueDetail.urgency === undefined ? null : <Tag tone="warning">{issueDetail.urgency}</Tag>}
-              <Tag tone="neutral">{issueDetail.id.slice(0, 8)}</Tag>
+      {issueDetail !== undefined ? (
+        <div className="dsh-atw-drawer-backdrop" onClick={() => { setIssueDetail(undefined) }} />
+      ) : null}
+      {issueDetail !== undefined ? (
+        <aside
+          className="dsh-atw-drawer dsh-atw-issue-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label={issueDetail.title ?? issueDetail.id}
+        >
+          <header className="dsh-atw-drawer-head">
+            <div className="dsh-atw-drawer-title">
+              <h2>{issueDetail.title ?? issueDetail.id}</h2>
             </div>
-            <div className="dsh-atw-card" style={{ cursor: 'default', display: 'grid', gap: 6 }}>
-              <div><span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{props.t('teamwork.issue.assignee')}: </span>{issueDetail.assignee ?? '—'}</div>
-              <div><span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{props.t('teamwork.issue.updated')}: </span>{formatTime(issueDetail.updatedAt, lang)}</div>
-              {issueDetail.createdAt === undefined ? null : (
-                <div><span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{props.t('teamwork.issue.created')}: </span>{formatTime(issueDetail.createdAt, lang)}</div>
-              )}
-            </div>
-            {issueDetail.detail === undefined || issueDetail.detail === '' ? null : (
-              <div className="dsh-atw-card" style={{ cursor: 'default', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                {issueDetail.detail}
+            <Button variant="ghost" size="sm" aria-label={props.t('common.close')} onClick={() => { setIssueDetail(undefined) }}>
+              <IconCloseOutlineRegular size={16} />
+            </Button>
+          </header>
+
+          <div className="dsh-atw-drawer-body">
+            <section className="dsh-atw-drawer-section">
+              <div className="dsh-atw-issue-drawer-chips">
+                <span className="dsh-atw-issue-chip" data-tone={issueStatusTone(issueDetail.status)}>
+                  {statusLabel(issueDetail.status)}
+                </span>
+                {issueDetail.urgency === undefined ? null : (
+                  <span className="dsh-atw-issue-chip" data-tone={issueUrgencyTone(issueDetail.urgency)}>
+                    {props.t(`urgency.${issueDetail.urgency}`)}
+                  </span>
+                )}
+                <span className="dsh-atw-issue-chip" data-tone="muted">{issueDetail.id.slice(0, 8)}</span>
               </div>
-            )}
+              <div className="dsh-atw-kv"><span>{props.t('teamwork.issue.assignee')}</span><b>{issueDetail.assignee ?? '—'}</b></div>
+              <div className="dsh-atw-kv"><span>{props.t('teamwork.issue.updated')}</span><b>{formatTime(issueDetail.updatedAt, lang)}</b></div>
+              {issueDetail.createdAt === undefined ? null : (
+                <div className="dsh-atw-kv"><span>{props.t('teamwork.issue.created')}</span><b>{formatTime(issueDetail.createdAt, lang)}</b></div>
+              )}
+            </section>
+
+            <section className="dsh-atw-drawer-section">
+              <h3>{props.t('teamwork.issue.detail')}</h3>
+              <p className="dsh-atw-issue-drawer-text">
+                {issueDetail.detail === undefined || issueDetail.detail === ''
+                  ? props.t('teamwork.issue.noDetail')
+                  : issueDetail.detail}
+              </p>
+            </section>
+
+            <section className="dsh-atw-drawer-section">
+              <h3 className="dsh-atw-members-title">
+                {props.t('teamwork.issue.comments')}
+                <span>{issueComments.length}</span>
+              </h3>
+              {issueComments.length === 0 ? (
+                <div className="dsh-atw-drawer-text">{props.t('teamwork.issue.commentsEmpty')}</div>
+              ) : (
+                <div className="dsh-atw-issue-comments">
+                  {issueComments.map(comment => {
+                    const described = props.describeComment?.(comment)
+                    const author = commentAuthorLabel(comment, props.t)
+                    return (
+                      <div className="dsh-atw-issue-comment" data-system={described === undefined ? undefined : '1'} key={comment.id}>
+                        <div className="dsh-atw-issue-comment-meta">
+                          <b>{author}</b>
+                          <span>{formatTime(comment.createdAt, lang)}</span>
+                        </div>
+                        {described === undefined
+                          ? <div className="dsh-atw-issue-comment-body">{comment.body}</div>
+                          : <div className="dsh-atw-issue-comment-control">{described.node}</div>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="dsh-atw-issue-comment-box">
+                <textarea
+                  className="dsh-atw-issue-comment-input"
+                  value={issueCommentDraft}
+                  placeholder={props.t('teamwork.issue.commentPlaceholder')}
+                  aria-label={props.t('teamwork.issue.commentPlaceholder')}
+                  onChange={event => { setIssueCommentDraft(event.target.value) }}
+                  onKeyDown={event => {
+                    if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter') return
+                    event.preventDefault()
+                    void sendIssueComment()
+                  }}
+                />
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={issueCommentBusy || issueCommentDraft.trim() === ''}
+                  onClick={() => { void sendIssueComment() }}
+                >
+                  {props.t('teamwork.issue.commentSend')}
+                </Button>
+              </div>
+            </section>
           </div>
-        )}
-      </Modal>
+        </aside>
+      ) : null}
 
       <Modal
         open={deviceOpen}
@@ -1063,7 +1247,7 @@ export function TeamworkPanel(props: TeamworkPanelProps): ReactNode {
             <Input value={deviceOs} placeholder="windows / darwin / linux" onChange={event => { setDeviceOs(event.target.value) }} />
           </label>
           {deviceError === undefined ? null : (
-            <div role="alert" style={{ color: 'var(--dsw-alias-state-error)', fontSize: 12 }}>{deviceError}</div>
+            <div role="alert" style={{ color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>{deviceError}</div>
           )}
         </div>
       </Modal>

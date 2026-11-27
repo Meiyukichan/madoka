@@ -221,6 +221,29 @@ test('放弃与删除：先写云端再动本地镜像；已转任务的 issue �
   assert.deepEqual(abandonedRemotely.at(-1), [secondId])
 })
 
+test('GET /issues/:id/cloud-comments 与云 issue 评论直发', async (t) => {
+  const issueId = '11111111-1111-4111-8111-111111111111'
+  const published: unknown[] = []
+  const deps = makeDeps(tempRoot(t), {
+    issueComments: async () => [{
+      id: 'c-cloud', body: '云端评论', createdAt: 9, role: 'assigner', authorType: 'user',
+    }],
+    commentPublish: async input => { published.push(input) },
+  })
+  const routes = issuesRoutes(deps)
+  const listed = await call(routes, 'GET', `/issues/${issueId}/cloud-comments`)
+  assert.deepEqual(listed.value, {
+    comments: [{ id: 'c-cloud', body: '云端评论', createdAt: 9, role: 'assigner', authorType: 'user' }],
+  })
+
+  const posted = await call(routes, 'POST', `/issues/${issueId}/comment`, { body: '本地评论' })
+  assert.equal(posted.status, 201)
+  assert.equal(published.length, 1)
+  assert.equal((published[0] as { issueId: string }).issueId, issueId)
+  assert.equal((published[0] as { role: unknown }).role, null)
+  assert.equal((published[0] as { authorType: string }).authorType, 'user')
+})
+
 test('GET /issues/dispatched：按关系表列出派出去的 issue 与未读', async (t) => {
   const deps = makeDeps(tempRoot(t))
   const routes = issuesRoutes(deps)

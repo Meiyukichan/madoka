@@ -1,6 +1,6 @@
 {
   "name": "@meiyukichan/dsh-magica-teamwork",
-  "version": "0.2.0-alpha.4",
+  "version": "0.2.0-alpha.5",
   "description": "DSH Teamwork：本地协作服务（issue / 项目 / 设备 / 文件）+ 客户端 SDK",
   "type": "module",
   "license": "MIT",

@@ -220,8 +220,9 @@ export class ThreadService {
   /**
    * Record a system message ("execution failed", "auto-moved to acceptance", etc. from settlement / the scheduler).
    *
-   * The only difference from {@link add} is the fixed `role` / `authorType`; the deliverer skips waking sessions by
-   * `authorType === 'system'`. Failures are only logged: a system message is a trace and must not make settlement or
+   * The only difference from {@link add} is the fixed `role` / `authorType`; the deliverer
+   * skips waking sessions for ordinary system traces, but lets runtime results
+   * (`sys.runtimeCommand`) through because they are RPC answers. Failures are only logged: a system message is a trace and must not make settlement or
    * scheduling fail because a comment could not be written.
    *
    * @param anchorId - Anchor.

@@ -15,6 +15,10 @@
  */
 import { ISSUE_DELEGATION_SECTION } from './sections.ts'
 import { escapeXml } from './xml-escape.ts'
+import {
+  RUNTIME_POLICY,
+  RUNTIME_TOOL_CATALOG,
+} from '../runtime-contract.ts'
 
 export interface IssueDelegationFacts {
   readonly instance: string
@@ -37,6 +41,16 @@ export function issueDelegationFieldMapXml(facts: IssueDelegationFacts): string 
 <subfield name="cron">Only for scheduled work: five-field cron. Omit for queue work.</subfield>
 <subfield name="checklist">Optional string array; converted to unchecked checklist items when the issue becomes a task.</subfield>
 <subfield name="acceptanceStrategies">Optional array of { title, type: "issue" | "close", description } (max 10). The host mints ids from type + title; do not pass an id. close finishes as done; issue spawns a new planning issue.</subfield>
+<subfield name="runtime">
+<description>Runtime executes one implemented tool on the target; requires explicit cwd and permission; runs without a task card and writes the result as a system issue comment.</description>
+<tools>
+${RUNTIME_TOOL_CATALOG.map(spec => `<tool name="${spec.name}" platform="${spec.platform}">
+<description>${escapeXml(spec.description)}</description>
+<arguments_schema>${escapeXml(spec.argumentsSchema)}</arguments_schema>
+</tool>`).join('\n')}
+</tools>
+<policy>${escapeXml(RUNTIME_POLICY)}</policy>
+</subfield>
 </field>
 <field name="urgency" from="schema default">Use the default unless the request clearly needs otherwise; do not ask the user.</field>
 <field name="permission" from="schema default">Use the default unless the request clearly needs otherwise; do not ask the user.</field>

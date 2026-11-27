@@ -1,6 +1,6 @@
 {
   "name": "@meiyukichan/dsh-magica-castboard",
-  "version": "0.2.0-alpha.3",
+  "version": "0.2.0-alpha.6",
   "type": "module",
   "license": "MIT",
   "publishConfig": {
@@ -68,6 +68,7 @@
   "dependencies": {
     "@meiyukichan/dsh-magica-spellbook": "link:../dsh-magica-spellbook",
     "@meiyukichan/dsh-magica-teamwork": "link:../dsh-magica-teamwork",
+    "ajv": "^8.20.0",
     "cron-schedule": "^5.0.4"
   },
   "peerDependencies": {

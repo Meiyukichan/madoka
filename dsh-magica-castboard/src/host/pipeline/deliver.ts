@@ -26,8 +26,9 @@
  * - **Echo guard**: never deliver a comment back to the session that wrote it. The test is the comment's `threadId`,
  *   independent of `role` -- relying on `role` alone would let any write path that gets the role wrong loop back.
  *
- * System comments (such as "execution failed" left by settlement) wake no session: they are only a trace, the red dot
- * is already updated by the comment service, and waking a session would only make it read a notice it just wrote.
+ * Ordinary system comments (such as "execution failed" left by settlement) wake no session:
+ * they are only a trace. Runtime results (`sys.runtimeCommand`) are the exception: they are
+ * the answer to an RPC, so the assigner must be woken to consume them.
  *
  * @module dsh-magica-castboard/host/pipeline/deliver
  */
@@ -35,6 +36,7 @@ import { commentsXml, type CommentAttachmentRef } from '../context/comment-conte
 import { ISSUE_COMMENTS_SECTION } from '../context/sections.ts'
 import { ASSIGNER_WAKE_INSTRUCTION, WAKE_INSTRUCTION } from '../context/comment-instruction.ts'
 import type { CommentOrigin, ThreadComment } from '../ledger/comment-store.ts'
+import { RUNTIME_COMMENT_PREFIX, RUNTIME_RESULT_SYSTEM_KEY } from '../runtime-contract.ts'
 import { isIssueAnchor, type LinkStore } from '../ledger/link-store.ts'
 import { isInteractionDeliverable } from './interaction-delivery.ts'
 import {
@@ -48,6 +50,29 @@ import {
 } from '../ledger/link-types.ts'
 
 export { commentsXml }
+
+const LEGACY_RUNTIME_RESULT_SYSTEM_KEY = 'sys.runtimeBash'
+
+/**
+ * Runtime results are system traces, but unlike settlement notices they are the
+ * answer to an RPC: the assigner must be woken so it can consume the result.
+ */
+function isRuntimeResultSystemComment(comment: ThreadComment, anchorId: string): boolean {
+  if (!isIssueAnchor(anchorId) || comment.role !== 'assignee' || comment.authorType !== 'system') return false
+  if (comment.systemKey === RUNTIME_RESULT_SYSTEM_KEY
+    || comment.systemKey === LEGACY_RUNTIME_RESULT_SYSTEM_KEY) return true
+  // Cloud comments do not carry systemKey; the worker's stable header identifies them.
+  return comment.systemKey === undefined && comment.body.startsWith(RUNTIME_COMMENT_PREFIX)
+}
+
+/**
+ * Narrow gate for system comments. Non-system comments never go through this
+ * helper; callers keep the ordinary `authorType !== 'system'` fast path.
+ */
+function isDeliverableSystemComment(comment: ThreadComment, anchorId: string): boolean {
+  return isInteractionDeliverable(comment, anchorId)
+    || isRuntimeResultSystemComment(comment, anchorId)
+}
 
 /** Merge window for the same `(issue, side)` (ms). */
 export const MERGE_WINDOW_MS = 400
@@ -164,10 +189,11 @@ export class CommentDeliverer {
     comments: readonly ThreadComment[],
     options: DeliverOptions = {},
   ): Promise<void> {
-    // System messages are traces only, except interaction control comments, which
-    // `isInteractionDeliverable` lets through the narrow gate.
+    // System messages are traces only, except the narrow gate: interaction control
+    // comments and runtime results.
     const deliverable = comments.filter(comment =>
-      comment.authorType !== 'system' || isInteractionDeliverable(comment, anchorId))
+      comment.authorType !== 'system'
+      || isDeliverableSystemComment(comment, anchorId))
     if (deliverable.length === 0) return
 
     const link = this.deps.links.get(anchorId)
@@ -242,14 +268,14 @@ export class CommentDeliverer {
           continue
         }
         // Redeliver only comments headed to this side and still inside the owed range; ordinary
-        // system messages and echoes are excluded, interaction control comments are allowed.
+        // system messages and echoes are excluded, the narrow system gate is allowed.
         const covered = this.deps.coveredUntil?.(anchorId) ?? 0
         const pending = unique(all.filter(comment => {
-          const interaction = isInteractionDeliverable(comment, anchorId)
-          return (comment.authorType !== 'system' || interaction)
+          const systemAllowed = isDeliverableSystemComment(comment, anchorId)
+          return (comment.authorType !== 'system' || systemAllowed)
             && targetsSide(comment, side)
             && comment.createdAt >= since
-            && (covered === 0 || interaction || comment.createdAt > covered)
+            && (covered === 0 || systemAllowed || comment.createdAt > covered)
             && comment.threadId !== sessionId
         }))
         this.noteAttempt(anchorId, side)
@@ -365,12 +391,12 @@ export class CommentDeliverer {
     comments: readonly ThreadComment[],
   ): Promise<boolean> {
     const uniqueBatch = unique(comments.filter(comment =>
-      (comment.authorType !== 'system' || isInteractionDeliverable(comment, anchorId))
+      (comment.authorType !== 'system' || isDeliverableSystemComment(comment, anchorId))
       && comment.threadId !== sessionId))
     const covered = this.deps.coveredUntil?.(anchorId) ?? 0
     const batch = covered > 0
       ? uniqueBatch.filter(comment =>
-        isInteractionDeliverable(comment, anchorId) || comment.createdAt > covered)
+        isDeliverableSystemComment(comment, anchorId) || comment.createdAt > covered)
       : uniqueBatch
     if (batch.length === 0) {
       if (uniqueBatch.length > 0) {

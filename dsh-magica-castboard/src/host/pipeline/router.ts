@@ -463,10 +463,13 @@ export class IssueRouterService {
    * Such records are left by a dispatch that did not finish (process killed, session cannot open, turn threw) --
    * they are not in the candidate pool (routing is not a candidate) and never return to pending by themselves, so
    * they would stay stuck forever. Scanning summaries every tick is cheap.
+   *
+   * Runtime issues are excluded: `RuntimeCommandWorker` owns their `routing` state until it settles.
    */
   private async healStranded(): Promise<void> {
     const stranded = this.deps.issues.summaries().flatMap(row =>
       row.status === 'routing'
+      && row.urgency !== 'runtime'
       && blank(row.assigneeTask)
       && row.routeNextTryAt === undefined
         ? [row.id]
@@ -525,6 +528,8 @@ export class IssueRouterService {
   }
 
   private isRoutable(row: IssueSummary, at: number): boolean {
+    // Runtime issues are executed by RuntimeCommandWorker, never planned into a card.
+    if (row.urgency === 'runtime') return false
     if (row.status === 'routing') {
       return blank(row.assigneeTask) && (row.routeNextTryAt ?? 0) <= at
     }

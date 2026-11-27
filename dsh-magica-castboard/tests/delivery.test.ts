@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { join } from 'node:path'
 
 import { CommentDeliverer, commentsXml, type CommentContextEntry } from '../src/host/pipeline/deliver.ts'
+import { RUNTIME_RESULT_SYSTEM_KEY } from '../src/host/runtime-contract.ts'
 import { IssueCommentInbox, COMMENT_PAGE_LIMIT } from '../src/host/pipeline/inbox.ts'
 import { CommentPublisher } from '../src/host/pipeline/publish.ts'
 import { LinkStore } from '../src/host/ledger/link-store.ts'
@@ -164,6 +165,36 @@ test('回声守卫：写评论的会话不会收到自己的评论；系统消�
   assert.equal(live.pushed.length, 0)
   await deliverer.deliver('local', ISSUE, [threadComment({ id: 'c-2', authorType: 'system' })])
   assert.equal(live.pushed.length, 0)
+})
+
+test('runtime 结果系统评论会唤醒 assigner 会话', async (t) => {
+  const root = tempRoot(t)
+  const links = new LinkStore({ dir: root })
+  await links.patch(ISSUE, { assignerSessionId: 'session-1' })
+  const live = liveSession(true)
+  const deliverer = new CommentDeliverer({
+    links,
+    liveSession: () => live.live,
+    mergeWindowMs: 0,
+  })
+  await deliverer.deliver('local', ISSUE, [threadComment({
+    id: 'runtime-result',
+    role: 'assignee',
+    authorType: 'system',
+    systemKey: RUNTIME_RESULT_SYSTEM_KEY,
+    body: 'runtime pwsh\noutcome: success',
+  })])
+  assert.equal(live.pushed.length, 1)
+  assert.match(live.pushed[0]?.[0]?.text ?? '', /runtime pwsh/)
+
+  // Cloud comments do not carry systemKey; the body header still identifies the result.
+  await deliverer.deliver('remote', ISSUE, [threadComment({
+    id: 'runtime-result-remote',
+    role: 'assignee',
+    authorType: 'system',
+    body: 'runtime pwsh\noutcome: success',
+  })])
+  assert.equal(live.pushed.length, 2)
 })
 
 test('task 自建评论（锚点是卡片 id）：不进任何会话，只落评论流', async (t) => {

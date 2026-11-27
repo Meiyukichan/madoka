@@ -7,6 +7,7 @@ import { TeamworkPanel } from '@meiyukichan/dsh-magica-teamwork/client'
 import type { ReactNode } from 'react'
 
 import type { Translate } from '../../labels/index.ts'
+import { interactionCommentView } from '../interactions/control-comment-card.tsx'
 
 function currentLang(): 'zh' | 'en' {
   try {
@@ -17,5 +18,11 @@ function currentLang(): 'zh' | 'en' {
 }
 
 export function TeamworkPage(props: { t: Translate }): ReactNode {
-  return <TeamworkPanel t={props.t} lang={currentLang()} />
+  return (
+    <TeamworkPanel
+      t={props.t}
+      lang={currentLang()}
+      describeComment={comment => interactionCommentView(comment, props.t)}
+    />
+  )
 }

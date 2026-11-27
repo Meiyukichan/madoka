@@ -9,6 +9,7 @@ import { buildIssueDispatchTools } from '../src/host/tools/issue-tools.ts'
 import { issueTaskTools } from '../src/host/tools/issue-task.ts'
 import { issueCommentTools } from '../src/host/tools/issue-comment.ts'
 import { buildTools } from '../src/host/tools/index.ts'
+import { castboardIssueDelegation } from '../src/host/context/delegation-context.ts'
 import { TaskStore } from '../src/host/ledger/task-store.ts'
 import { IssueStore } from '../src/host/ledger/issue-store.ts'
 import { LinkStore } from '../src/host/ledger/link-store.ts'
@@ -410,6 +411,110 @@ test('castboard_comment_add 只落评论，绝不 steer/followUp 正在执行的
   assert.equal(rows[0]?.body, '进展')
 })
 
+test('castboard_issues_create：runtime 必须显式 cwd / permission / bash payload', async (t) => {
+  const kit = fixture(tempRoot(t))
+  const tool = byName(buildIssueDispatchTools({
+    tasks: kit.tasks,
+    issues: kit.issues,
+    comments: kit.comments,
+    thread: kit.thread,
+    now: () => 1_000,
+    instance: () => '127.0.0.1:3080',
+    remoteCreate: {
+      createMany: async inputs => ({
+        created: [],
+        skipped: inputs.map((_, index) => `issues[${String(index)}]`),
+      }),
+    },
+  }), 'castboard_issues_create')
+  const base = {
+    projectId: 1,
+    title: 'runtime',
+    detail: 'run it',
+    assignee: 'user-1',
+    assigneeInstance: '127.0.0.1:3080',
+    urgency: 'runtime',
+  }
+  const runtime = {
+    runtime: { arguments: { command: 'pwd', description: 'print cwd' } },
+  }
+  await assert.rejects(
+    tool.execute({ issues: [{ ...base, cwd: 'D:/repo', permission: 'workspace-write' }] }, execContext()),
+    /assignerMeta\.runtime/,
+  )
+  const missing = await tool.execute(
+    { issues: [{ ...base, cwd: 'D:/repo', permission: 'workspace-write' }] },
+    execContext(),
+  ).then(() => undefined, (error: Error) => error)
+  assert.match(missing?.message ?? '', /Required runtime issue schema/)
+  assert.match(missing?.message ?? '', /arguments: object \(required; must match the selected runtime tool's DSH schema/)
+  assert.match(missing?.message ?? '', /explicitly asks to execute a command/)
+  await assert.rejects(
+    tool.execute({ issues: [{ ...base, permission: 'workspace-write', assignerMeta: runtime }] }, execContext()),
+    /requires an explicit cwd/,
+  )
+  await assert.rejects(
+    tool.execute({ issues: [{ ...base, cwd: 'D:/repo', assignerMeta: runtime }] }, execContext()),
+    /requires an explicit permission/,
+  )
+})
+
+test('castboard_issues_create：runtime 按目标设备 OS 自动填 tool', async (t) => {
+  const kit = fixture(tempRoot(t))
+  const sent: Array<Record<string, unknown>> = []
+  const tool = byName(buildIssueDispatchTools({
+    tasks: kit.tasks,
+    issues: kit.issues,
+    comments: kit.comments,
+    links: kit.links,
+    thread: kit.thread,
+    now: () => 1_000,
+    instance: () => '127.0.0.1:3080',
+    query: {
+      groups: async () => [],
+      groupMembers: async () => [],
+      devices: async () => [{
+        id: '127.0.0.1:3080',
+        label: '127.0.0.1:3080',
+        instance: '127.0.0.1:3080',
+        os: 'windows',
+      }],
+      workspaces: async () => [],
+    },
+    remoteCreate: {
+      createMany: async inputs => {
+        sent.push(...inputs)
+        return {
+          created: inputs.map((input, index) => ({
+            issueId: String(input.issueId),
+            title: String(input.title ?? `issue-${String(index)}`),
+          })),
+          skipped: [],
+        }
+      },
+    },
+  }), 'castboard_issues_create')
+
+  const result = await tool.execute({
+    issues: [{
+      projectId: 1,
+      title: 'runtime',
+      detail: 'run it',
+      assignee: 'user-1',
+      assigneeInstance: '127.0.0.1:3080',
+      urgency: 'runtime',
+      cwd: 'D:/repo',
+      permission: 'workspace-write',
+      assignerMeta: {
+        runtime: { arguments: { command: 'Get-Location', description: 'print cwd' } },
+      },
+    }],
+  }, execContext()) as { created: Array<{ issueId: string }> }
+  assert.equal(result.created.length, 1)
+  const runtime = (sent[0]?.assignerMeta as { runtime?: { tool?: string } }).runtime
+  assert.equal(runtime?.tool, 'pwsh')
+})
+
 test('castboard_issue_state：issue 目标（双角色）+ 每条评论目标附件（raw/host/9）', async (t) => {
   const root = tempRoot(t)
   const kit = fixture(root)
@@ -714,6 +819,21 @@ test('castboard_issue_comment_add：把评论附件上传为 comment target', as
   assert.equal(uploads[0]?.commentId, result.id)
   assert.equal(uploads[0]?.role, 'assigner')
   assert.deepEqual(uploads[0]?.paths, ['D:/tmp/shot.png', 'D:/tmp/log.txt'])
+})
+
+test('castboard-issue-delegation：包含 runtime 契约与“仅用户明确要求”策略', () => {
+  const text = castboardIssueDelegation({ instance: '127.0.0.1:3080' })
+  assert.match(text, /<subfield name="runtime">/)
+  assert.match(text, /explicitly asks to execute a command/)
+  assert.match(text, /Runtime executes one implemented tool on the target/)
+  assert.doesNotMatch(text, /bash-specific/i)
+  assert.match(text, /<tool name="pwsh" platform="windows">/)
+  assert.match(text, /<tool name="bash" platform="linux\/macOS">/)
+  assert.match(text, /Default command tool on Windows targets/)
+  assert.match(text, /Default command tool on Linux\/macOS targets/)
+  assert.match(text, /arguments: object \(required/)
+  assert.match(text, /description: string \(required\)/)
+  assert.doesNotMatch(text, /"tool":/)
 })
 
 test('castboard_issues_help：能注入时把指导送进会话，不能时随返回值下发', async (t) => {

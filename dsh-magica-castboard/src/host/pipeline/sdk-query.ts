@@ -19,6 +19,8 @@ export interface QueryItem {
   restricted?: boolean
   /** Device/workspace: instance `host:port`. */
   instance?: string
+  /** Device: `windows` / `linux` / `macos` when the shared library reports it. */
+  os?: string
   /** Project/workspace: absolute path. */
   cwd?: string
 }

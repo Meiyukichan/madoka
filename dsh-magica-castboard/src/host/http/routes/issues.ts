@@ -23,7 +23,8 @@ import {
 } from '../../ledger/issue-validate.ts'
 import { asPermission, asUrgency, normalizeBody } from '../../rules.ts'
 import { objectBody, queryValue, type RouteDeps } from './shared.ts'
-import type { SdkIssueSummary } from '../../pipeline/sdk-face.ts'
+import type { SdkIssueComment, SdkIssueSummary } from '../../pipeline/sdk-face.ts'
+import type { RemoteCommentsFace } from '../../pipeline/remote.ts'
 
 export interface IssueRouteCapabilities {
   workspaces?: { get: (workspaceId: string) => unknown }
@@ -38,6 +39,8 @@ export interface IssueRouteCapabilities {
     projectId?: number
     keyword?: string
   }) => Promise<readonly SdkIssueSummary[]>
+  issueComments?: (issueId: string) => Promise<readonly SdkIssueComment[]>
+  commentPublish?: RemoteCommentsFace['publish']
   taskExists?: (taskId: string) => boolean
 }
 
@@ -264,6 +267,21 @@ export function issuesRoutes(deps: IssueRouteDeps): readonly Route[] {
 
     {
       method: 'GET',
+      path: '/issues/:id/cloud-comments',
+      handler: async (context) => {
+        const issueId = issueIdOf(context)
+        if (deps.issueComments === undefined) return { comments: [] }
+        try {
+          return { comments: await deps.issueComments(issueId) }
+        } catch (error) {
+          warn('issue-cloud-comments-failed', `${issueId}: ${errorText(error)}`)
+          throw new HttpFailure('internal', '共享库读取评论失败', 502)
+        }
+      },
+    },
+
+    {
+      method: 'GET',
       path: '/issues/:id/thread',
       handler: async (context) => {
         const issueId = issueIdOf(context)
@@ -402,6 +420,23 @@ export function issuesRoutes(deps: IssueRouteDeps): readonly Route[] {
         // unknown to the executor. Letting the caller pass `role` would let a typo misroute it.
         const added = await deps.thread.add(issueId, { body: text, role: null, authorType: 'user' })
         if (added === undefined) throw new HttpFailure('conflict', '这条评论已经存在', 409)
+        // Cloud-only issues have no local mirror/link, so the publisher would skip them.
+        // Publish the row we just wrote directly; the id is the idempotency key.
+        if (deps.commentPublish !== undefined && deps.issues.summary(issueId) === undefined) {
+          try {
+            await deps.commentPublish({
+              issueId,
+              commentId: added.id,
+              body: added.body,
+              role: added.role,
+              authorType: added.authorType,
+              createdAt: added.createdAt,
+            })
+          } catch (error) {
+            warn('issue-comment-publish-failed', `${issueId}/${added.id}: ${errorText(error)}`)
+            throw new HttpFailure('internal', '评论上云失败', 502)
+          }
+        }
         return { status: 201, value: added }
       },
     },

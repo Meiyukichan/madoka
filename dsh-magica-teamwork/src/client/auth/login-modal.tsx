@@ -152,7 +152,7 @@ export function LoginModal(props: LoginModalProps): ReactNode {
         </label>
         {error === undefined || error === ''
           ? null
-          : <p role="alert" style={{ margin: 0, color: 'var(--dsw-alias-state-error)', fontSize: 12 }}>{error}</p>}
+          : <p role="alert" style={{ margin: 0, color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>{error}</p>}
       </div>
     </Modal>
   )

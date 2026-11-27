@@ -73,6 +73,9 @@ import { IssueRouterService } from './host/pipeline/router.ts'
 import { createRouterSessionOpener, routerGuideSection } from './host/pipeline/router-runner.ts'
 import { createSdkFaces, type CastboardClientLike, type SdkFaces, type SdkIssueComment } from './host/pipeline/sdk-face.ts'
 import { IssueSyncService } from './host/pipeline/sync.ts'
+import { RuntimeCommandWorker, shellExecutor } from './host/pipeline/runtime-worker.ts'
+import { createToolArgsValidator, type RuntimeShell } from './host/pipeline/runtime-command.ts'
+import { RUNTIME_COMMAND_ARGUMENTS_SCHEMA } from './host/runtime-contract.ts'
 import { ThreadService } from './host/pipeline/thread.ts'
 import { ArtifactUplink, type ArtifactAttachmentSpec } from './host/pipeline/uplink.ts'
 import {
@@ -218,6 +221,7 @@ interface SystemPromptFace {
 
 interface ToolsFace {
   register(definition: HostToolDefinition): () => void
+  get?(name: string): { parameters?: Record<string, unknown> } | undefined
 }
 
 interface WorkspaceEntity {
@@ -894,6 +898,8 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
         },
       }),
     ...(options.faces?.issueList === undefined ? {} : { issueList: options.faces.issueList }),
+    ...(options.faces?.issueComments === undefined ? {} : { issueComments: options.faces.issueComments }),
+    ...(options.faces?.comments === undefined ? {} : { commentPublish: options.faces.comments.publish }),
     ...(options.faces?.abandon === undefined
       ? {}
       : { abandonRemote: (issueIds: readonly string[]) => options.faces!.abandon!(issueIds) }),
@@ -1275,6 +1281,55 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     owner.router = router
     ownerDisposers.push(router)
     router.start()
+
+    // Runtime commands sit beside the router: no card, no agent session. Sync already
+    // claims the issue for this instance; this worker runs the command and settles it.
+    const runtimeShell = (options.ctx as { get?: (name: string) => unknown }).get?.('shell') as RuntimeShell | undefined
+    if (runtimeShell === undefined) {
+      note('warn', 'runtime-command-disabled', 'DSH shell 服务不可用，runtime command 不会执行')
+    } else {
+      const toolsService = (options.ctx as { get?: (name: string) => unknown }).get?.('tools') as ToolsFace | undefined
+      const validateToolArgs = createToolArgsValidator(
+        name => toolsService?.get?.(name)?.parameters,
+        name => (name === 'bash' || name === 'pwsh') ? RUNTIME_COMMAND_ARGUMENTS_SCHEMA : undefined,
+      )
+      const runtimeWorker = new RuntimeCommandWorker({
+        issues,
+        instance: () => deviceInstance,
+        execute: shellExecutor(runtimeShell),
+        validateToolArgs,
+        resolveWorkspace: async cwd => {
+          const found = await workspaces.resolveByPath(cwd)
+          return found === undefined ? undefined : workspaces.get(found.id)
+        },
+        thread,
+        ...(options.faces?.comments === undefined
+          ? {}
+          : {
+            publish: input => options.faces!.comments!.publish({
+              issueId: input.issueId,
+              commentId: input.commentId,
+              body: input.body,
+              role: input.role,
+              authorType: input.authorType,
+              createdAt: input.createdAt,
+            }),
+          }),
+        ...(finalizeFace === undefined
+          ? {}
+          : {
+            finalize: (issueId, input) => finalizeFace.finalize({ issueId, ...input }),
+          }),
+        enabled: () => !envOff('DSH_CASTBOARD_RUNTIME'),
+        allowCrossAccount: () => !envOff('DSH_CASTBOARD_RUNTIME_ALLOW_CROSS_ACCOUNT'),
+        isOwner: () => lease.isOwner(),
+        now: clock,
+        log: noteAny,
+      })
+      ownerDisposers.push(runtimeWorker)
+      runtimeWorker.start()
+      note('info', 'runtime-command-started')
+    }
 
     // Portrait scans every workspace on a fixed cadence, skipping the home directory and worklab.
     const portraitStore = new PortraitStore({

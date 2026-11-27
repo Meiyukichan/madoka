@@ -161,6 +161,7 @@ export const ENDPOINTS: readonly string[] = [
   'POST /issues',
   'GET /issues/:id',
   'GET /issues/:id/state',
+  'GET /issues/:id/cloud-comments',
   'GET /issues/:id/thread',
   'POST /issues/:id/abandon',
   'POST /issues/:id/comment',

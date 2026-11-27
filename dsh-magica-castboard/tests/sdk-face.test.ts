@@ -506,3 +506,24 @@ test('issueList 面：拆响应信封并映射 issueId / updatedAt', async () =>
     { issueId: 'i-2', title: '采纳', status: 'success', assignee: 'a-1', urgency: 'urgent' },
   ])
 })
+
+test('issueComments 面：用 commentId 而不是数据库自增 id 做去重键', async () => {
+  const client: CastboardClientLike = {
+    castboardIssueComments: async () => [{
+      id: 7,
+      commentId: 'comment-uuid',
+      issueId: 'i-1',
+      content: '正文',
+      commentAt: '2026-01-02T03:04:05.000Z',
+      commentRole: 'assignee',
+      commentAuthorType: 'agent',
+      author: 'a-1',
+    }],
+  }
+  const faces = await createSdkFaces({ instance: 'x', load: async () => ({ createCastboardClient: () => client }) })
+  const rows = await faces.issueComments!('i-1')
+  assert.equal(rows[0]?.id, 'comment-uuid')
+  assert.equal(rows[0]?.role, 'assignee')
+  assert.equal(rows[0]?.authorType, 'agent')
+  assert.equal(rows[0]?.author, 'a-1')
+})

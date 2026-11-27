@@ -12,9 +12,18 @@
  * 详情见设计文档 §11.6。
  */
 
-import { createEventLogger, type EventLogger, type LogLevel } from '@meiyukichan/dsh-magica-spellbook'
+import { createEventLogger } from '@meiyukichan/dsh-magica-spellbook'
 
-export type { EventLogger, LogLevel }
+/** 与发布包保持结构兼容；本地声明避免 .d.ts 反向依赖 spellbook 的类型入口。 */
+export type LogLevel = 'info' | 'warn' | 'error'
+
+export interface EventLogger {
+  logEvent(level: LogLevel, event: string, detail: string): void
+  exportLogs(header: Record<string, string>, snapshot?: string[], priorSessions?: string[]): string
+  readPersistentLog(maxLines?: number): string[]
+  flush(): Promise<void>
+  dispose(): void
+}
 
 /** 结构等价于发布包的 `EventLogger`（宿主传它自己的实例就行；便于测试传假对象） */
 export type CastboardEventLoggerLike = Pick<EventLogger, 'logEvent'>
@@ -23,7 +32,7 @@ export type CastboardEventLoggerLike = Pick<EventLogger, 'logEvent'>
 let current: CastboardEventLoggerLike | null = null
 
 /** 独立使用 SDK 时的默认出口：与其它插件同一套周轮转 NDJSON。 */
-const fallback = createEventLogger('dsh-magica-teamwork')
+const fallback: EventLogger = createEventLogger('dsh-magica-teamwork')
 
 /** 注入 / 清除 logger（宿主在 `apply` 里调一次；`ctx.effect` 回收时传 `null`） */
 export function setCastboardLogger(logger: CastboardEventLoggerLike | null): void {

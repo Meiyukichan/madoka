@@ -35,6 +35,8 @@ import {
   type Urgency,
 } from '../model.ts'
 import { queryOrDegrade } from '../pipeline/sdk-query.ts'
+import { parseRuntimeCommand } from '../pipeline/runtime-command.ts'
+import { isRuntimeTool, runtimeContractError, runtimeToolForOs, type RuntimeTool } from '../runtime-contract.ts'
 import { ISSUE_SOURCE_DSH, normalizeIssueSource } from '../../shared/wire.ts'
 import {
   asPermission,
@@ -96,6 +98,8 @@ interface Candidate {
   readonly requestedSource?: string
   /** Source actually written to the shared library; `self` folds to `dsh`. */
   source: string
+  /** Runtime target's platform tool, resolved from the device OS before submit. */
+  runtimeTool?: RuntimeTool
   dependsOn?: string[]
 }
 
@@ -454,7 +458,11 @@ function renderLinkTable(_args: unknown, value: unknown): RenderBlock[] {
  * batch has been read once (they need the alias table).
  * @throws When any item is invalid (the caller records it in `rejected` and keeps the batch going).
  */
-function candidateOf(raw: unknown, index: number, instance: string): Candidate {
+function candidateOf(
+  raw: unknown,
+  index: number,
+  instance: string,
+): Candidate {
   const where = `issues[${index}]`
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error(`${where} 必须是对象`)
@@ -473,6 +481,20 @@ function candidateOf(raw: unknown, index: number, instance: string): Candidate {
   }
   const urgency = entry.urgency === undefined ? 'normal' : asUrgency(String(entry.urgency))
   const permission = entry.permission === undefined ? 'workspace-write' : asPermission(entry.permission)
+  if (urgency === 'runtime') {
+    // Runtime issues are executed without an agent/card, so the request must be
+    // self-contained: explicit target directory, explicit permission, command payload.
+    if (entry.permission === undefined || entry.permission === null || entry.permission === '') {
+      throw new Error(runtimeContractError(where,
+        'urgency=runtime requires an explicit permission (read-only / workspace-write / danger-full-access)'))
+    }
+    if (cwd === undefined) {
+      throw new Error(runtimeContractError(where,
+        'urgency=runtime requires an explicit cwd (absolute path inside a registered workspace)'))
+    }
+    const parsed = parseRuntimeCommand({ cwd, permission, assignerMeta: normalizedMeta })
+    if (!parsed.ok) throw new Error(runtimeContractError(where, parsed.reason))
+  }
   const ref = refOf(entry.ref, where)
   const attachments = attachmentsOf(entry.attachments, where)
   const dependsOnRefs = dependsOnRefsOf(entry.dependsOn, where)
@@ -499,15 +521,85 @@ function candidateOf(raw: unknown, index: number, instance: string): Candidate {
 }
 
 /**
- * Translate one entry's dependency refs into real issueIds.
+ * Resolve each runtime issue's target platform before submitting anything.
  *
- * Each item is either a `ref` of some entry in this batch or a standard UUID (pointing at an issue
- * already in the library). An unresolvable ref is rejected outright: a dependency that cannot be
- * looked up once stored is a promise that this issue waits forever.
+ * The picker/SDK knows the device OS; the model never chooses bash/pwsh. Unknown
+ * devices or OS values are rejected here, before the issue reaches the cloud.
+ */
+async function resolveRuntimeTools(
+  candidates: readonly Candidate[],
+  rejected: Rejection[],
+  query: ToolDeps['query'],
+): Promise<Candidate[]> {
+  const alive: Candidate[] = []
+  for (const candidate of candidates) {
+    if (candidate.urgency !== 'runtime') {
+      alive.push(candidate)
+      continue
+    }
+    if (query === undefined) {
+      rejected.push({ index: candidate.index, reason: 'runtime 需要共享库设备查询能力，当前宿主不可用' })
+      continue
+    }
+    try {
+      const devices = await query.devices(candidate.assignee)
+      const device = devices.find(item =>
+        item.instance === candidate.assigneeInstance || item.id === candidate.assigneeInstance)
+      if (device === undefined) {
+        rejected.push({
+          index: candidate.index,
+          reason: `找不到目标实例 ${candidate.assigneeInstance}（assignee ${candidate.assignee}）`,
+        })
+        continue
+      }
+      const tool = runtimeToolForOs(device.os)
+      if (tool === undefined) {
+        rejected.push({
+          index: candidate.index,
+          reason: `目标实例 ${candidate.assigneeInstance} 的平台未知（os=${String(device.os ?? '')}），无法确定 bash/pwsh`,
+        })
+        continue
+      }
+      const runtime = candidate.meta.runtime
+      const requested = typeof runtime === 'object' && runtime !== null
+        && typeof (runtime as Record<string, unknown>).tool === 'string'
+        ? (runtime as Record<string, unknown>).tool as string
+        : undefined
+      if (requested !== undefined) {
+        if (!isRuntimeTool(requested)) {
+          rejected.push({
+            index: candidate.index,
+            reason: `runtime.tool "${requested}" 尚未实现；目前支持 bash / pwsh`,
+          })
+          continue
+        }
+        if (requested !== tool) {
+          rejected.push({
+            index: candidate.index,
+            reason: `目标实例 ${candidate.assigneeInstance} 是 ${String(device.os ?? 'unknown')}，`
+              + `应使用 ${tool}，而不是 ${requested}`,
+          })
+          continue
+        }
+      }
+      candidate.runtimeTool = tool
+      alive.push(candidate)
+    } catch (error) {
+      rejected.push({
+        index: candidate.index,
+        reason: `查询目标实例平台失败：${messageOf(error)}`,
+      })
+    }
+  }
+  return alive
+}
+
+/**
+ * Translate one entry's dependency refs into real issueIds.
  *
  * @param candidate - An entry that already passed field validation.
  * @param alias - This batch's `ref → entry` map.
- * @throws When a ref cannot be resolved, points at itself, or exceeds the count limit.
+ * @returns Resolved issue ids, or `undefined` when there are none.
  */
 function resolveDependencies(
   candidate: Candidate,
@@ -579,12 +671,22 @@ function remoteInputOf(
   instance: string,
   assignerTask: string | undefined,
 ): Record<string, unknown> {
+  const runtime = candidate.runtimeTool === undefined
+    ? candidate.meta.runtime
+    : {
+        ...(typeof candidate.meta.runtime === 'object' && candidate.meta.runtime !== null
+          ? candidate.meta.runtime
+          : {}),
+        tool: candidate.runtimeTool,
+      }
   return {
     issueId: candidate.issueId,
     projectId: candidate.projectId,
     title: candidate.title,
     detail: candidate.detail,
-    assignerMeta: candidate.meta,
+    assignerMeta: runtime === undefined
+      ? candidate.meta
+      : { ...candidate.meta, runtime },
     assignee: candidate.assignee,
     assigneeInstance: candidate.assigneeInstance,
     urgency: candidate.urgency,
@@ -1094,6 +1196,8 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
         + '(default normal), permission (default workspace-write), source (default `dsh`; external channels '
         + 'such as `im` must already exist in the source dictionary; `self` is normalized to `dsh`), '
         + 'attachments (input files the user picked), ref and dependsOn. '
+        + 'Runtime is a user-triggered channel: only create urgency=runtime when the user explicitly asks to '
+        + 'run a command on a target instance; never create it proactively. '
         + 'The tool fills the rest itself: issueId (fresh UUID), sourceInstance (current device instance) '
         + 'and assignerTask (the board task you are executing, resolved from your session). '
         + '**When creating several issues at once, decide whether they depend on each other**: if B may only '
@@ -1142,10 +1246,39 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
                       },
                     },
                   },
+                  runtime: {
+                    type: 'object',
+                    description: 'Runtime executes one implemented tool on the target. '
+                      + 'Omit tool for the target platform\'s default command tool (pwsh Windows / bash Linux/macOS); '
+                      + 'tool may name another implemented runtime tool. arguments must satisfy that tool\'s DSH schema. '
+                      + 'Only with urgency=runtime and only when the user explicitly asked.',
+                    additionalProperties: false,
+                    properties: {
+                      tool: {
+                        type: 'string',
+                        description: 'Optional runtime tool name. Omit for the target platform\'s default command tool.',
+                      },
+                      arguments: {
+                        type: 'object',
+                        required: true,
+                        additionalProperties: true,
+                        properties: {
+                          command: { type: 'string', description: 'Command for the default command tool (required there).' },
+                          description: { type: 'string', description: 'Description for the default command tool (required there).' },
+                          workdir: { type: 'string', description: 'Optional absolute working directory; defaults to issue.cwd.' },
+                          timeoutMs: { type: 'number', description: 'Optional 1000..600000 ms; default 120000.' },
+                        },
+                      },
+                    },
+                  },
                 },
                 description: 'Optional requester metadata. '
                   + 'Planning keys cron / checklist / acceptanceStrategies are documented in '
                   + 'castboard_issue_delegation — call castboard_issues_help first. '
+                  + 'For urgency=runtime (only on explicit user request), runtime is a tool-call envelope: '
+                  + '{ tool?: string, arguments: object }. Omit tool for the target platform\'s default command tool; '
+                  + 'arguments must satisfy the selected tool\'s DSH schema. '
+                  + 'cwd and permission are also required. '
                   + 'Legacy assignerMeta.title/detail is still accepted when top-level title/detail are absent.',
               },
               assignee: { type: 'string', required: true, description: 'Responsible account — exactly one person per issue.' },
@@ -1160,7 +1293,10 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
                   + 'Omit it when the assignee should decide the directory itself. Never invent one: only pass '
                   + 'a path that came from castboard_issue_workspaces or from the user.',
               },
-              urgency: { type: 'string', description: 'runtime | direct | urgent | normal (default) | relaxed.' },
+              urgency: { type: 'string', description: 'runtime | direct | urgent | normal (default) | relaxed. '
+                + 'runtime executes one tool on assigneeInstance: omit runtime.tool for the target default command '
+                + 'tool (pwsh Windows / bash Linux/macOS), or name another implemented tool. No card is created. '
+                + 'Only use it when the user explicitly requests a runtime command; never create it proactively.' },
               permission: { type: 'string', description: 'read-only | workspace-write (default) | danger-full-access.' },
               source: {
                 type: 'string',
@@ -1221,13 +1357,17 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
             }
           })
 
+          // Resolve target platforms before refs/dependencies: a runtime issue with no
+          // known target is rejected here, not after its dependents were submitted.
+          const runtimeAlive = await resolveRuntimeTools(candidates, rejected, deps.query)
+
           // A duplicated ref makes dependsOn ambiguous, so those entries are rejected outright.
           const refCounts = new Map<string, number>()
-          for (const candidate of candidates) {
+          for (const candidate of runtimeAlive) {
             if (candidate.ref !== undefined) refCounts.set(candidate.ref, (refCounts.get(candidate.ref) ?? 0) + 1)
           }
           const duplicateRefs = new Set([...refCounts.entries()].filter(([, count]) => count > 1).map(([ref]) => ref))
-          const alive = candidates.filter(candidate => {
+          const alive = runtimeAlive.filter(candidate => {
             if (candidate.ref === undefined || !duplicateRefs.has(candidate.ref)) return true
             rejected.push({ index: candidate.index, reason: `ref "${candidate.ref}" 在本批里重复了（dependsOn 靠它引用，必须唯一）` })
             return false

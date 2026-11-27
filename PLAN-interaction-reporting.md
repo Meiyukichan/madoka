@@ -1,6 +1,6 @@
 # Castboard 交互事件上报、跨机同步与应答 —— 实施计划
 
-> 状态：**已实现 v1**。协议 / projection / 渲染 / addControl / 投递窄口子 / Coordinator reporter / bridge / full answers / 工具 / 设置 / 客户端摘要均已落地；`commentsEnabled=false` 同时停 reporter/bridge/tool answer；castboard 测试 **342/342** 通过，typecheck 与 build 通过。
+> 状态：**已实现 v1**。协议 / projection / 渲染 / addControl / 投递窄口子 / Coordinator reporter / bridge / full answers / 工具 / 设置 / 客户端摘要均已落地；`commentsEnabled=false` 同时停 reporter/bridge/tool answer；castboard 测试 **344/344** 通过，typecheck 与 build 通过。
 > 协议 v1 已定：控制评论的 body 是**纯 JSON**，不再使用 marker 包裹。
 > 范围：`dsh-magica-castboard` 的 issue / task / comment / interaction 链路。
 > 不涉及：0.1.2 的 `dsh-magica-index`、`dsh-magica-im`、magica 兼容、云端新增表。

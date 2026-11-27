@@ -746,6 +746,7 @@ export async function createSdkFaces(options: {
             label: endpoint,
             instance: endpoint,
             detail: typeof row.accountId === 'string' ? row.accountId : undefined,
+            ...(typeof row.os === 'string' && row.os !== '' ? { os: row.os } : {}),
           }
         })
       },
@@ -993,7 +994,7 @@ export async function createSdkFaces(options: {
     faces.issueComments = async id => {
       const rows = await call<readonly Record<string, unknown>[]>(client.castboardIssueComments, id)
       return (Array.isArray(rows) ? rows : []).flatMap((row): SdkIssueComment[] => {
-        const commentId = String(row.id ?? row.commentId ?? '')
+        const commentId = String(row.commentId ?? row.id ?? '')
         if (commentId === '') return []
         const createdAt = commentTime(row)
         return [{
