@@ -93,6 +93,102 @@ Castboard 里的“多系统”不是简单把几个服务拼在一起，而是�
 
 这就是“多系统协同”的含义：**不是让所有系统变成 DSH，而是让所有系统的事件都能进入同一条可执行、可回传的事件流。**
 
+### 五个核心机制
+
+一句话版本：
+
+> **issue 是事件，router 是转换器，评论是上下文总线，interaction 是非阻塞事件，runtime 是跨实例直连 RPC。**
+
+```text
+issue（事件源）
+  → router（协议转换 / 依赖门禁）
+  → task（Agent 会话）或 runtime（目标实例直接执行）
+  → 评论事件流（普通 / 系统 / 控制协议）
+  → 跨会话、跨实例投递 / 补投 / 回答
+  → 结果与产物回到 issue
+```
+
+#### 1. Issue as Event Source：issue 是事件源
+
+每一件进入 Castboard 的工作，先成为一个 issue：
+
+- 带 `source` / `sourceInstance`，知道来自哪个系统、哪台实例；
+- 带稳定的 `issueId`，天然是幂等键；
+- 可以来自人、Agent、IM、工单、CI、监控或任何接了 teamwork SDK 的系统；
+- 事件不等同于“消息”：它有状态、依赖、归属、评论和产物。
+
+所以 Castboard 不是“收消息再转发”，而是**把事件变成可执行、可追踪的工作对象**。
+
+#### 2. Router as Protocol Converter：router 是协议转换器
+
+Router 不生产工作，它把一种工作形态转换成另一种：
+
+```text
+issue（待规划事件）
+  → 临时规划会话（结构化 decision）
+  → task（可执行卡片）
+```
+
+- 普通 issue 由 router 规划成 task；
+- `direct` issue 跳过规划，直接转 task；
+- `runtime` issue 跳过 router，直接进入 runtime worker；
+- 依赖未满足、会话起不来、规划失败都有退避和明确的终态。
+
+它本质上是**跨形态协议转换层**：把“外部系统的事件”翻译成“DSH 能执行的卡”。
+
+#### 3. Comment as Context Bus：评论是上下文总线
+
+评论不是附属聊天，而是 Castboard 的**跨会话、跨实例上下文总线**：
+
+- append-only 持久化，不原地改历史；
+- 多种协议共存：
+  - 普通文本评论（人 / Agent）；
+  - 系统评论（状态、错误、runtime 结果）；
+  - JSON 控制评论（`requested` / `answered` / `completed`）；
+- 投递三档：live session 直接 `push` / `steer` / `followUp`，远端实例走 inbox；
+- 发布/拉取游标记录水位，`commentId` 保证幂等；
+- 目标不在线就记 pending 欠账，之后补投。
+
+默认轮询是秒级（`commentPollMs=5000`），本地投递走合并窗口，属于**准实时**而不是同步 RPC。好处是：慢网络、会话重启、跨机器都不会丢上下文。
+
+#### 4. Interaction as Non-blocking Event：交互上报不阻塞执行
+
+Agent 执行中的提问 / 审批不是另开一条私有通道，而是：
+
+```text
+Agent interaction
+  → 控制评论（requested）
+  → issue 事件流
+  → 远端 / 面板回答（answered）
+  → 回到执行会话
+```
+
+- 上报本身不阻塞执行；
+- 答案可以来自另一个会话、另一个实例，甚至另一个用户；
+- 关闭评论通道时，上报和应答一起停，但执行本身不被卡死；
+- 是否等待答案，由 Agent 的交互语义决定；Castboard 只负责把事件送到正确的一侧。
+
+#### 5. Runtime as Direct RPC：runtime 是跨实例直连 RPC
+
+`runtime` 是 Castboard 里一条特殊执行路径：
+
+```text
+issue(urgency=runtime)
+  → 目标 instance 认领
+  → 目标平台选择 pwsh / bash
+  → 直接通过 shell 执行一次命令
+  → 结果作为系统评论回传
+```
+
+- 不建 task；
+- 不起 Agent 会话；
+- 不经过 router；
+- 有 cwd / permission / sandbox 三道闸门；
+- 跨 Windows / Linux / macOS 自动选择目标工具；
+- 结果按 RPC 语义回传给 assigner，但底层仍是可审计的 issue 评论。
+
+一句话：**它把“远程执行一次工具”做成了共享库里的一个事件，而不是一条黑色 RPC。**
+
 ### 三种协同模式
 
 | 模式 | 谁在动 | 适用场景 |

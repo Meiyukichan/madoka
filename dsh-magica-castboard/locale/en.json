@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Castboard",
-    "description": "A multi-person, multi-instance, multi-system collaboration framework for DSH: route work to the right machine and agent, then write process, results, and artifacts back to the shared library."
+    "description": "A multi-person, multi-instance, multi-system collaboration framework for DSH: issues as event sources, a router as protocol converter, comments as the cross-session context bus, and runtime for direct cross-instance tool execution."
   }
 }

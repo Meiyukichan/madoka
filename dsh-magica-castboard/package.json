@@ -6,7 +6,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "DSH 的多人、多实例、多系统协同框架：把工作派给正确的机器与 Agent，并将过程、结果与产物回写到共享库。host 半侧负责协作/工作/执行/事件协议，client 半侧提供看板与项目管理入口。",
+  "description": "DSH 的多人、多实例、多系统协同框架：issue 作为事件源、router 做协议转换、评论作为跨会话上下文总线，runtime 提供跨实例直连执行。把过程、结果与产物回写到共享库。",
   "engines": {
     "node": ">=22.5",
     "pnpm": ">=11"

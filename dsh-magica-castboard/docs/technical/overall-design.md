@@ -309,6 +309,18 @@ Teamwork 共享库（评论 / 附件）
 
 这样同一套任务模型可以接入 IM、工单、CI、监控等多个系统，而不需要为每个系统复制一套执行链路。
 
+### 5.11 核心机制总览
+
+| 机制 | 实现 | 保证 |
+|---|---|---|
+| **Issue as Event Source** | 外部事件先落成 issue，带 `source` / `sourceInstance` / 稳定 `issueId` | 事件有身份、可幂等、可追溯 |
+| **Router as Converter** | 临时会话把 issue 规划成 task；`direct` / `runtime` 有独立旁路 | 外部事件能转换成 DSH 可执行工作 |
+| **Comment as Context Bus** | append-only 评论流、发布/拉取游标、`commentId` 幂等、三档投递 | 跨会话/跨实例上下文可靠送达 |
+| **Interaction as Event** | 提问/审批编码为控制评论，答案从任一侧回传 | 上报不阻塞执行，答案可跨端 |
+| **Runtime as Direct RPC** | 目标 worker 直接调 shell，不建卡/不起会话 | 跨实例工具执行有边界、有结果、有审计 |
+
+这五个机制组合起来，Castboard 才成立：**issue 提供事件，router 提供转换，comment 提供上下文总线，interaction 提供非阻塞回传，runtime 提供直连执行。**
+
 ## 6. Client 半侧
 
 - 通过 DSH slot 注册：
