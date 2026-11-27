@@ -5,11 +5,14 @@
 
 ## 1. 定位
 
-Castboard 解决的是 **“把工作交给某台机器上的 Agent，并让结果回来”**：
+Castboard 是 **DSH 的多人、多实例、多系统协同框架**：它解决的是 **“把工作交给正确的机器和 Agent，并让结果回到源系统可消费的事件流”**。
 
-- 看板负责把工作组织成 task；
-- issue 负责跨实例派发、认领、评论和依赖；
-- teamwork 共享库负责项目、成员、设备、issue 与附件；
+- 看板只是人类操作面的一个投影，不是系统本体；
+- task / issue 是统一的工作对象，负责跨实例派发、认领、评论和依赖；
+- 多人协作由项目、成员、角色、assigner / assignee 定义；
+- 多实例协作由 instance、租约、云端 CAS 和事件流定义；
+- 多系统协作由 **事件源模型** 定义：每个外部系统通过 teamwork SDK 把 issue 送进共享库，执行结果和产物再回写到该系统可消费的事件流；
+- teamwork 共享库负责项目、成员、设备、issue、评论与附件；
 - spellbook 负责执行 Agent 会话、交互与工具能力；
 - runtime 是一条旁路：目标实例直接执行一次命令，不建 task、不起 Agent 会话。
 
@@ -17,6 +20,7 @@ Castboard 解决的是 **“把工作交给某台机器上的 Agent，并让结�
 
 - 不做通用工作流引擎；
 - 不替代 DSH 的 session / workspace / approval 能力；
+- 不替代源系统的业务状态机；Castboard 只负责跨系统流转与执行回写；
 - 不提供公网多租户 SaaS；
 - 不把 runtime 当作后台任务队列（只支持前台命令）；
 - 不在插件内重新实现一套 SQL/ORM。
@@ -274,6 +278,36 @@ body        = runtime <tool> + outcome / exit code / stdout / stderr
 - 失败退避，有会话 TTL 和并发限制；
 - `ArtifactUplink` 在结算后读取 `execution_report.artifacts`；
 - 先挂附件再记幂等，每批 10 个 / 50MB / 0 字节跳过。
+
+### 5.10 多系统事件源
+
+Castboard 的“多系统”不是多个服务互相调用，而是 **多个事件源共享同一条工作事件流**。
+
+```text
+外部系统 A（工单 / IM / CI / 监控 / 业务后台）
+  │ teamwork SDK：创建 issue，source = a
+  ▼
+Teamwork 共享库（issue + source + sourceInstance）
+  │ Castboard 认领 / 执行
+  ▼
+Castboard Host（Agent 会话 / Runtime）
+  │ 结果评论 + artifacts
+  ▼
+Teamwork 共享库（评论 / 附件）
+  │ 源系统通过 teamwork SDK 拉取，或接入自己的 webhook
+  ▼
+外部系统 A
+```
+
+约束：
+
+- 每个事件源使用稳定的 `source` 代码，且必须存在于 `dsh_teamwork_issue_source`；
+- issue 同时记录 `source` 与 `sourceInstance`，用于区分来源系统和来源实例；
+- 外部系统创建 issue 时只需 teamwork SDK，不需要变成 DSH 插件；
+- Castboard 把结果写成 issue 评论、把产物挂成附件，源系统通过 SDK 读取；
+- 如果源系统需要实时推送，由源系统自己的集成层订阅共享库事件，Castboard 不绑定具体业务系统的回调协议。
+
+这样同一套任务模型可以接入 IM、工单、CI、监控等多个系统，而不需要为每个系统复制一套执行链路。
 
 ## 6. Client 半侧
 
