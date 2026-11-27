@@ -75,14 +75,22 @@ Castboard 依赖两个同系列包：
 
 ### 通过 CLI
 
+普通安装直接用 npm 包：
+
 ```bash
-dsh plugin --profile <profile> add @meiyukichan/dsh-magica-castboard
+dsh plugin --profile <profile> add @meiyukichan/dsh-magica-castboard@0.2.0-alpha.6
 ```
 
 例如：
 
 ```bash
-dsh plugin --profile web add @meiyukichan/dsh-magica-castboard
+dsh plugin --profile web add @meiyukichan/dsh-magica-castboard@0.2.0-alpha.6
+```
+
+也可以不写版本，跟随 npm 的 `latest`：
+
+```bash
+dsh plugin --profile <profile> add @meiyukichan/dsh-magica-castboard
 ```
 
 安装后重启对应 DSH 实例。启动成功后，侧边栏会出现两个入口：
@@ -90,20 +98,7 @@ dsh plugin --profile web add @meiyukichan/dsh-magica-castboard
 - **任务面板**：看板与任务台账；
 - **项目管理**：项目、成员、设备与 issue 详情。
 
-### 从源码开发
-
-```bash
-cd dsh-magica-castboard
-pnpm install
-pnpm build
-pnpm test
-```
-
-装进 profile：
-
-```bash
-dsh plugin --profile <profile> add link:<path-to-dsh-magica-castboard>
-```
+> `link:<path>` 只用于本地开发调试，普通用户不需要；下面「开发与测试」会单独说明。
 
 ## 界面使用指南
 
@@ -489,6 +484,14 @@ pnpm e2e            # Playwright 假 shell 渲染验收
 pnpm e2e:dsh        # 工作区内隔离 DSH_HOME 的真 dsh E2E
 pnpm e2e:accept     # 真机 HTTP 协议面验收（不需要浏览器）
 ```
+
+本地源码调试时，才把当前目录链接进 profile：
+
+```bash
+dsh plugin --profile <profile> add link:<path-to-dsh-magica-castboard>
+```
+
+> 这是开发调试入口；从 npm / dshmarket 安装的用户请使用上面的普通安装命令。
 
 源码结构：
 
