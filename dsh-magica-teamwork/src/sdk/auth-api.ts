@@ -8,6 +8,7 @@
  */
 
 import type { CastboardAuth } from './auth.js'
+import { CastboardAuthError } from './auth.js'
 import type { CastboardTransport } from './transport.js'
 import { castboardOk, type CastboardResult, type CastboardFail } from './result.js'
 import type { CastboardAccount, CastboardAuthSession, CastboardGlobalRole } from './types.js'
@@ -87,8 +88,8 @@ export class CastboardAuthApi {
     const result = await this.transport.call<void>('authLogout', {}, {
       body: options.allDevices === undefined ? {} : { allDevices: options.allDevices },
     })
-    // 无论服务端怎么回，本地都清（登出的语义就是"这台机器不再带着密钥"）
-    if (result.ok) this.auth.clearStored(false)
+    // 登出的语义是“这台机器不再带着凭据”：服务端失败也清本地，避免留下过期 headers。
+    this.auth.clearStored(false)
     return result
   }
 
@@ -126,7 +127,7 @@ export class CastboardAuthApi {
     return isCastboardGlobalRole(value)
   }
 
-  private accept(result: CastboardResult<CastboardAuthSession>): CastboardResult<CastboardAuthSession> {
+  private async accept(result: CastboardResult<CastboardAuthSession>): Promise<CastboardResult<CastboardAuthSession>> {
     if (!result.ok) return result
     const session = result.data
     if (session === null || typeof session !== 'object' || typeof session.accountToken !== 'string' || session.account === undefined) {
@@ -145,6 +146,18 @@ export class CastboardAuthApi {
       displayName: session.account.displayName,
       globalRole: session.account.globalRole,
     })
+    try {
+      // Login only returns the long-lived credential; headers come from /auth/token.
+      await this.auth.refresh()
+    } catch (error) {
+      const code = error instanceof CastboardAuthError ? error.code : 'auth_refresh_failed'
+      return {
+        ok: false,
+        status: error instanceof CastboardAuthError ? error.status : 0,
+        code,
+        reason: `登录成功但换取鉴权 headers 失败：${error instanceof Error ? error.message : String(error)}`,
+      }
+    }
     return result
   }
 }

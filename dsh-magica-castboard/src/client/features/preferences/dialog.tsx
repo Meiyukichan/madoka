@@ -63,7 +63,7 @@ export function SettingsSheet({ store, t, lang }: { store: BoardStore; t: Transl
   const [tab, setTab] = useState<TabId>('exec')
   const settings: BoardSettings = state.settings ?? {
     defaultPermission: 'workspace-write',
-    maxConcurrent: 3,
+    maxConcurrent: 4,
     autoRoute: true,
     portraitRunOnStart: false,
     commentsEnabled: true,

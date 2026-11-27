@@ -48,7 +48,7 @@ const snapshot = {
 
 test('taskSessionIds：执行史 + 持有者，去重且保持首次出现顺序', () => {
   assert.deepEqual(taskSessionIds(detail), ['session-aaa', 'session-bbb', 'session-ccc'])
-  assert.deepEqual(taskSessionIds({ executions: [], claimedBy: 'Yuki' }), [])
+  assert.deepEqual(taskSessionIds({ executions: [], claimedBy: 'tester' }), [])
   assert.deepEqual(taskSessionIds({}), [])
 })
 

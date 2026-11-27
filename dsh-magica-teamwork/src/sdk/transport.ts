@@ -30,6 +30,7 @@ import {
 import { castboardFail, castboardOk, type CastboardErrorCode, type CastboardFail, type CastboardResult } from './result.js'
 import { castboardLog } from './log.js'
 import type { CastboardAuthLike } from './auth.js'
+import { CastboardAuthError } from './auth.js'
 import { CASTBOARD_BODY_LIMIT, describeHttpFailure, safeText, seg } from './wire.js'
 
 /** 默认超时（与 `CastboardOptions.timeoutMs` 一致） */
@@ -254,25 +255,28 @@ export class CastboardTransport {
     return url.toString()
   }
 
-  private authHeaders(
+  private async authHeaders(
     mode: CastboardAuthMode,
-  ): { ok: true; headers: Record<string, string> } | { ok: false; fail: CastboardFail } {
+  ): Promise<{ ok: true; headers: Record<string, string> } | { ok: false; fail: CastboardFail }> {
     if (mode === 'public') return { ok: true, headers: {} }
     const auth = this.auth
-    const snapshot = auth?.headers() ?? null
+    if (auth === undefined) {
+      if (mode === 'local') return { ok: true, headers: {} }
+      return { ok: false, fail: this.loginRequired('需要先登录：client 还没有会话') }
+    }
+    let snapshot: Record<string, string> | null
+    try {
+      snapshot = await auth.headers()
+    } catch (error) {
+      if (mode === 'local') return { ok: true, headers: {} }
+      return { ok: false, fail: this.authFailure(error) }
+    }
     if (snapshot === null) {
       if (mode === 'local') return { ok: true, headers: {} }
-      return {
-        ok: false,
-        fail: castboardFail({
-          status: 401,
-          code: 'login_required',
-          reason: '需要先登录：client 还没有会话（调用 auth.login() / auth.register()，或注入 credentials / tokenProvider）',
-        }),
-      }
+      return { ok: false, fail: this.loginRequired('需要先登录：client 还没有会话') }
     }
     if (mode === 'admin') {
-      const role = auth?.globalRole()
+      const role = auth.globalRole()
       if (role !== undefined && role !== 'administrator') {
         return {
           ok: false,
@@ -284,10 +288,24 @@ export class CastboardTransport {
         }
       }
     }
-    return {
-      ok: true,
-      headers: { 'dsh-teamwork-token': snapshot.token, 'dsh-teamwork-account': snapshot.accountId },
-    }
+    return { ok: true, headers: snapshot }
+  }
+
+  private loginRequired(reason: string): CastboardFail {
+    return castboardFail({
+      status: 401,
+      code: 'login_required',
+      reason,
+    })
+  }
+
+  private authFailure(error: unknown): CastboardFail {
+    const authError = error instanceof CastboardAuthError ? error : null
+    return castboardFail({
+      status: 401,
+      code: authError?.code ?? 'auth_refresh_failed',
+      reason: `认证交换失败：${error instanceof Error ? error.message : String(error)}`,
+    })
   }
 
   private async perform(
@@ -303,7 +321,7 @@ export class CastboardTransport {
       return castboardFail({ status: 0, code: 'internal_error', reason: 'client 已 dispose，不能再发请求' })
     }
     const mode = options.auth ?? 'signed'
-    const authResult = this.authHeaders(mode)
+    let authResult = await this.authHeaders(mode)
     if (!authResult.ok) {
       castboardLog('warn', 'sdk-auth-failed', `${method} ${path} ${mode} ${authResult.fail.code}`)
       return authResult.fail
@@ -312,13 +330,13 @@ export class CastboardTransport {
     const url = this.buildUrl(path, options.query)
     const body = 'body' in options ? options.body : undefined
     const noTimeout = 'noTimeout' in options ? options.noTimeout === true : false
-    const headers: Record<string, string> = { ...authResult.headers, ...(options.headers ?? {}) }
+    const plainHeaders: Record<string, string> = { ...(options.headers ?? {}) }
     let payload: string | Uint8Array | undefined
     if (body !== undefined) {
       if (typeof body === 'string' || body instanceof Uint8Array) {
         payload = body
       } else {
-        headers['content-type'] = 'application/json'
+        plainHeaders['content-type'] = 'application/json'
         try {
           payload = JSON.stringify(body)
         } catch (err) {
@@ -338,12 +356,19 @@ export class CastboardTransport {
     let lastFail: CastboardFail | null = null
 
     for (let attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) {
+        // A 5xx retry can happen after an in-attempt auth refresh; always take the
+        // latest cached headers instead of reusing the pre-refresh snapshot.
+        authResult = await this.authHeaders(mode)
+        if (!authResult.ok) return authResult.fail
+      }
       const outcome = await this.attempt(url, {
         method,
-        headers,
+        headers: { ...authResult.headers, ...plainHeaders },
+        plainHeaders,
         ...(payload === undefined ? {} : { body: payload }),
         ...(noTimeout ? { noTimeout: true } : { timeoutMs: options.timeoutMs ?? this.timeoutMs }),
-      })
+      }, mode !== 'public')
       if (outcome.ok) {
         castboardLog('info', 'sdk-response', `${method} ${path} ${outcome.status} ${Date.now() - startedAt}ms`)
         return castboardOk(outcome.status, outcome.data)
@@ -382,10 +407,12 @@ export class CastboardTransport {
     init: {
       method: string
       headers: Record<string, string>
+      plainHeaders?: Record<string, string>
       body?: string | Uint8Array
       timeoutMs?: number
       noTimeout?: boolean
     },
+    allowAuthRetry = false,
   ): Promise<AttemptResult> {
     const started = Date.now()
     const requestInit: CastboardFetchInit = {
@@ -443,98 +470,73 @@ export class CastboardTransport {
       retryable: response.status === 429 || response.status >= 500,
     }
 
-    if (response.status === 401 || (response.status === 403 && failure.code === 'account_disabled')) {
+    if (allowAuthRetry && (response.status === 401 || (response.status === 403 && failure.code === 'account_disabled'))) {
       const retried = await this.handleAuthFailure(failure, url, init)
       if (retried !== null) return retried
     }
     return { ok: false, failure }
   }
 
-  /** 401/403 分支。返回 `null` = 不重试（交给上层按 failure 归一） */
+  /** 401/403 分支：刷新 headers 后只重试一次。返回 `null` = 交给上层归一。 */
   private async handleAuthFailure(
     failure: AttemptFailure,
     url: string,
-    init: { method: string; headers: Record<string, string>; body?: string | Uint8Array; timeoutMs?: number },
+    init: {
+      method: string
+      headers: Record<string, string>
+      plainHeaders?: Record<string, string>
+      body?: string | Uint8Array
+      timeoutMs?: number
+      noTimeout?: boolean
+    },
   ): Promise<AttemptResult | null> {
-    switch (failure.code) {
-      case 'token_expired': {
-        // 现签模式：重签一次（新的 exp）
-        this.auth?.onExpired()
-        return this.retryWithFreshAuth(url, init, failure)
+    if (failure.code === 'account_disabled') {
+      return {
+        ok: false,
+        failure: {
+          ...failure,
+          code: 'login_required',
+          reason: `账号已被禁用，恢复后可直接使用：${failure.reason}`,
+        },
       }
-      case 'token_exp_too_long': {
-        const skew = await this.learnSkew()
-        if (skew === null) return null
-        this.auth?.onExpTooLong(skew)
-        return this.retryWithFreshAuth(url, init, failure)
-      }
-      case 'token_account_mismatch': {
-        return {
-          ok: false,
-          failure: {
-            ...failure,
-            code: 'internal_error',
-            reason: `两个鉴权头不一致（SDK 内部错误，请报 bug）：${failure.reason}`,
-          },
-        }
-      }
-      case 'unauthorized': {
-        this.auth?.onUnauthorized()
-        return {
-          ok: false,
-          failure: {
-            ...failure,
-            code: 'login_required',
-            reason: `会话已失效（签名对不上等认证失败），需要重新登录：${failure.reason}`,
-          },
-        }
-      }
-      case 'account_disabled': {
-        return {
-          ok: false,
-          failure: {
-            ...failure,
-            code: 'login_required',
-            reason: `账号已被禁用，恢复后可直接使用：${failure.reason}`,
-          },
-        }
-      }
-      default:
-        return null
     }
-  }
+    if (failure.status !== 401 || this.auth === undefined) return null
 
-  private async retryWithFreshAuth(
-    url: string,
-    init: { method: string; headers: Record<string, string>; body?: string | Uint8Array; timeoutMs?: number },
-    failure: AttemptFailure,
-  ): Promise<AttemptResult> {
-    const snapshot = this.auth?.headers() ?? null
-    if (snapshot === null) {
-      return { ok: false, failure: { ...failure, code: 'login_required', reason: '会话已失效，需要重新登录' } }
-    }
-    return this.attempt(url, {
-      ...init,
-      headers: {
-        ...init.headers,
-        'dsh-teamwork-token': snapshot.token,
-        'dsh-teamwork-account': snapshot.accountId,
-      },
-    })
-  }
-
-  /** 读 `/health.serverTime` 学时钟差；失败返回 `null`（不递归、不重试） */
-  private async learnSkew(): Promise<number | null> {
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}/health`, { method: 'GET' })
-      if (!response.ok) return null
-      const data = (await response.json()) as { serverTime?: unknown }
-      if (typeof data.serverTime !== 'string') return null
-      const parsed = Date.parse(data.serverTime)
-      if (!Number.isFinite(parsed)) return null
-      return Date.now() - parsed
-    } catch {
-      return null
+      await this.auth.refresh()
+      const headers = await this.auth.headers()
+      if (headers === null) {
+        return {
+          ok: false,
+          failure: { ...failure, code: 'login_required', reason: '认证已失效，需要重新登录' },
+        }
+      }
+      const retried = await this.attempt(url, {
+        ...init,
+        headers: { ...headers, ...(init.plainHeaders ?? {}) },
+      }, false)
+      if (!retried.ok && retried.failure.status === 401) {
+        this.auth.onUnauthorized()
+        return {
+          ok: false,
+          failure: {
+            ...retried.failure,
+            code: 'login_required',
+            reason: `重新认证后仍被拒绝，需要重新登录：${retried.failure.reason}`,
+          },
+        }
+      }
+      return retried
+    } catch (error) {
+      const authError = error instanceof CastboardAuthError ? error : null
+      return {
+        ok: false,
+        failure: {
+          ...failure,
+          code: authError?.code ?? 'auth_refresh_failed',
+          reason: `重新认证失败：${error instanceof Error ? error.message : String(error)}`,
+        },
+      }
     }
   }
 

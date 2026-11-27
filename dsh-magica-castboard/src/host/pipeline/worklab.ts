@@ -177,12 +177,11 @@ export interface WorklabComment {
   readonly at?: string
 }
 
-export interface IssueReferenceExtras {
+export interface IssueContextExtras {
   /** Persisted input artifacts; **an empty array = do not add the `<input_attachments>` tag**. */
   readonly attachments?: readonly WorklabAttachment[]
   /** This issue's comments; **an empty array = do not add the `<comments>` tag**. */
   readonly comments?: readonly WorklabComment[]
-  readonly workspacesCatalog?: { readonly indexFile: string; readonly portraitDir: string }
 }
 
 type WorklabLog = (level: 'info' | 'warn', event: string, detail?: string) => void
@@ -217,7 +216,6 @@ export interface WorklabDeps {
 interface PreparedExtras {
   attachments?: readonly WorklabAttachment[]
   comments?: readonly WorklabComment[]
-  workspacesCatalog?: { indexFile: string; portraitDir: string }
 }
 
 /**
@@ -229,22 +227,21 @@ interface PreparedExtras {
  * @param issueId - Target issue.
  * @returns Extras used to render references (never throws).
  */
-export async function prepareWorklab(deps: WorklabDeps, issueId: string): Promise<IssueReferenceExtras> {
+export async function prepareWorklab(deps: WorklabDeps, issueId: string): Promise<IssueContextExtras> {
   const extras: PreparedExtras = {}
   const log: WorklabLog = (level, event, detail) => { deps.log?.(level, event, detail) }
-  await refreshWorkspaceCatalog(extras, deps, log)
+  await refreshWorkspaceCatalog(deps, log)
   await collectAttachmentFiles(extras, deps, issueId, log)
   await collectComments(extras, deps, issueId, log)
   return extras
 }
 
 async function refreshWorkspaceCatalog(
-  extras: PreparedExtras,
   deps: WorklabDeps,
   log: WorklabLog,
 ): Promise<void> {
   try {
-    extras.workspacesCatalog = await ensureWorkspaceCatalog(deps.home, deps.listWorkspaces)
+    await ensureWorkspaceCatalog(deps.home, deps.listWorkspaces)
   } catch (error) {
     log('warn', 'worklab-catalog-failed', messageOfError(error))
   }
@@ -317,31 +314,34 @@ async function collectComments(
 }
 
 
-const CATALOG_PREAMBLE = `# workspace 清单索引
+const CATALOG_PREAMBLE = `# Workspace index
 
-> 用途：**给 router 判断「这条 issue 该交给哪个 workspace」**。先读本文件 —— 目标是一眼
-> 就能定下 80% 的归属；两个项目都像的时候，再去读对应肖像 \`./<workspaceId>.md\`。
+> Purpose: **the router's first pass for deciding which workspace an issue belongs to**. Read this
+> file first — the goal is to settle 80% of assignments at a glance; when two projects look alike,
+> open the corresponding portrait \`./<workspaceId>.md\`.
 >
-> 每个项目**必须**有两个关键字段：\`workspaceId\` 与 \`cwd\`（项目绝对路径）——
-> router 会把 cwd **逐字**填进 task，写错一个字就等于把活派到错的仓库。
-> \`workspaceId\` 是 dsh 分配的 **UUID**（36 字符，\`8-4-4-4-12\`），不是 \`ws-xxx\` 这类自造名字；
-> 这两个值由宿主播种时给准，维护时**照抄，不要改写**（别换成相对路径、别加引号/反引号、别自造 id）。
+> Every workspace has two required fields: \`workspaceId\` and \`cwd\` (absolute project path) —
+> the router copies cwd **verbatim** into the task, so one wrong character sends the work to the
+> wrong repository. \`workspaceId\` is the UUID assigned by dsh (36 chars, \`8-4-4-4-12\`), not a
+> hand-made \`ws-xxx\` name. The host supplies both values when seeding; copy them, never rewrite
+> them (no relative paths, quotes, backticks, or invented ids).
 >
-> 维护方式：由「项目肖像」会话**增量更新**。宿主只在缺失/为空时播种，之后不再改动。
-> 每个项目有两处要写：下面一览表里**本行**的「一句话职责」，以及后面**本项目那一段**。
+> Maintenance: the project-portrait session updates this file incrementally. The host seeds it
+> only when missing or empty; after that it is never overwritten. Each workspace contributes one
+> row in the overview table and one section below it.
 
-## 一览
+## Overview
 
-| workspaceId | 标题 | cwd（绝对路径） | 一句话职责 |
+| workspaceId | title | cwd (absolute) | responsibility |
 |---|---|---|---|`
 
-const EMPTY_OVERVIEW_ROW = '| （无） | — | — | （待补） |'
+const EMPTY_OVERVIEW_ROW = '| (none) | — | — | (fill in) |'
 
-const PORTRAIT_STUB_TAIL = `- 能做什么：（待补）
-- 关键词：（待补）
-- 适合接的活：（待补）
-- 不适合（容易误派的近似领域）：（待补）
-- 肖像：—`
+const PORTRAIT_STUB_TAIL = `- Routing fit: (fill in)
+- Not here: (fill in)
+- Keywords: (fill in)
+- Notes: (fill in)
+- Portrait: —`
 
 /** Indexes confirmed to "have content" (in-process cache, so the hot path stops reading disk). */
 const confirmedIndexes = new Set<string>()
@@ -396,16 +396,16 @@ function escapeTableCell(text: string): string {
 }
 
 function renderOverviewRow(workspace: WorkspaceSummary): string {
-  return `| ${workspace.id} | ${escapeTableCell(workspace.title)} | ${escapeTableCell(workspace.path)} | （待补） |`
+  return `| ${workspace.id} | ${escapeTableCell(workspace.title)} | ${escapeTableCell(workspace.path)} | (fill in) |`
 }
 
 function renderPortraitStub(workspace: WorkspaceSummary): string {
   const escapedTitle = escapeTableCell(workspace.title)
   return [
-    `## ${workspace.id}（${escapedTitle === '' ? '（无标题）' : escapedTitle}）`,
+    `## ${workspace.id} (${escapedTitle === '' ? '(untitled)' : escapedTitle})`,
     '',
-    `- workspaceId：${workspace.id}`,
-    `- cwd（绝对路径）：${workspace.path}`,
+    `- workspaceId: ${workspace.id}`,
+    `- cwd: ${workspace.path}`,
     PORTRAIT_STUB_TAIL,
   ].join('\n')
 }

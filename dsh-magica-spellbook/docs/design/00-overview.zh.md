@@ -520,7 +520,7 @@ pnpm build
 1. `TURN_END_KINDS` **顺序与内容**都锁死（改成 7 个后仍要 `deepEqual` 整数组）。
 2. `isTurnCompleted(undefined) === false`（缺 `turn/end` 不能算成功）。
 3. `describeTurnEnd` 的 9 条精确字符串（含 `'no turn/end observed'`、`'error: unknown'`）。
-4. `buildPluginMessage` 具名分支：`source = { kind: section, plugin, form:'snapshot', sections:[{ name, text }] }`，深等于、无多余键。
+4. `buildPluginMessage` 具名分支：`source = { kind: section, form:'snapshot', sections:[{ name, text }] }`，深等于、无 `plugin` 键。
 5. `mintMessageId` 连续 200 次不重复。
 6. `snapshotRunState` 的可选键**缺失**而非 `undefined`（`'outcome' in snap === false`）。
 7. `resolveAgents` 5 种畸形输入全抛且 message 匹配 `/ctx\.agents/`，**不再接受** `ctx.agents` 属性访问。

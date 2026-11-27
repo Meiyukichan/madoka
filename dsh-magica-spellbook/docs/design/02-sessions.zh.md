@@ -330,8 +330,8 @@ function installObservers(agentCtx: Context, sessionId: SessionId, state: Sessio
 function mintMessageId(): MessageId           // 'magica-msg-<ts36>-<seq36>-<rand6>'
 function mintSessionId(prefix: string): SessionId   // '<prefix>-<ts36>-<seq36>-<rand8>'
 function buildUserMessage(text: string | string[]): UserMessage
-function buildPluginMessage(plugin: string, text: string, section?: string): UserMessage
-function toContextEntries(value: PluginContextEntry | readonly PluginContextEntry[] | undefined): Array<{ name?: string; text: string }>
+function buildPluginMessage(plugin: string, text: string, section?: string, options?: PluginContextOptions): UserMessage
+function toContextEntries(value: PluginContextEntry | readonly PluginContextEntry[] | undefined): Array<{ name?: string; text: string; form?: PluginContextForm; summary?: string }>
 ```
 
 **为什么本地 mint id 而不 import `MessageId()`**：dsh 的品牌函数运行时是 no-op，本地断言可保持"构建产物零运行时 `@deepseek-ai/*` 导入"（P2）。唯一性靠 `messageSeq` 单调递增（200 次调用不重复是验收契约）。
@@ -342,18 +342,20 @@ function toContextEntries(value: PluginContextEntry | readonly PluginContextEntr
 { id, role: 'user', content: string[] 归一成 [{ type:'text', text }], source: { kind:'user' } }
 ```
 
-`buildPluginMessage` 两分支（`section` 名会变成**用户可见的来源标签**）：
+`buildPluginMessage` 的 `form`（缺省 `snapshot`）决定 source 形状（`section` 名会变成**用户可见的来源标签**）：
 
 ```ts
-// 无名
-source = { kind: 'plugin', plugin }
-// 具名
-source = { kind: section, plugin, form: 'snapshot', sections: [{ name: section, text }] }
+// snapshot（缺省）：当前状态，多段贡献放 sections
+source = { kind: section ?? 'spellbook-context', form: 'snapshot', sections: [{ name: kind, text }] }
+// instructions：纯指令，不伪造 sections
+source = { kind: section ?? 'spellbook-context', form: 'instructions' }
+// notice：一次性事件，必须带折叠行 summary
+source = { kind: section ?? 'spellbook-context', form: 'notice', summary }
 ```
 
-**为什么用 `section` 当 `source.kind`**：GUI 的上下文行 label 只取 `source.kind` —— `kind:'plugin'` 显示插件包名，其余 kind 显示 kind 本身。具名 section 让 GUI 显示 `lattice-rules` 而不是 `@amazing-tools/dsh-magica`。`plugin` 字段两条分支都保留（它表达"谁注入的"）。
+**为什么用 `section` 当 `source.kind`**：GUI 的上下文行 label 只取 `source.kind` —— 具名 section 让 GUI 显示 `lattice-rules` 而不是固定包名。V4 source **不再写退役的 `plugin` 字段**；生产者身份由 `kind` 表达，`plugin` 参数只保留在函数签名里给调用方表达来源。
 
-`toContextEntries` 归一规则：`undefined` → `[]`；数组归一成列表；非空字符串 → `{ text }`；对象且 `text` 非空 → `{ name?, text }`（`name` 非空才带）；其余（空串 / `null` / 非对象 / `text` 非字符串）**静默丢弃**。
+`toContextEntries` 归一规则：`undefined` → `[]`；数组归一成列表；非空字符串 → `{ text }`；对象且 `text` 非空 → `{ name?, text, form?, summary? }`（`name` 非空才带；`form` 只认三种合法值；`summary` 非空才带）；其余（空串 / `null` / 非对象 / `text` 非字符串）**静默丢弃**。
 
 ### 3.5 上下文投递：`installContextDelivery`
 
@@ -650,10 +652,10 @@ TTL（`startTimer`）：`ttlMs === undefined || !(ttlMs > 0)` → 直接返回 �
 ### 5.2 `noInteraction` 的注入形态
 
 ```
-NO_INTERACTION_PREFIX = '禁止向用户提问，直接完成/回答。'
+NO_INTERACTION_PREFIX = 'Do not ask the user questions; complete or answer directly.'
 ```
 
-**不是**拼进 user 消息，而是 `contexts.push(buildPluginMessage(contextPlugin, NO_INTERACTION_PREFIX))` —— 一条 `source.kind = 'plugin'` 的**插件规则**（"插件说的"，不是"用户说的"）。**刻意无名**（不传 `section`）：GUI 行显示来源插件署名。顺序：调用方 `context` 全部在前，这条最后。
+**不是**拼进 user 消息，而是 `contexts.push(buildPluginMessage(contextPlugin, NO_INTERACTION_PREFIX))` —— 一条 `source.kind = 'spellbook-context'`、`form = 'snapshot'` 的**插件规则**（"插件说的"，不是"用户说的"）。**刻意无名**（不传 `section`）：GUI 行显示默认 kind。顺序：调用方 `context` 全部在前，这条最后。
 
 ### 5.3 fail-fast 接管（临时会话必须装）
 
@@ -887,7 +889,10 @@ buildUserMessage('干活')
 
 buildPluginMessage('@x/y', '规则', 'lattice-rules')
 // { id:'magica-msg-…', role:'user', content:[{type:'text',text:'规则'}],
-//   source:{ kind:'lattice-rules', plugin:'@x/y', form:'snapshot', sections:[{name:'lattice-rules',text:'规则'}] } }
+//   source:{ kind:'lattice-rules', form:'snapshot', sections:[{name:'lattice-rules',text:'规则'}] } }
+
+buildPluginMessage('@x/y', '新评论', 'issue-comments', { form: 'notice', summary: '3 条新评论' })
+// source:{ kind:'issue-comments', form:'notice', summary:'3 条新评论' }（notice 没有 sections）
 ```
 
 **最终模型请求次序**（`installContextDelivery` 在首个 enter 的 step 末尾追加）：
@@ -968,8 +973,8 @@ bridges: Map<sessionId, { sessionId, pending: Map<questionId, PendingEntry> }>
 | 1 | `TURN_END_KINDS` | `deepEqual` 整数组（**顺序也锁**） |
 | 2 | `isTurnCompleted` | 只有 `completed` 为真；`undefined` 为假 |
 | 3 | `describeTurnEnd` | 7 种 kind 各一条精确串 + `undefined` 一条 |
-| 4 | `buildPluginMessage` 无名 | `source` 深等于 `{ kind:'plugin', plugin }`（无多余键） |
-| 5 | `buildPluginMessage` 具名 | `source = { kind:section, plugin, form:'snapshot', sections:[{name,text}] }` |
+| 4 | `buildPluginMessage` 无名 | `source` 深等于 `{ kind:'spellbook-context', form:'snapshot', sections:[{name,text}] }`（无 `plugin` 键） |
+| 5 | `buildPluginMessage` 具名 | `source = { kind:section, form:'snapshot', sections:[{name,text}] }`；`form:'instructions'` 不带 sections；`form:'notice'` 必须有 summary |
 | 6 | `buildUserMessage` | `source` 深等于 `{ kind:'user' }`；`string[]` → 多 block |
 | 7 | `mintMessageId` | 200 次不重复 |
 | 8 | `emptyRunState` | `running === true`、`done === false`、`error === null` |

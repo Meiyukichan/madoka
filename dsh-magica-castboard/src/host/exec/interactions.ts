@@ -12,6 +12,15 @@ import type { PendingInteractionRecord } from '../model.ts'
 
 export type InteractionKind = 'approval' | 'question'
 
+/** 关闭结果；`answered` 表示有人答过，具体是否 apply 仍以 source host 为准。 */
+export type InteractionOutcome = 'answered' | 'cancelled' | 'expired' | 'reporting_disabled' | 'unknown'
+
+/** `refresh` 的成败；`ok:false` 时调用方必须整拍跳过，不能把旧 cache 当“没有 pending”。 */
+export interface InteractionRefresh {
+  items: readonly PendingInteraction[]
+  ok: boolean
+}
+
 export interface PendingInteraction {
   id: string
   kind: InteractionKind
@@ -54,6 +63,8 @@ export interface InteractionDeps {
 export class InteractionService {
   private readonly deps: InteractionDeps
   private cache: PendingInteraction[] = []
+  /** 本地已观察到的关闭结果；只写第一次，重启后丢失，由 projection 兜底。 */
+  private readonly outcomes = new Map<string, InteractionOutcome>()
 
   constructor(deps: InteractionDeps) {
     this.deps = deps
@@ -61,10 +72,19 @@ export class InteractionService {
 
   /** Rides on `/state`; no polling of its own. */
   async refresh(): Promise<readonly PendingInteraction[]> {
+    return (await this.refreshResult()).items
+  }
+
+  /**
+   * 带成败的刷新：reporter/coordinator 只能在这返回 `ok:true` 时做 diff，
+   * 否则一次读失败会把全部 pending 误判成 completed。
+   */
+  async refreshResult(): Promise<InteractionRefresh> {
     const face = this.deps.face
     if (face === undefined) {
+      // No authority at all: do not keep showing a snapshot nobody can answer.
       this.cache = []
-      return this.cache
+      return { items: this.cache, ok: false }
     }
     try {
       const [approvals, questions] = await Promise.all([
@@ -75,14 +95,32 @@ export class InteractionService {
         ...item,
         taskId: item.taskId ?? this.deps.taskIdOfSession?.(item.sessionId),
       }))
+      return { items: this.cache, ok: true }
     } catch {
-      // Keep the last snapshot on a failed read (do not blank the UI)
+      // Keep the last snapshot on a failed read (do not blank the UI), but report failure.
+      return { items: this.cache, ok: false }
     }
-    return this.cache
   }
 
   list(): readonly PendingInteraction[] {
     return this.cache
+  }
+
+  /** 记录一次关闭结果；先到先得，不覆盖 `answerRemote` 写入的 answered。 */
+  noteOutcome(id: string, outcome: InteractionOutcome): void {
+    if (id === '' || this.outcomes.has(id)) return
+    this.outcomes.set(id, outcome)
+  }
+
+  outcomeOf(id: string): InteractionOutcome | undefined {
+    return this.outcomes.get(id)
+  }
+
+  /** 取走结果（Coordinator 发 completed 后调用）。 */
+  takeOutcome(id: string): InteractionOutcome | undefined {
+    const outcome = this.outcomes.get(id)
+    this.outcomes.delete(id)
+    return outcome
   }
 
   ofTask(taskId: string): readonly PendingInteraction[] {
@@ -93,6 +131,7 @@ export class InteractionService {
     const target = this.cache.find(item => item.id === id && item.kind === 'approval')
     if (target === undefined) return false
     await this.deps.face?.answerApproval?.({ id, sessionId: target.sessionId, approved, note })
+    this.noteOutcome(id, 'answered')
     this.cache = this.cache.filter(item => item.id !== id)
     return true
   }
@@ -106,6 +145,7 @@ export class InteractionService {
       answer,
       ...(selected === undefined ? {} : { selected }),
     })
+    this.noteOutcome(id, 'answered')
     this.cache = this.cache.filter(item => item.id !== id)
     return true
   }
@@ -114,6 +154,7 @@ export class InteractionService {
     const target = this.cache.find(item => item.id === id && item.kind === 'question')
     if (target === undefined) return false
     await this.deps.face?.cancelQuestion?.({ id, sessionId: target.sessionId })
+    this.noteOutcome(id, 'cancelled')
     this.cache = this.cache.filter(item => item.id !== id)
     return true
   }

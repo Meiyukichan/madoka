@@ -181,7 +181,7 @@ test('注入前失败：丢弃会话、attempts 归零，下一拍新会话注�
   issue = await issues.get(created.id)
   assert.equal(fresh.runs.length, 1)
   assert.ok(fresh.runs[0]!.references.length > 0, '新会话必须重新注入完整 references')
-  assert.doesNotMatch(fresh.runs[0]!.instruction, /继续处理 issue/)
+  assert.doesNotMatch(fresh.runs[0]!.instruction, /Continue with the issue/)
   assert.equal(issue?.status, 'routing')
   service.dispose()
 })
@@ -260,7 +260,7 @@ test('失败退避：未转换成功回 pending 并记录重试时刻，到上�
   await service.tick()
   issue = await issues.get(created.id)
   assert.equal(fake.runs.length, 2)
-  assert.match(fake.runs[1]?.instruction ?? '', /继续处理 issue/)
+  assert.match(fake.runs[1]?.instruction ?? '', /Continue with the issue/)
   assert.equal(fake.runs[1]?.references, '', '重试只注入 issueId 提醒，不重复完整 references')
   assert.equal(issue?.status, 'abandoned')
   assert.equal(issue?.routeAttempts, 2)
@@ -481,7 +481,7 @@ test('现场材料失败时退回本地台账渲染', async (t) => {
   await service.tick()
   assert.equal(fake.runs.length, 1)
   assert.deepEqual(cloud.routed.length, 1)
-  assert.ok(fake.runs[0]?.references.includes('castboard_issue_references'))
+  assert.ok(fake.runs[0]?.references.includes('castboard_issue_context'))
 })
 
 test('默认上限是 3 次', () => {

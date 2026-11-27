@@ -74,10 +74,10 @@ test('visibleTasks 按搜索 / 项目 / 紧急度过滤并支持排序', () => {
 
 test('visibleIssues 只画未转卡的 pending/accepted/routing，并按状态 → 紧急度 → 创建时间排序', () => {
   const issues = [
-    { issueId: 'i-1', title: 'a', status: 'pending', urgency: 'relaxed', source: 'self', createdAt: 2, updatedAt: 2 },
-    { issueId: 'i-2', title: 'b', status: 'routing', urgency: 'relaxed', source: 'self', createdAt: 3, updatedAt: 3 },
-    { issueId: 'i-3', title: 'c', status: 'pending', urgency: 'urgent', source: 'self', createdAt: 1, updatedAt: 1 },
-    { issueId: 'i-4', title: 'd', status: 'success', urgency: 'urgent', source: 'self', createdAt: 0, updatedAt: 0 },
+    { issueId: 'i-1', title: 'a', status: 'pending', urgency: 'relaxed', source: 'dsh', createdAt: 2, updatedAt: 2 },
+    { issueId: 'i-2', title: 'b', status: 'routing', urgency: 'relaxed', source: 'dsh', createdAt: 3, updatedAt: 3 },
+    { issueId: 'i-3', title: 'c', status: 'pending', urgency: 'urgent', source: 'dsh', createdAt: 1, updatedAt: 1 },
+    { issueId: 'i-4', title: 'd', status: 'success', urgency: 'urgent', source: 'dsh', createdAt: 0, updatedAt: 0 },
   ] as const
   const state = fakeState({
     tasks: [{ id: 't-1', title: 'a', status: 'todo', urgency: 'relaxed', issueId: 'i-1', createdAt: 2, updatedAt: 2 }],
@@ -91,7 +91,7 @@ test('isSessionId 认标准 dsh UUID / session- / 旧 magica-', () => {
   assert.equal(isSessionId('magica-ws-abc-1-def'), true)
   assert.equal(isSessionId(''), false)
   assert.equal(isSessionId(undefined), false)
-  assert.equal(isSessionId('Yuki'), false)
+  assert.equal(isSessionId('not-a-session'), false)
 })
 
 test('状态机：done 只能去 archived', () => {

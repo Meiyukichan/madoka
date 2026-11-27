@@ -55,12 +55,10 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     const tokenOk = Boolean(ctx.shutdownToken) && token === ctx.shutdownToken
 
     if (!tokenOk) {
-      // 退化为 administrator 签名头
-      const { authenticateHeaders, requireAdministrator } = await import('../auth/guard.js')
-      const { user } = authenticateHeaders(req.headers as Record<string, string | string[] | undefined>, {
-        db: ctx.db,
-        ttlSeconds: ctx.config.tokenTtlSeconds,
-        authCache: ctx.authCache,
+      // 退化为当前 AuthProvider 的认证头
+      const { requireAdministrator } = await import('../auth/guard.js')
+      const user = await ctx.auth.authenticate({
+        headers: req.headers as Record<string, string | string[] | undefined>,
       })
       requireAdministrator(user)
     }

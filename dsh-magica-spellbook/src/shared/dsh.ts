@@ -61,21 +61,16 @@ declare module '@deepseek-ai/dsh-llm' {
      * spellbook 注入的插件上下文（`agent.inject()` / 会话上下文投递）。
      *
      * dsh 的 `MessageSourceMap` 按**生产者**合并，而我们的生产者是"任意具名 section"：
-     * 具体 `kind` 由调用方给的 section 名决定（无名时是 `spellbook-context`），
-     * 所以这里只能声明成 `string` —— 这也是运行时事实（dsh 不枚举 user 消息的 `kind`，
-     * session format v4 只拒绝已退役的字面量 `plugin`）。段落名同时出现在 `sections` 里，
-     * 消费方需要精确定位时读 `sections[].name`。
+     * 具体 `kind` 由调用方给的 section 名决定（无名时是 `spellbook-context`）。
+     * V4 source 不再携带退役的 `plugin` 字段；`form` 表示内容形态：
+     * - `snapshot`：当前状态，多段贡献放在 `sections`；
+     * - `instructions`：一次性指令，没有 sections；
+     * - `notice`：一次性事件，必须带一行 `summary`。
      */
-    'spellbook-context': {
-      /** 生产者自有 kind：调用方给的 section 名，无名时是 `spellbook-context`。 */
-      kind: string
-      /** 注入方包名（表达"谁注入的"）。 */
-      plugin: string
-      /** 快照形态：一次注入的具名段落。 */
-      form: 'snapshot'
-      /** 本次注入的具名段落（`name` 与 `kind` 同值）。 */
-      sections: readonly ContextSnapshotSection[]
-    }
+    'spellbook-context':
+      | { kind: string; form?: 'snapshot'; sections: readonly ContextSnapshotSection[] }
+      | { kind: string; form: 'instructions' }
+      | { kind: string; form: 'notice'; summary: string }
   }
 }
 

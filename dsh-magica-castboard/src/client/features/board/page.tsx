@@ -15,7 +15,7 @@ import {
 import { useEffect, useState, useSyncExternalStore } from 'react'
 
 import type { TaskStatus } from '../../../shared/wire.ts'
-import { canTransition } from '../../../shared/wire.ts'
+import { canTransition, isImSource } from '../../../shared/wire.ts'
 import type { TaskSummaryView } from '../../data/index.ts'
 import type { BoardState, BoardStore } from '../../data/state/index.ts'
 import type { Translate } from '../../labels/index.ts'
@@ -251,7 +251,7 @@ export function Lanes({ store, t, lang }: LanesProps) {
         }}
       >
         {state.secondaryOpen
-          ? <SecondaryPage store={store} tasks={state.tasks} t={t} lang={lang} onAlert={alert} />
+          ? <SecondaryPage store={store} tasks={state.tasks.filter(task => !isImSource(task.source))} t={t} lang={lang} onAlert={alert} />
           : (
               <div className="lt-lanes">
                 <div className="lt-lane lt-lane-issue" key="issue">

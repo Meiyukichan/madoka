@@ -12,7 +12,7 @@ import { createEventLogger } from '@meiyukichan/dsh-magica-spellbook'
 
 import { eventLog } from '../shared/event-log.ts'
 
-/** Registered owner of the `self` / `dsh` source codes. */
+/** Registered owner of the `dsh` source code. */
 const ISSUE_SOURCE_PLUGIN_NAME = '@meiyukichan/dsh-magica-castboard'
 
 /** Shared teamwork SDK logger: same spellbook NDJSON stream, separate plugin directory. */
@@ -180,9 +180,9 @@ export interface AuthFace {
   logout(): Promise<AuthSnapshot>
 }
 
-/** Source dictionary self-healing + validation (raw/host/8). */
+/** Source dictionary healing + registration. */
 export interface IssueSourcesFace {
-  /** Make sure `self` / `dsh` exist with this plugin's `pluginName`. */
+  /** Make sure the `dsh` source exists with this plugin's `pluginName`. */
   ensure(): Promise<void>
   /** Whether the shared library already knows this code (never registers it). */
   isRegistered(code: string): Promise<boolean>

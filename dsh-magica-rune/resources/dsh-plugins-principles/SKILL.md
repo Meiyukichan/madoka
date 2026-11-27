@@ -25,15 +25,22 @@ Any plugin built for dsh must obey the rules and requirements below — they are
    - `dsh.client.external` is only for infrastructure, transport, or generated-wiring module requests; a feature plugin must not use it to reach another plugin's runtime values (the build-time purity gate rejects cross-plugin value imports).
    - `immediately: true` is only for stage-one prefetch rows that must register their factory before the shell boots; ordinary plugins leave it out.
 
-3. **Dependency ranges must cover the running dsh runtime**: dsh packages that must share an instance with the host (cordis, dsh-llm, dsh-settings, dsh-tools, schemastery, ...) belong in **both** `peerDependencies` and `devDependencies`, with ranges covering the runtime (e.g. `^0.2.0-rc.2` / `>=0.2.0-rc.2`). Baseline modules injected by the shell module table (`react`/`react-dom`, `ui-primitives`/`ui-slots`/`client-store`, ...) go in `devDependencies` only, for type checking; they are never bundled.
+3. **Dependency ranges**: this repository's 0.2 plugins compile and test against **dsh `0.2.1-rc.5`** while keeping install support for `0.2.0 ~ 0.2.2`. dsh packages that must share an instance with the host (cordis, dsh-llm, dsh-settings, dsh-tools, schemastery, ...) belong in **both** `peerDependencies` and `devDependencies`: pin the dev side to the exact baseline (`0.2.1-rc.5`, cordis `4.0.5`, schemastery `3.18.5`) and give the peer side three branches (see below). Baseline modules injected by the shell module table (`react`/`react-dom`, `ui-primitives`/`ui-slots`/`client-store`, ...) go in `devDependencies` only, for type checking; they are never bundled.
 
    ```json
-   "peerDependencies": { "@deepseek-ai/cordis": "^4.0.4", "@deepseek-ai/dsh-llm": "^0.2.0-rc.2" },
-   "devDependencies": { "@deepseek-ai/cordis": "^4.0.4", "@deepseek-ai/dsh-llm": "^0.2.0-rc.2" }
+   "peerDependencies": {
+     "@deepseek-ai/cordis": ">=4.0.4",
+     "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 <0.3.0-0 || >=0.2.1-rc.5 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0"
+   },
+   "devDependencies": {
+     "@deepseek-ai/cordis": "4.0.5",
+     "@deepseek-ai/dsh-llm": "0.2.1-rc.5"
+   }
    ```
 
-   - During profile composition, 0.2 semver-checks the `@deepseek-ai/dsh` and `@deepseek-ai/dsh-*` peers (**prereleases included**): a row with an unsatisfied peer is **disabled outright** (the plugin manager also rolls back and refuses the install). The only way through is a per-version exemption: `dsh plugin --profile <p> allow-version <pkg@version> --dsh-version <exact> --accept-risk`.
-   - `engines.dsh` is declarative only — nothing in the source reads it, so it provides no protection.
+   - During profile composition, 0.2 semver-checks the `@deepseek-ai/dsh` and `@deepseek-ai/dsh-*` peers with `includePrerelease: true`: a row with an unsatisfied peer is **disabled outright** (the plugin manager also rolls back and refuses the install). The only way through is a per-version exemption: `dsh plugin --profile <p> allow-version <pkg@version> --dsh-version <exact> --accept-risk`.
+   - The peer range is **three branches** because package managers use standard semver: the prerelease tuple rule would reject `0.2.1-rc.x` / `0.2.2-rc.x` if only `>=0.2.0-rc.2 <0.3.0-0` were written. dsh's own gate is lenient, npm/pnpm are not.
+   - **Never write `engines.dsh`**: it has a reader, and when present it decides alone — every per-package dsh peer is then skipped. Omit it so the real peer checks run.
 
 4. **`cordis.patch.yml` mounts rows with `insert`** (`id` + `name`), and the profile applies it on install. **The inserted `name` must exactly equal `package.json`'s `name`** (the full scoped package name) — the loader locates the package at `node_modules/<name>` by that name.
 

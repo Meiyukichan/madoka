@@ -9,6 +9,7 @@
  *
  * @module dsh-magica-castboard/host/rules
  */
+import { acceptanceIdFor } from './exec/acceptance.ts'
 import {
   ACCEPTANCE_TYPES,
   DEFAULT_MAX_CONCURRENT,
@@ -482,21 +483,13 @@ export function normalizeAcceptanceStrategyIds(raw: unknown): string[] | undefin
   return ids.length > 0 ? ids : undefined
 }
 
-/** Derive a stable id from title + type, so a resubmitted inline strategy keeps its identity. */
-function inlineStrategyId(title: string, type: AcceptanceStrategy['type']): string {
-  const seed = `${type}\u0000${title}`
-  let hash = 5381
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = ((hash << 5) + hash + seed.charCodeAt(index)) >>> 0
-  }
-  return `a-${hash.toString(36)}`
-}
-
 /**
  * Normalize one-off acceptance strategies carried by an issue or a card.
  *
- * A bad entry is dropped rather than failing the whole create/edit; duplicate
- * titles keep the first occurrence because array order is priority.
+ * The caller never supplies an id: ids are always derived from `type + title` by the
+ * same `acceptanceIdFor` used by the strategy archive. A bad entry is dropped rather
+ * than failing the whole create/edit; duplicate titles keep the first occurrence
+ * because array order is priority.
  */
 export function normalizeAcceptanceStrategies(raw: unknown): AcceptanceStrategy[] | undefined {
   if (!Array.isArray(raw)) return undefined
@@ -516,10 +509,7 @@ export function normalizeAcceptanceStrategies(raw: unknown): AcceptanceStrategy[
     const titleKey = title.normalize('NFKC').toLowerCase()
     if (seenTitles.has(titleKey)) continue
     seenTitles.add(titleKey)
-    const rawId = typeof fields.id === 'string' ? fields.id.trim() : ''
-    let id = rawId !== '' && isValidId(rawId) && !seenIds.has(rawId)
-      ? rawId
-      : inlineStrategyId(title, type as AcceptanceStrategy['type'])
+    let id = acceptanceIdFor(title, type as AcceptanceStrategy['type'])
     while (seenIds.has(id)) id = `${id}x`
     seenIds.add(id)
     out.push({ id, title, type: type as AcceptanceStrategy['type'], description })

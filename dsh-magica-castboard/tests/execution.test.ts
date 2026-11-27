@@ -154,19 +154,19 @@ test('run：同一张卡重复启动被闸门拒绝', async (t) => {
   service.dispose()
 })
 
-test('run：并发上限在闸门内生效，welink 不占名额', async (t) => {
+test('run：并发上限在闸门内生效，im 不占名额', async (t) => {
   const { tasks } = await seeded(t, [
     taskRecord({ id: 't-1' }),
     taskRecord({ id: 't-2' }),
-    taskRecord({ id: 't-3', source: 'welink' }),
+    taskRecord({ id: 't-3', source: 'im' }),
   ])
   const first = fakeHandle('session-1')
-  const welink = fakeHandle('session-2')
+  const im = fakeHandle('session-2')
   let index = 0
   const service = new ExecutionService({
     tasks,
     sessions: {
-      start: async () => [first.handle, welink.handle][index++]!,
+      start: async () => [first.handle, im.handle][index++]!,
     },
     now: () => 1,
     hostInstanceId: 'host-1',
@@ -181,7 +181,7 @@ test('run：并发上限在闸门内生效，welink 不占名额', async (t) => 
   assert.equal((await service.run('t-3')).ok, true)
 
   first.first.resolve(settleCompleted())
-  welink.first.resolve(settleCompleted())
+  im.first.resolve(settleCompleted())
   await service.waitForIdle()
   service.dispose()
 })
@@ -286,25 +286,73 @@ test('followUp：台账里有会话时走 resume，而不是新起一条', async
   service.dispose()
 })
 
-test('dispatch：辅助轮只记执行记录，不移动卡片状态', async (t) => {
-  const { tasks } = await seeded(t, [taskRecord({ id: 't-1', status: 'in_review' })])
-  const fake = fakeHandle()
+test('wakeForComment：resume 只带具名上下文，不产生 prompt', async (t) => {
+  const record = taskRecord({
+    id: 't-1',
+    status: 'in_review',
+    executions: [{ id: 'e-0', trigger: 'manual', outcome: 'succeeded', sessionId: 'session-prev' }],
+  })
+  const { tasks } = await seeded(t, [record])
+  const fake = fakeHandle('session-prev')
+  const resumes: Array<{ prompt?: string; context?: readonly { name: string; text: string }[] }> = []
   const service = new ExecutionService({
     tasks,
-    sessions: sessionsWith([fake]),
+    sessions: {
+      start: async () => { throw new Error('should resume') },
+      resume: async options => {
+        resumes.push(options)
+        return fake.handle
+      },
+    },
+    now: () => 11,
+    hostInstanceId: 'host-1',
+  })
+
+  const result = await service.wakeForComment('t-1', '<issue_comments/>')
+  assert.equal(result.ok, true)
+  assert.equal(resumes.length, 1)
+  assert.equal(resumes[0]?.prompt, undefined)
+  assert.equal(resumes[0]?.context?.[0]?.name, 'castboard-issue-comments')
+  assert.equal(resumes[0]?.context?.[0]?.text, '<issue_comments/>')
+  fake.first.resolve(settleCompleted())
+  await service.waitForIdle()
+  service.dispose()
+})
+
+test('dispatch：只唤醒保留会话，辅助轮不移动卡片状态', async (t) => {
+  const { tasks } = await seeded(t, [taskRecord({
+    id: 't-1',
+    status: 'in_review',
+    executions: [{ id: 'e-0', trigger: 'manual', outcome: 'succeeded', sessionId: 'session-prev' }],
+  })])
+  const fake = fakeHandle('session-prev')
+  const resumed: Array<{ prompt?: string; context?: readonly { name: string; text: string }[] }> = []
+  const service = new ExecutionService({
+    tasks,
+    sessions: {
+      start: async () => { throw new Error('should resume') },
+      resume: async options => {
+        resumed.push(options)
+        return fake.handle
+      },
+    },
     now: () => 13,
     hostInstanceId: 'host-1',
   })
 
   const result = await service.dispatch('t-1', '拆两件事')
   assert.equal(result.ok, true)
+  assert.equal(resumed[0]?.prompt, undefined)
+  assert.equal(resumed[0]?.context?.[0]?.name, 'castboard-task-dispatch')
+  assert.equal(resumed[0]?.context?.[0]?.text, '拆两件事')
   fake.first.resolve(settleCompleted())
   await service.waitForIdle()
 
   const task = tasks.get('t-1')
+  const dispatch = task?.executions.find(execution => execution.trigger === 'issue-dispatch')
   assert.equal(task?.status, 'in_review')
-  assert.equal(task?.executions[0]?.assist, true)
-  assert.equal(task?.executions[0]?.trigger, 'issue-dispatch')
+  assert.equal(dispatch?.assist, true)
+  assert.equal(dispatch?.trigger, 'issue-dispatch')
   assert.equal(task?.claimedBy, undefined)
   service.dispose()
 })
@@ -378,7 +426,7 @@ test('recordExecutionReport：挂到本会话正在跑的执行上', async (t) =
 test('验收轮是正式执行：用 named context 唤醒并落 trigger=acceptance 记录', async (t) => {
   const { tasks } = await seeded(t, [taskRecord({
     id: 't-1',
-    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出 MIKU' }],
+    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出结果' }],
   })])
   const base = fakeHandle()
   const named: Deferred<TurnSettlementLike>[] = []

@@ -233,7 +233,6 @@ export const zh = {
   'issue.onlineAttachRemove': '移除',
   'issue.source': '来源',
   'issue.assigner': '创建人',
-  'issue.sourceLocal': '本地',
   'issue.discuss': '讨论',
   'issue.discussEmpty': '还没有评论。写一句会被投给执行方（还没转成任务时先留在评论流里）。',
   'issue.discussPlaceholder': '补一句要求 / 回答执行方的问题…',

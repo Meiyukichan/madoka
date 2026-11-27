@@ -21,6 +21,7 @@ import {
   isBacklogStageTask,
   isPlausibleTaskRecord,
   maxConcurrentOf,
+  normalizeAcceptanceStrategies,
   normalizeAcceptanceStrategyIds,
   normalizeBody,
   normalizeChecklist,
@@ -32,6 +33,18 @@ import {
   normalizeTitle,
 } from '../src/host/rules.ts'
 import { taskRecord } from './helpers.ts'
+import { acceptanceIdFor } from '../src/host/exec/acceptance.ts'
+
+test('inline acceptance strategy：工具传入的 id 一律忽略，按 type + title 生成规范 id', () => {
+  const strategies = normalizeAcceptanceStrategies([{
+    id: 'close-on-miku',
+    title: '验收通过',
+    type: 'close',
+    description: '清单全勾',
+  }])
+  assert.equal(strategies?.[0]?.id, acceptanceIdFor('验收通过', 'close'))
+  assert.notEqual(strategies?.[0]?.id, 'close-on-miku')
+})
 
 test('状态机：正向与横移合法，终态不可逆', () => {
   assert.equal(canTransition('todo', 'in_progress'), true)
@@ -113,7 +126,7 @@ test('模型、标签、清单与报告归一化', () => {
   assert.throws(() => normalizeModel({ provider: '', model: 'm' }), /non-empty/)
   assert.throws(() => normalizeModel(null), /must be/)
 
-  assert.deepEqual(normalizeTags('webide, webide, ui'), ['webide', 'ui'])
+  assert.deepEqual(normalizeTags('example, example, ui'), ['example', 'ui'])
   assert.equal(normalizeTags([]), undefined)
   assert.equal(normalizeTags(Array.from({ length: 20 }, (_, index) => `t${index}`))?.length, MAX_TAGS)
   assert.equal(normalizeTags('x'.repeat(40))?.[0]?.length, 30)

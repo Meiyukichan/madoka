@@ -1,9 +1,11 @@
-﻿# dsh-teamwork 接口设计（逐模块）
+# dsh-teamwork 接口设计（逐模块）
 
-> 本文是 **47 个端点** 的正式契约。表结构见 [`db-design.zh.md`](./db-design.zh.md)，
+> **认证已改为 [`auth-exchange.zh.md`](./auth-exchange.zh.md)：`POST /auth/token` + 任意 headers。** 本文 §0.2 / §1 里「客户端现签 JWT、固定双头」的旧段落只保留作历史；端点总数现在是 50（新增 A0 `/auth/token`）。
+>
+> 本文是 **50 个端点** 的正式契约。表结构见 [`db-design.zh.md`](./db-design.zh.md)，
 > 服务端实现形态见 [`server-design.zh.md`](./server-design.zh.md)，客户端 SDK 见 [`sdk-design.zh.md`](./sdk-design.zh.md)。
 >
-> 状态：**47 个端点全部定稿**（A 6 / B 16 / C 16 / F 3 / M 6）。
+> 状态：**50 个端点全部定稿**（A 7 / B 16 / C 16 / F 3 / M 6 + A0）。
 
 ---
 

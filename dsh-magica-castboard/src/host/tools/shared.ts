@@ -75,8 +75,16 @@ export interface ToolDeps {
   /** This machine's ip:port, quoted back in the dispatch guidance. */
   instance?: () => string
   /** Returns false when the session cannot take injected context; the payload then ships in the result. */
-  inject?: (sessionId: string | undefined, entries: readonly { name: string; text: string }[]) => boolean
-  /** Dispatch source dictionary: `ensure` registers self/dsh, `isRegistered` never registers. */
+  inject?: (
+    sessionId: string | undefined,
+    entries: readonly {
+      name: string
+      text: string
+      form?: 'snapshot' | 'instructions' | 'notice'
+      summary?: string
+    }[],
+  ) => boolean
+  /** Dispatch source dictionary: `ensure` registers `dsh`; `isRegistered` never registers. */
   sources?: {
     ensure(): Promise<void>
     isRegistered(code: string): Promise<boolean>

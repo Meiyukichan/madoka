@@ -5,7 +5,7 @@
 不喜欢的工具可以关掉，模型就看不见它、也调不动它；同一个工具还能做到「A 项目里禁用、B 项目里保留」。改动即时生效，不用重启 DSH，也不用改任何配置文件。
 
 - 包名：`@meiyukichan/dsh-magica-rune`（设置命名空间仍是 `dsh-magica-rune`）
-- 适用版本：DSH **0.2.0 ~ 0.2.2**（含 rc 预发布；0.2.1-rc.5 实测，Web 端）
+- 适用版本：DSH **0.2.0 ~ 0.2.2**（含 rc 预发布；0.2.1-rc.5 是编译/单测/真机基线，0.2.0 / 0.2.2 开放安装）
 - 界面入口：**设置 → 能力管理**（在「内置插件」之后、「Agent 预设」之前，图标是扳手 + 螺丝刀）
 
 ---
@@ -165,14 +165,15 @@ dsh plugin --profile web add @meiyukichan/dsh-magica-rune
 
 ## 七、兼容性
 
-- 支持 DSH **0.2.0 ~ 0.2.2**（在 0.2.1-rc.5 上全量实测；0.2.2 的 settings/tools 关键签名已抽查一致）
-- peer 范围（`@deepseek-ai/dsh-*` 六个包一致）：
+- 支持 DSH **0.2.0 ~ 0.2.2**：**0.2.1-rc.5 是编译、单测与真机基线**；0.2.0 / 0.2.2 通过 peer 范围开放安装，尚未做全量 API 回归。
+- peer 范围（`@deepseek-ai/dsh-*` 七个包一致）：
 
   ```text
   >=0.2.0-rc.2 <0.3.0-0 || >=0.2.1-rc.5 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0
   ```
 
-  `0.2.1` 的 rc 预发布必须单独列一条（semver 的预发布规则：只写 `>=0.2.0-rc.2 <0.2.2-0` 会拒绝 `0.2.1-rc.x`）。
+  `0.2.1-rc.x` / `0.2.2-rc.x` 必须各列一条：DSH 自己的兼容闸用 `includePrerelease: true`，单段就够；但 npm/pnpm 按标准 semver 解析 peer，只写 `>=0.2.0-rc.2 <0.3.0-0` 会拒绝这两条预发布线。
+- `devDependencies` 钉 `0.2.1-rc.5`（cordis `4.0.5`、schemastery `3.18.5`）供 `tsc` 解析真实类型；不再使用手写 shim，也不写 `engines.dsh`。
 - **0.3.x 及以上未验证**：peer 会拒绝装配；确需试用可 dsh plugin allow-version 逐版本豁免。
 - 仅 Web 平台（`dsh.client.platform: "web"`）。
 - 中英文界面随 DSH 语言切换。

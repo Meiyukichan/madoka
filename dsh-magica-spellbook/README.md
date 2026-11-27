@@ -177,7 +177,8 @@ node .e2e/run-interactions.mjs approval
 会话/交互能力**不是运行时 npm 依赖**：本库对 `@deepseek-ai/*` 只有**类型** import
 （`import type`，构建时擦除；`verify` 断言 `lib/index.js` 无该子串），
 真正干活的是消费方插件传进来的 `ctx` 里的 **cordis 服务**。类型直接引用真实包，
-所以 `peerDependencies` 与本包 `import` 的包一一对应（dsh 系列 `>=0.2.1-rc.5 <0.3.0-0`、
+所以 `peerDependencies` 与本包 `import` 的包一一对应（dsh 系列三段式
+`>=0.2.0-rc.2 <0.3.0-0 || >=0.2.1-rc.5 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0`、
 cordis `>=4.0.4`、react `>=19`；**不 peer `@deepseek-ai/dsh` 本体**）。契约用代码显式暴露：
 
 ```ts
@@ -210,7 +211,7 @@ console.log(describeHostRequirements()) // 完整契约（排障用）
   - 内部相对 import 带显式 `.ts`/`.tsx` 后缀（仓库风格）：打包器（Vite/esbuild/webpack）直接可用；若消费方用 `tsc` 直接编译这份源码，需要开 `allowImportingTsExtensions`（或把它当 external 交给 bundler）。
   - 回归守卫：`node .e2e/check-pack-selfcontained.mjs` 会按 `files` 展开发布集，逐个校验相对 import 是否落在包内——发布前跑一次。
 - **依赖声明**（peer + dev 双写；optional 语义对齐 0.1.2 参考包与 `dsh-magica-lattice`/`rune`）：
-  - **硬 peer（4）**：`@deepseek-ai/cordis`（`>=4.0.4`）、`dsh-agent`、`dsh-llm`、`dsh-session`（`>=0.2.1-rc.5 <0.3.0-0`）—— 会话/消息/上下文主干，缺了核心能力不可用。
+  - **硬 peer（4）**：`@deepseek-ai/cordis`（`>=4.0.4`）、`dsh-agent`、`dsh-llm`、`dsh-session`（三段式 `>=0.2.0-rc.2 <0.3.0-0 || >=0.2.1-rc.5 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0`）—— 会话/消息/上下文主干，缺了核心能力不可用。
   - **optional peer（15）**：`agent-preset-registry`、`home-paths`、`permission-presets`、`plan-mode`、`sandbox-policy`、`session-title`、`user-approval`、`user-questions`、`workspace`、`client-ui-{primitives,session,slots,renderer,conversation}`、`react` —— 缺任意一个只是降级（见上表"缺失时"列），不阻断安装。
   - `devDependencies` 与 peer 一一对应（精确版本，供 `tsc` 解析真实类型），另含 `@types/node`、`@types/react`、`esbuild`、`react`、`typescript`。
   - 运行时对 `@deepseek-ai/*` 仍是**零值导入**（`verify` 断言产物无该子串），类型直接来自真实包。

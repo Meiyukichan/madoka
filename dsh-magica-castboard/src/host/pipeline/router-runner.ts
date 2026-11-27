@@ -16,19 +16,19 @@
  * ## Resident session
  *
  * The session itself is opened by {@link openWorkSession}: worklab directory, `read-only` sandbox, and a first turn
- * that only wakes it. The assembly layer computes the static guidance and passes it in (`routerRoutingSection`);
+ * that only wakes it. The assembly layer computes the static guidance and passes it in (`routerGuideSection`);
  * each turn's issue data is injected by the router service as named context.
  *
  * @module dsh-magica-castboard/host/pipeline/router-runner
  */
 import type { CreateTaskBody, IssueRecord } from '../model.ts'
 import {
-  ISSUE_REFERENCES_SECTION,
-  ISSUE_ROUTING_ORDER,
-  ISSUE_ROUTING_SECTION,
+  ISSUE_ROUTER_ORDER,
+  ISSUE_ROUTER_REMINDER_SECTION,
+  ISSUE_ROUTER_SECTION,
   PLUGIN_NAME,
 } from '../context/sections.ts'
-import { ROUTER_IDLE_PROMPT } from '../context/texts.ts'
+import { ROUTER_IDLE_PROMPT } from '../context/router-instruction.ts'
 import type { ResolvedModel } from '../shared/default-model.ts'
 import type { RouterLog, RouterSessionFace } from './router.ts'
 import {
@@ -50,8 +50,8 @@ export function routerTtlMs(env: Record<string, string | undefined> = process.en
   return workSessionTtlMs(ROUTER_TTL_ENV, env)
 }
 
-export function routerRoutingSection(guide: string): WorkSection {
-  return { name: ISSUE_ROUTING_SECTION, text: guide, order: ISSUE_ROUTING_ORDER }
+export function routerGuideSection(guide: string): WorkSection {
+  return { name: ISSUE_ROUTER_SECTION, text: guide, order: ISSUE_ROUTER_ORDER, form: 'instructions' }
 }
 
 export function taskDraftFromIssue(issue: IssueRecord): CreateTaskBody {
@@ -79,7 +79,7 @@ export interface RouterRunnerOptions {
   readonly ctx: unknown
   /** Router session cwd (the worklab directory). */
   readonly cwd: string
-  /** Static guidance sections; the assembly layer builds them with {@link routerRoutingSection}. */
+  /** Static guidance sections; the assembly layer builds them with {@link routerGuideSection}. */
   readonly sections?: readonly WorkSection[]
   /** Model route; it must already be resolved before being passed. */
   readonly model?: ResolvedModel
@@ -97,7 +97,11 @@ export function createRouterSessionOpener(options: RouterRunnerOptions): RouterS
   const ttlMs = options.ttlMs ?? routerTtlMs()
   const contextPlugin = options.contextPlugin ?? PLUGIN_NAME
   const log = options.log
-  const referencesContext = (text: string): WorkContext => ({ name: ISSUE_REFERENCES_SECTION, text })
+  const referencesContext = (text: string): WorkContext => ({
+    name: ISSUE_ROUTER_REMINDER_SECTION,
+    text,
+    form: 'snapshot',
+  })
 
   return async (sessionId, onCompacted) => {
     const session = await openWorkSession(options.ctx, {
@@ -107,6 +111,7 @@ export function createRouterSessionOpener(options: RouterRunnerOptions): RouterS
       sandbox: ROUTER_SANDBOX,
       ...(sessionId !== undefined ? { sessionId } : {}),
       idlePrompt: ROUTER_IDLE_PROMPT,
+      turnSection: ISSUE_ROUTER_REMINDER_SECTION,
       ...(sections.length > 0 ? { sections } : {}),
       ...(options.model !== undefined ? { model: options.model } : {}),
       ttlMs,

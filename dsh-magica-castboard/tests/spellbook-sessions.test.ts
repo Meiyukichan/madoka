@@ -72,6 +72,31 @@ test('正式会话：调 runWorkspaceSession，且要求 workspace', async () =>
   assert.equal(fake.state.named.length, 1)
 })
 
+test('续跑：prompt 省略时只透传 context，不产生用户消息', async () => {
+  const seen: Record<string, unknown>[] = []
+  const fake = fakeHandle({ kind: 'completed', completed: true, texts: ['ok'] })
+  const module: SpellbookSessionsModule = {
+    runWorkspaceSession: (_ctx, options) => {
+      seen.push(options)
+      return fake.handle
+    },
+  }
+  const face = await createSpellbookSessions({
+    ctx: {},
+    kind: 'workspace',
+    load: async () => module,
+    resolveWorkspacePath: () => 'D:/ws/ws-1',
+  })
+  await face!.resume!({
+    task: { id: 't-1', title: '写文档', workspaceId: 'ws-1', permission: 'workspace-write' } as never,
+    sessionId: 'session-prev',
+    context: [{ name: 'castboard-issue-comments', text: '<issue_comments/>' }],
+  })
+  assert.equal(seen[0]!.sessionId, 'session-prev')
+  assert.equal('prompt' in seen[0]!, false)
+  assert.deepEqual(seen[0]!.context, [{ name: 'castboard-issue-comments', text: '<issue_comments/>' }])
+})
+
 test('适配器：底层缺少 named-context 唤醒时明确失败，不退回用户 followup', async () => {
   const module: SpellbookSessionsModule = {
     runWorkspaceSession: () => ({
@@ -110,21 +135,21 @@ test('新版契约：context 原样透传给门面，sections 变成 setup(agent
   })
   assert.ok(face !== undefined)
   const entries = [
-    { name: 'castboard-task-rules', text: '<castboard_task_rules></castboard_task_rules>' },
-    { name: 'castboard-task-references', text: '<castboard_task_references></castboard_task_references>' },
+    { name: 'castboard-task-protocol', text: '<castboard_task_protocol></castboard_task_protocol>' },
+    { name: 'castboard-task-context', text: '<castboard_task_context></castboard_task_context>' },
   ]
   const session = await face.start({
     task: { id: 't-9', title: '契约', workspaceId: 'ws-9' } as never,
     prompt: '执行',
     context: entries,
-    sections: [{ name: 'castboard-issue-routing', order: 150, text: '<castboard_issue_routing/>' }],
+    sections: [{ name: 'castboard-issue-router', order: 150, text: '<castboard_issue_router/>' }],
   })
   assert.deepEqual(seen[0]!.context, entries)
   assert.equal(seen[0]!.contextPlugin, '@meiyukichan/dsh-magica-castboard')
   const setup = seen[0]!.setup as (agentCtx: unknown) => void
   assert.equal(typeof setup, 'function', 'sections 必须变成 setup')
   setup({ systemPrompt: { section: (input: { name: string; order?: number; text: string }) => { sections.push(input) } } })
-  assert.deepEqual(sections, [{ name: 'castboard-issue-routing', order: 150, text: '<castboard_issue_routing/>' }])
+  assert.deepEqual(sections, [{ name: 'castboard-issue-router', order: 150, text: '<castboard_issue_router/>' }])
   // 新版两个门面都有 injectContext/pushNamedContext：适配器必须把它们透出去
   assert.equal(typeof session.injectContext, 'function')
   assert.equal(session.injectContext?.([{ name: 'x', text: 'y' }]), true)

@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 
-import { CommentDeliverer, commentsXml } from '../src/host/pipeline/deliver.ts'
+import { CommentDeliverer, commentsXml, type CommentContextEntry } from '../src/host/pipeline/deliver.ts'
 import { IssueCommentInbox, COMMENT_PAGE_LIMIT } from '../src/host/pipeline/inbox.ts'
 import { CommentPublisher } from '../src/host/pipeline/publish.ts'
 import { LinkStore } from '../src/host/ledger/link-store.ts'
@@ -21,11 +21,11 @@ const ISSUE = '11111111-1111-4111-8111-111111111111'
 interface LiveFixture {
   live: {
     running: boolean
-    push?: (entries: readonly { name: string; text: string }[]) => string | false
+    push?: (entries: readonly CommentContextEntry[]) => string | false
     steer?: (text: string) => boolean
     followUp?: (text: string) => unknown
   }
-  pushed: Array<readonly { name: string; text: string }[]>
+  pushed: Array<readonly CommentContextEntry[]>
   steered: string[]
   followed: string[]
 }
@@ -64,10 +64,38 @@ test('直推：push 成功即清欠账，消息体带 issue id 且转义正文',
   })
   await deliverer.deliver('local', ISSUE, [threadComment({ id: 'c-1', body: '看 <b>这里</b>', role: 'assigner' })])
   assert.equal(live.pushed.length, 1)
-  const text = live.pushed[0]?.[0]?.text ?? ''
-  assert.ok(text.includes(`issue="${ISSUE}"`))
+  const entry = live.pushed[0]?.[0]
+  const text = entry?.text ?? ''
+  assert.ok(text.includes(`issue_id="${ISSUE}"`))
   assert.ok(text.includes('&lt;b&gt;这里&lt;/b&gt;'))
+  assert.equal(entry?.form, 'notice')
+  assert.equal(entry?.summary, 'New comments on the issue')
   assert.equal(links.get(ISSUE)?.assignerPendingSince, undefined)
+})
+
+test('直推：评论附件路径进入 <comment> 的 <attachments> 块', async (t) => {
+  const root = tempRoot(t)
+  const links = new LinkStore({ dir: root })
+  await links.patch(ISSUE, { assigneeSessionId: 'session-1' })
+  const live = liveSession(true)
+  const synced: string[] = []
+  const deliverer = new CommentDeliverer({
+    links,
+    liveSession: () => live.live,
+    mergeWindowMs: 0,
+    syncCommentAttachments: async (_issueId, commentId) => { synced.push(commentId) },
+    commentAttachments: (_issueId, commentId) => commentId === 'c-att'
+      ? [{ name: 'miku.txt', path: 'C:\\work\\attachments\\issue\\comments\\c-att\\miku.txt' }]
+      : [],
+  })
+  await deliverer.deliver('remote', ISSUE, [
+    threadComment({ id: 'c-att', origin: 'remote', body: '带附件评论' }),
+  ])
+  assert.deepEqual(synced, ['c-att'])
+  const text = live.pushed[0]?.[0]?.text ?? ''
+  assert.ok(text.includes('<attachments count="1">'))
+  assert.ok(text.includes('name="miku.txt"'))
+  assert.ok(text.includes('path="C:\\work\\attachments\\issue\\comments\\c-att\\miku.txt"'))
 })
 
 test('直推：没有 push 时按 running 退到 steer 或 followUp', async (t) => {
@@ -242,7 +270,7 @@ test('commentsXml：锚点、role、作者与正文都安全落入 XML', () => {
   const xml = commentsXml(ISSUE, [
     threadComment({ body: 'a & b', role: 'assignee', authorType: 'user', author: 'r"1"' }),
   ])
-  assert.ok(xml.includes(`issue="${ISSUE}"`))
+  assert.ok(xml.includes(`issue_id="${ISSUE}"`))
   assert.ok(xml.includes('role="assignee"'))
   assert.ok(xml.includes('by="user"'))
   assert.ok(xml.includes('author="r&quot;1&quot;"'))
@@ -565,4 +593,37 @@ test('收件箱：非租约主人不拉取；云端空方向保持 null，作者
   const secondary = makeInbox(() => false)
   assert.deepEqual(await secondary.tick(), { fetched: 0, written: 0, delivered: 0, advanced: false })
   assert.equal(fetched, 1)
+})
+
+test('附件：投递前等待远端评论附件同步，本地评论不重复同步', async (t) => {
+  const root = tempRoot(t)
+  const links = new LinkStore({ dir: root })
+  await links.patch(ISSUE, { assigneeSessionId: 'session-1' })
+  const live = liveSession(true)
+  const events: string[] = []
+  const synced: string[] = []
+  live.live.push = entries => {
+    events.push('push')
+    live.pushed.push(entries)
+    return 'steer'
+  }
+  const deliverer = new CommentDeliverer({
+    links,
+    liveSession: () => live.live,
+    mergeWindowMs: 0,
+    syncCommentAttachments: async (issueId, commentId) => {
+      assert.equal(issueId, ISSUE)
+      synced.push(commentId)
+      events.push(`sync:${commentId}`)
+    },
+  })
+
+  await deliverer.deliver('remote', ISSUE, [
+    threadComment({ id: 'c-remote', body: '远端', origin: 'remote' }),
+    threadComment({ id: 'c-local', body: '本地', origin: 'local' }),
+  ])
+
+  assert.deepEqual(synced, ['c-remote'])
+  assert.deepEqual(events, ['sync:c-remote', 'push'])
+  assert.equal(live.pushed.length, 1)
 })

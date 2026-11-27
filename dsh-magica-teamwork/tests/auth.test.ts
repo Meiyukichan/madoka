@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { bootHarness, isCode, PASSWORD, PASSWORD2, signToken } from './helpers.js'
-import { TeamworkClient, TeamworkError } from '../src/index.js'
+import { TeamworkClient, TeamworkError } from './support/legacy-client.js'
 
 test('注册：首个账号自动 administrator，后续都是 user', async (t) => {
   const h = await bootHarness()
@@ -49,6 +49,54 @@ test('登录：成功拿到同一个 accountToken；失败与不存在同码', a
 
   await assert.rejects(() => h.client().login({ accountId: 'alice', password: PASSWORD2 }), isCode('invalid_credentials'))
   await assert.rejects(() => h.client().login({ accountId: 'ghost', password: PASSWORD }), isCode('invalid_credentials'))
+})
+
+test('A0 /auth/token：账号 + accountToken → 任意 headers；失败不泄露账号', async (t) => {
+  const h = await bootHarness()
+  t.after(() => h.close())
+  const reg = await h.register('alice')
+
+  const good = await h.raw('POST', '/auth/token', {
+    body: {
+      accountId: 'alice',
+      accountToken: reg.accountToken,
+      device: { id: 'dev-1', host: '10.0.0.2', port: 3939, os: 'win32' },
+    },
+  })
+  assert.equal(good.status, 200)
+  assert.equal(good.headers.get('cache-control'), 'no-store')
+  const grant = good.body as {
+    accountId: string
+    headers: Record<string, string>
+    expiresAt: number
+    globalRole: string
+  }
+  assert.equal(grant.accountId, 'alice')
+  assert.equal(grant.globalRole, 'administrator')
+  assert.equal(typeof grant.headers['dsh-teamwork-token'], 'string')
+  assert.equal(grant.headers['dsh-teamwork-account'], 'alice')
+  assert.ok(grant.expiresAt > Date.now())
+
+  const me = await h.raw('GET', '/auth/me', { headers: grant.headers })
+  assert.equal(me.status, 200)
+  assert.equal((me.body as { account: { accountId: string } }).account.accountId, 'alice')
+
+  const bad = await h.raw('POST', '/auth/token', {
+    body: { accountId: 'alice', accountToken: 'f'.repeat(64) },
+  })
+  assert.equal(bad.status, 401)
+  assert.equal((bad.body as { code: string }).code, 'invalid_credentials')
+
+  const badDevice = await h.raw('POST', '/auth/token', {
+    body: { accountId: 'alice', accountToken: reg.accountToken, device: { port: '3939' } },
+  })
+  assert.equal(badDevice.status, 400)
+
+  const unknown = await h.raw('POST', '/auth/token', {
+    body: { accountId: 'alice', accountToken: reg.accountToken, extra: true },
+  })
+  assert.equal(unknown.status, 400)
+  assert.equal((unknown.body as { code: string }).code, 'unknown_field')
 })
 
 test('登录失败延迟 ≥ 300ms（抑制爆破）', async (t) => {

@@ -45,7 +45,8 @@ import {
   type Urgency,
 } from '../model.ts'
 import type { IssueStore } from '../ledger/issue-store.ts'
-import { castboardIssueReferences, routerInstruction, routerReminder } from '../context/renders.ts'
+import { castboardIssueContext } from '../context/issue-context.ts'
+import { routerInstruction, routerReminder } from '../context/router-instruction.ts'
 import { eventLog } from '../shared/event-log.ts'
 
 /** Default polling interval (ms): the same cadence as shared-library delta sync. */
@@ -104,7 +105,7 @@ export interface RouterSessionFace {
    * Run one turn: inject `references` as this turn's material, then send the instruction and await settlement.
    *
    * @param instruction - This turn's user instruction (contains this issueId).
-   * @param references - The issue's `<castboard_issue_references>` text.
+   * @param references - The issue's `<castboard_issue_context>` text.
    */
   run(instruction: string, references: string): Promise<RouterTurnResult>
   dispose(): Promise<void>
@@ -167,7 +168,7 @@ export interface IssueRouterDeps {
    */
   readonly syncAttachments?: (issueId: string) => Promise<void>
   /**
-   * Render this issue's `<castboard_issue_references>` text.
+   * Render this issue's `<castboard_issue_context>` text.
    *
    * A separate dependency because live material must be prepared before dispatch (download input artifacts, query
    * online comments, refresh the project catalog) -- that is async I/O and network and does not belong in this
@@ -614,14 +615,14 @@ export class IssueRouterService {
    */
   private async buildReferences(issue: IssueRecord): Promise<string> {
     const render = this.deps.renderReferences
-    if (render === undefined) return castboardIssueReferences(issue)
+    if (render === undefined) return castboardIssueContext(issue)
     let text: string
     try {
       text = await render(issue)
     } catch (error) {
       this.logger('warn', 'router-references-fallback',
         `${issue.id}: 现场材料准备失败，退回台账字段渲染（${errorText(error)}）`)
-      return castboardIssueReferences(issue)
+      return castboardIssueContext(issue)
     }
     return text
   }
@@ -753,7 +754,7 @@ export class IssueRouterService {
 
   private failureReason(outcome: RouterTurnResult): string {
     return outcome.ok
-      ? '这一轮结束了，但没有调用 castboard_issue_task（或调用被拒）——issue 还没转成 task'
+      ? '这一轮结束了，但没有调用 castboard_issue（capability="convert"）（或调用被拒）——issue 还没转成 task'
       : outcome.error
   }
 

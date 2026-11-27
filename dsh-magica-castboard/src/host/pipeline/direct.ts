@@ -137,7 +137,7 @@ export async function directRoute(deps: DirectRouteDeps, issueId: string): Promi
   if (issue.urgency !== 'direct') {
     return { kind: 'skipped', issueId, reason: `urgency is "${issue.urgency}", not "direct"` }
   }
-  if (issue.status !== 'pending' && issue.status !== 'accepted') {
+  if (issue.status !== 'accepted') {
     return { kind: 'skipped', issueId, reason: `status is "${issue.status}"` }
   }
   if (isConverted(issue)) {
@@ -178,6 +178,7 @@ export async function directRoute(deps: DirectRouteDeps, issueId: string): Promi
       ? issue.assignerMeta.tags.filter((tag): tag is string => typeof tag === 'string')
       : undefined
 
+    // The sync claim already moved this issue to accepted; issueRouted accepts that state.
     const { task } = await convertIssueToTask(deps, { ...issue, status: 'routing' }, {
       title,
       detail,

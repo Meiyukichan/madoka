@@ -37,7 +37,7 @@ function compare(a: string, b: string): number {
   return left.pre < right.pre ? -1 : 1
 }
 
-function satisfies(version: string, range: string): boolean {
+function satisfiesOne(version: string, range: string): boolean {
   // `>=A <B`
   const bounded = /^>=\s*(\S+)\s+<\s*(\S+)$/.exec(range.trim())
   if (bounded !== null) {
@@ -56,6 +56,15 @@ function satisfies(version: string, range: string): boolean {
   const atLeast = /^>=\s*(\S+)$/.exec(range.trim())
   if (atLeast !== null) return compare(version, atLeast[1] ?? '0.0.0') >= 0
   return false
+}
+
+/**
+ * 本包 peer 用 `A || B || C` 表达三条 0.2 线：0.2.0 线、0.2.1-rc.5 起的
+ * 0.2.1 线、0.2.2-rc.1 起的 0.2.2 线。标准 semver 会把 prerelease 限制在
+ * 同 [major, minor, patch] 的比较器上，所以不能只写 `>=0.2.0-rc.2 <0.3.0-0`。
+ */
+function satisfies(version: string, range: string): boolean {
+  return range.split('||').some((part) => satisfiesOne(version, part))
 }
 
 describe('dsh 版本兼容（peer 范围覆盖已安装版本）', () => {
@@ -77,6 +86,26 @@ describe('dsh 版本兼容（peer 范围覆盖已安装版本）', () => {
       checked.push(`${name}@${installed}`)
     }
     assert.ok(checked.length >= 10, `只校验到 ${checked.length} 个包，安装可能不完整`)
+  })
+
+  it('peer 范围覆盖 0.2.0 / 0.2.1 / 0.2.2，且不放进 0.1.x / 0.3.x', () => {
+    const supported = [
+      '0.2.0-rc.2',
+      '0.2.0',
+      '0.2.1-rc.5',
+      '0.2.1',
+      '0.2.2-rc.5',
+      '0.2.2',
+    ]
+    for (const [name, range] of Object.entries(manifest.peerDependencies)) {
+      if (name === 'react' || name === '@deepseek-ai/cordis') continue
+      for (const version of supported) {
+        assert.ok(satisfies(version, range), `${name}: ${version} 应落在 ${range} 内`)
+      }
+      for (const version of ['0.1.2-rc.1', '0.3.0-rc.1']) {
+        assert.ok(!satisfies(version, range), `${name}: ${version} 不应落在 ${range} 内`)
+      }
+    }
   })
 
   it('cordis peer 覆盖已安装版本（4.x）', () => {

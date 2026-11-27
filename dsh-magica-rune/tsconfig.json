@@ -1,12 +1,7 @@
 {
-  // 本包的 @deepseek-ai/* 全是 peerDependencies（运行时由 host 提供同一份实例），
-  // 所以**类型解析**指向本机 DSH 源码树（与运行时同一份版本）。
-  //
-  // 为什么不用 lib/types：0.2.1 起 client 包（store / ui-primitives / ui-slots）
-  // 不再作为独立包出现在 dsh 的安装树里（它们被打进 shell 的 client bundle），
-  // 只有源码树里还有完整 .ts；指源码还能顺带校准 API 变更。
-  //
-  // 只影响 tsc：esbuild 把 @deepseek-ai/* 全部标 external，构建与运行都不看这里。
+  // @deepseek-ai/* 是 peerDependencies，运行时由宿主提供；devDependencies 钉
+  // 0.2.1-rc.5 只用于类型检查，所以这里直接走 node_modules 的真实声明，
+  // 不再维护手写 shim 或指向某台机器的全局安装路径。
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
@@ -23,11 +18,7 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "paths": {
-      "@deepseek-ai/dsh-scope": ["D:/project-tools/nodejs/node24/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-scope/lib/types/index.d.ts"],
-      "@deepseek-ai/schemastery": ["D:/project-tools/nodejs/node24/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery/lib/types/index.d.ts"]
-    }
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
   "exclude": ["lib", "node_modules"]

@@ -21,7 +21,7 @@
  *
  * Two more rules tied directly to product semantics:
  *
- * - cards from `welink` do not consume a concurrency slot;
+ * - cards from `im` do not consume a concurrency slot;
  * - failures / cancellations **never** auto-retry; `releasedAt` is consumed when a run
  *   starts, so the scheduler cannot release the same window again.
  *
@@ -34,10 +34,11 @@ import {
   ACCEPTANCE_ROUND_INSTRUCTION,
   ISSUE_COMMENTS_SECTION,
   TASK_ACCEPTANCE_SECTION,
+  TASK_DISPATCH_SECTION,
   buildContexts,
   castboardAcceptanceXml,
   userInstruction,
-  type InputAttachment,
+  type TaskAttachment,
 } from '../context/index.ts'
 import type { LinkStore } from '../ledger/link-store.ts'
 import type { ThreadComment } from '../ledger/comment-store.ts'
@@ -47,7 +48,7 @@ import { resolveDefaultModel } from '../shared/default-model.ts'
 import {
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_PERMISSION,
-  isWelinkSource,
+  isImSource,
   type AcceptanceStrategy,
   type CancelRequestResult,
   type ExecutionRecord,
@@ -58,6 +59,7 @@ import {
   type TurnSettlementLike,
 } from '../model.ts'
 import { newExecutionId } from '../rules.ts'
+import { spillExecutionError } from './error-file.ts'
 import { SessionPool } from './session-pool.ts'
 import {
   applySettlement,
@@ -67,9 +69,15 @@ import {
   type SystemCommentSink,
 } from './settlement.ts'
 
+export type ContextForm = 'snapshot' | 'instructions' | 'notice'
+
 export interface ContextEntry {
   name: string
   text: string
+  /** 内容形态；缺省 snapshot。 */
+  form?: ContextForm
+  /** `notice` 必填：折叠行的一行说明。 */
+  summary?: string
 }
 
 export interface SessionModel {
@@ -106,10 +114,11 @@ export interface SessionHandle {
 
 export interface StartSessionOptions {
   task: TaskRecord
-  prompt: string
+  /** First user turn. Omit only for a named-context wake (resume with `context` only). */
+  prompt?: string
   model?: SessionModel
   permission?: PermissionMode
-  /** First-turn rules + references. */
+  /** First-turn rules + references, or the named context that wakes a resumed session. */
   context?: readonly ContextEntry[]
   /** Agent-scoped system prompt sections, kept across compression. */
   sections?: readonly (ContextEntry & { order?: number })[]
@@ -153,7 +162,11 @@ export interface ExecutionDeps {
   workspaces?: WorkspaceFace
   /** Omitted = the runtime cannot archive sessions. */
   archiveSession?: (sessionId: string) => Promise<void>
-  attachmentsFor?: (issueId: string) => Promise<readonly InputAttachment[]>
+  attachmentsFor?: (issueId: string) => Promise<readonly TaskAttachment[]>
+  /** Download one comment's attachments before the task context is built. */
+  syncCommentAttachments?: (issueId: string, commentId: string) => Promise<unknown>
+  /** `<storage>/.cache`; over-long execution errors are spilled here. */
+  cacheDir?: string
   /** Live read, so a settings change applies to the next card. */
   acceptanceStrategies?: () => Promise<readonly AcceptanceStrategy[]>
   resolveDefaultModel?: () => SessionModel | undefined
@@ -219,21 +232,36 @@ function userMessage(text: string): unknown {
 }
 
 /**
- * The 0.2 format needs a producer-owned `source.kind` plus named entries in `sections`;
- * the GUI's context row reads exactly that.
+ * The 0.2 format needs a producer-owned `source.kind` plus a form; the GUI reads
+ * `snapshot.sections` and `notice.summary`. The V4 source omits the retired
+ * `plugin` field entirely.
  */
-function pluginMessage(section: string, text: string): unknown {
+export function buildContextMessage(
+  section: string,
+  text: string,
+  form: ContextForm = 'snapshot',
+  summary?: string,
+): unknown {
   const kind = section === '' ? 'castboard-context' : section
+  if (kind === 'plugin') {
+    throw new Error("context section must not be 'plugin': dsh session format v4 rejects it")
+  }
+  let source: Record<string, unknown>
+  if (form === 'notice') {
+    if (summary === undefined || summary.trim() === '') {
+      throw new Error(`context '${kind}' uses form 'notice' but has no summary`)
+    }
+    source = { kind, form, summary }
+  } else if (form === 'instructions') {
+    source = { kind, form }
+  } else {
+    source = { kind, form: 'snapshot', sections: [{ name: kind, text }] }
+  }
   return {
     id: `msg-${randomUUID()}`,
     role: 'user',
     content: [{ type: 'text', text }],
-    source: {
-      kind,
-      plugin: '@meiyukichan/dsh-magica-castboard',
-      form: 'snapshot',
-      sections: [{ name: kind, text }],
-    },
+    source,
   }
 }
 
@@ -358,7 +386,7 @@ export class ExecutionService {
     entry: ContextEntry,
   ): { ok: true } | { ok: false; error: string } {
     if (agent !== undefined) {
-      const message = pluginMessage(entry.name, entry.text)
+      const message = buildContextMessage(entry.name, entry.text, entry.form, entry.summary)
       try {
         if (agent.status === 'idle' && agent.followup !== undefined) {
           // Use the same producer-owned source as the running/steer branch so the
@@ -407,20 +435,25 @@ export class ExecutionService {
    */
   async wakeForComment(
     taskId: string,
-    instruction: string,
     commentsXml?: string,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     try {
       const context = commentsXml === undefined || commentsXml === ''
         ? undefined
-        : [{ name: ISSUE_COMMENTS_SECTION, text: commentsXml }]
+        : [{
+            name: ISSUE_COMMENTS_SECTION,
+            text: commentsXml,
+            form: 'notice' as const,
+            summary: 'New comments on the source issue',
+          }]
       // A live retained session wakes with the comments as its single named-context
-      // message. If the session has to be resumed, `start` falls back to the wake
-      // instruction plus injected context.
+      // message. If the session has to be resumed, omit the user prompt and pass the
+      // same context: spellbook then calls agent.followup(pluginMessage), so the GUI
+      // shows the injected context instead of an old "see below" follow-up bubble.
       const result = await this.start(
         taskId,
         'issue-comment',
-        instruction,
+        undefined,
         true,
         true,
         context,
@@ -542,7 +575,20 @@ export class ExecutionService {
    * is not another execution of the task, so the card stays in review.
    */
   async dispatch(taskId: string, text: string): Promise<RunRequestResult> {
-    return await this.start(taskId, 'issue-dispatch', text, true)
+    const task = this.deps.tasks.get(taskId)
+    if (task === undefined || task.trashedAt !== undefined) return { ok: false, error: `no task ${taskId}` }
+    const lastSessionId = lastSessionIdOf(task)
+    if (lastSessionId === undefined) return { ok: false, error: 'no retained session for issue dispatch' }
+    if (this.pool.get(lastSessionId) === undefined && this.deps.sessions?.resume === undefined) {
+      return { ok: false, error: 'no retained session for issue dispatch' }
+    }
+    const context = [{
+      name: TASK_DISPATCH_SECTION,
+      text,
+      form: 'notice' as const,
+      summary: 'Task dispatch request',
+    }]
+    return await this.start(taskId, 'issue-dispatch', undefined, true, false, context, context)
   }
 
   /**
@@ -577,7 +623,12 @@ export class ExecutionService {
         return { ok: false, error: 'no retained session for the automatic acceptance round' }
       }
 
-      const context = [{ name: TASK_ACCEPTANCE_SECTION, text: xml }]
+      const context = [{
+        name: TASK_ACCEPTANCE_SECTION,
+        text: xml,
+        form: 'notice' as const,
+        summary: 'Acceptance round requested',
+      }]
       // On a retained session this wakes the turn with the named context only (no user
       // message). Without a live session, `start` falls back to the instruction + context.
       const result = await this.start(
@@ -701,13 +752,26 @@ export class ExecutionService {
   }
 
   /** Attachments are material; an unreadable list must not block execution. */
-  private async attachmentsOf(issueId: string): Promise<readonly InputAttachment[]> {
+  private async attachmentsOf(issueId: string): Promise<readonly TaskAttachment[]> {
     if (this.deps.attachmentsFor === undefined) return []
     try {
       return await this.deps.attachmentsFor(issueId)
     } catch (error) {
       note('warn', 'execution-attachments-failed', `${issueId}: ${errorText(error)}`)
       return []
+    }
+  }
+
+  /** Comment attachments are part of the task context; sync before building it. */
+  private async syncCommentAttachmentsOf(issueId: string | undefined, comments: readonly ThreadComment[]): Promise<void> {
+    if (issueId === undefined || issueId === '' || this.deps.syncCommentAttachments === undefined) return
+    for (const comment of comments) {
+      if (comment.origin === 'local') continue
+      try {
+        await this.deps.syncCommentAttachments(issueId, comment.id)
+      } catch (error) {
+        note('warn', 'execution-comment-attachments-failed', `${issueId}/${comment.id}: ${errorText(error)}`)
+      }
     }
   }
 
@@ -773,13 +837,13 @@ export class ExecutionService {
           return undefined
         }
         // Check the cap here against the fresh ledger; a pre-check using pool size would
-        // lag behind. Cards from welink neither take a slot nor get blocked. The limit is
+        // lag behind. Cards from im neither take a slot nor get blocked. The limit is
         // resolved from the settings file by the caller (`maxConcurrent` is a live getter).
-        if (!isWelinkSource(target.source)) {
+        if (!isImSource(target.source)) {
           const limit = this.concurrencyFallback() ?? DEFAULT_MAX_CONCURRENT
           let running = 0
           for (const other of ledger.tasks) {
-            if (isWelinkSource(other.source)) continue
+            if (isImSource(other.source)) continue
             for (const execution of other.executions) {
               if (execution.outcome === 'running') running += 1
             }
@@ -827,13 +891,14 @@ export class ExecutionService {
         note('warn', 'issue-running-failed', `${issueId}: ${errorText(error)}`)
       }
     }
-    const inputAttachments = issueId === undefined || issueId === '' ? [] : await this.attachmentsOf(issueId)
-
-    // Only a new session needs comments; resume and append turns do not re-deliver them.
-    const resumesExisting = followUpText !== undefined && lastSessionIdOf(task) !== undefined
+    // Wake on a retained session when either a user turn or named context was supplied.
+    const wakesExisting = followUpText !== undefined || namedContext !== undefined
+    const resumesExisting = wakesExisting && lastSessionIdOf(task) !== undefined
     const seedComments = resumesExisting ? [] : await this.commentsOf(task)
     // Record which comments this turn's references delivered; the deliverer uses it to de-duplicate.
     this.noteCommentsSeeded(anchorOf(task), seedComments)
+    if (!resumesExisting) await this.syncCommentAttachmentsOf(issueId, seedComments)
+    const attachments = issueId === undefined || issueId === '' ? [] : await this.attachmentsOf(issueId)
 
     const sessions = this.deps.sessions
     if (sessions === undefined) {
@@ -853,7 +918,7 @@ export class ExecutionService {
     let turn: Promise<TurnSettlementLike>
     const lastSessionId = lastSessionIdOf(task)
     const live = lastSessionId === undefined ? undefined : this.pool.get(lastSessionId)
-    const resumeId = followUpText === undefined ? undefined : lastSessionId
+    const resumeId = wakesExisting ? lastSessionId : undefined
     const model = this.modelOf(task)
     const permission = task.permission ?? DEFAULT_PERMISSION
 
@@ -880,7 +945,7 @@ export class ExecutionService {
           }
         }
       } else {
-        const canResume = resumeId !== undefined && followUpText !== undefined && sessions.resume !== undefined
+        const canResume = resumeId !== undefined && sessions.resume !== undefined
         // Resume only delivers context when the caller passed extraContext; otherwise
         // the session log already holds the first-turn context and re-delivery would
         // duplicate it. A fresh session gets rules + references.
@@ -888,18 +953,31 @@ export class ExecutionService {
           ? extraContext
           : canResume
             ? undefined
-            : buildContexts(task, workspace.path, inputAttachments, seedComments)
+            : buildContexts(
+                await spillExecutionError(task, {
+                  ...(this.deps.cacheDir === undefined ? {} : { cacheDir: this.deps.cacheDir }),
+                  ...(issueId === undefined ? {} : { ownerId: issueId }),
+                  log: (level, event, detail) => note(level, event, detail),
+                }),
+                workspace.path,
+                attachments,
+                seedComments,
+              )
+        // A named-context wake has no user turn: omit prompt and let spellbook call
+        // agent.followup(pluginMessage) for each context entry.
+        const prompt = followUpText
+          ?? (canResume && namedContext !== undefined ? undefined : userInstruction(task))
         const base: StartSessionOptions = {
           task,
-          prompt: followUpText ?? userInstruction(task),
           permission,
+          ...(prompt !== undefined ? { prompt } : {}),
           ...(model !== undefined ? { model } : {}),
           ...(context !== undefined ? { context } : {}),
         }
         if (canResume) {
-          handle = await sessions.resume!({ ...base, sessionId: resumeId, prompt: followUpText })
+          handle = await sessions.resume!({ ...base, sessionId: resumeId })
         } else {
-          handle = await sessions.start(base)
+          handle = await sessions.start({ ...base, prompt: prompt ?? userInstruction(task) })
         }
         turn = handle.firstTurn
       }
@@ -1103,7 +1181,12 @@ export class ExecutionService {
               // not by this turn.
               note('info', 'comment-turn-kept-session', `${sessionId}：复用池内句柄，本轮结束不释放`)
             }
-            await this.retryTransientIfUnread(taskId, executionId, followUpText, settlementErrorCode)
+            await this.retryTransientIfUnread(
+              taskId,
+              executionId,
+              () => this.start(taskId, trigger, followUpText, assist, transient, extraContext, namedContext),
+              settlementErrorCode,
+            )
             return
           }
           const settledTask = this.deps.tasks.get(taskId)
@@ -1160,10 +1243,9 @@ export class ExecutionService {
   private async retryTransientIfUnread(
     taskId: string,
     executionId: string,
-    instruction: string | undefined,
+    retry: () => Promise<unknown>,
     errorCode?: string,
   ): Promise<void> {
-    if (instruction === undefined) return
     const settled = this.deps.tasks.get(taskId)?.executions.find(entry => entry.id === executionId)
     const noTurnEnd = settled?.outcome === 'failed' && (settled.error ?? '').includes('turn/end')
     if (!noTurnEnd) {
@@ -1183,7 +1265,7 @@ export class ExecutionService {
     }
     this.transientRetries.set(taskId, used + 1)
     note('warn', 'transient-wake-retry', `${taskId}: 上一轮没观察到 turn/end，重试一次`)
-    await this.wakeForComment(taskId, instruction)
+    await retry()
   }
 
   // ───────────────────────────────────────────────────────────────────────────

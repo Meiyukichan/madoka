@@ -6,8 +6,8 @@
  * stamps `releasedAt`; manual cards enter unless their last round failed or was cancelled, because
  * an automatic retry would burn tokens on a card that is bound to fail.
  *
- * `welink` cards take no concurrency slot and are not blocked by the cap (their volume is gated on
- * the WeLink side), so they run even when the board is full. Order: urgency, creation time, id.
+ * `im` cards take no concurrency slot and are not blocked by the cap (their volume is gated on
+ * the IM side), so they run even when the board is full. Order: urgency, creation time, id.
  *
  * @module dsh-magica-castboard/host/dispatch/dispatcher
  */
@@ -16,7 +16,7 @@ import {
   type RunRequestResult,
   type TaskSummary,
   URGENCIES,
-  isWelinkSource,
+  isImSource,
 } from '../model.ts'
 import { maxConcurrentOf } from '../rules.ts'
 import { eventLog } from '../shared/event-log.ts'
@@ -69,7 +69,7 @@ export function dispatchOrder(summaries: readonly TaskSummary[]): TaskSummary[] 
 }
 
 function unmetered(summary: TaskSummary): boolean {
-  return isWelinkSource(summary.source)
+  return isImSource(summary.source)
 }
 
 export class DispatcherService {
@@ -131,7 +131,7 @@ export class DispatcherService {
     const summaries = this.deps.store.summaries()
     const limit = maxConcurrentOf(this.deps.store.settings(), this.deps.maxConcurrent)
 
-    // Metered count only; welink is excluded.
+    // Metered count only; im is excluded.
     let running = 0
     for (const summary of summaries) {
       if (!summary.hasRunning || unmetered(summary)) continue

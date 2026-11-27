@@ -1,12 +1,19 @@
 /**
  * 本包用到的 dsh 运行时表面的**结构性声明**。
  *
- * 为什么不用 `import type { Context } from '@deepseek-ai/cordis'`：
- * 本仓是单包 workspace，未安装 dsh 依赖，直接 import 真类型会让 `tsc` 无法离线通过。
- * 这里按 0.2.0-rc.2 源码逐条对齐形状（每条都注了来源），运行时由真实实现满足。
- * 字段一旦与源码不符，编译期不会报错但运行时会崩——改动前请先回源码核对。
+ * 为什么不用 `Context` 直接贯穿所有函数：本包只需要 Cordis Context 的一个子集，
+ * 收敛成结构接口可以让测试构造最小假上下文，也不会把 cordis 的泛型/服务增强
+ * 泄漏到插件内部 API。
+ *
+ * 但结构不能凭空手写：下面的 `_DshContextMatchesRuntime` 在编译期要求真实的
+ * `Context` 必须满足 `DshContext`。dsh 0.2.1-rc.5 的 API 一变，这里就会红。
  * @module dsh-magica-rune/shared/dsh
  */
+
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-tools'
 
 /** `@deepseek-ai/cosmokit` 的 `Volatile<T>`：只读引用，值由 loader 原地更新。 */
 export interface VolatileRef<T> {
@@ -36,7 +43,7 @@ export interface DshContext {
    * `never | undefined`，`as XxxPayload` 直接被 TS 判为「类型不重叠」（TS2352）。
    */
   on(event: string, listener: (...args: unknown[]) => unknown): () => void
-  effect(callback: () => (() => void) | void, label?: string): () => void
+  effect(callback: () => (() => unknown) | Iterable<() => unknown>, label?: string): () => void
   inject(deps: readonly string[], callback: (ctx: DshContext) => void): void
   readonly logger: DshLogger
   readonly fiber: unknown
@@ -207,3 +214,7 @@ export interface AgentCreatedPayload {
 export interface AgentDisposedPayload {
   readonly agent: DshAgent
 }
+
+/** 编译期护栏：真实 `Context` 必须覆盖本包用到的结构子集（反向不要求）。 */
+type AssertAssignable<From extends To, To> = From
+type _DshContextMatchesRuntime = AssertAssignable<Context, DshContext>

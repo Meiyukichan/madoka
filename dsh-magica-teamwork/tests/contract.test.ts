@@ -9,7 +9,7 @@ import { bootHarness, PASSWORD } from './helpers.js'
 import { ENDPOINTS } from '../src/server/context.js'
 
 /** 文档声明的鉴权级别（api-design §0.2.1） */
-const PUBLIC = new Set(['POST /auth/register', 'POST /auth/login', 'GET /health', 'GET /version'])
+const PUBLIC = new Set(['POST /auth/token', 'POST /auth/register', 'POST /auth/login', 'GET /health', 'GET /version'])
 const ADMIN = new Set([
   'GET /auth/accounts',
   'PUT /issue-sources/:id',
@@ -21,12 +21,12 @@ const ADMIN = new Set([
 ])
 const LOCAL_OR_ADMIN = new Set(['POST /admin/shutdown'])
 
-test('端点清单：49 个、无重复、分级完整', () => {
-  assert.equal(ENDPOINTS.length, 49)
-  assert.equal(new Set(ENDPOINTS).size, 49, '不能有重复端点')
+test('端点清单：50 个、无重复、分级完整', () => {
+  assert.equal(ENDPOINTS.length, 50)
+  assert.equal(new Set(ENDPOINTS).size, 50, '不能有重复端点')
   const classified = new Set([...PUBLIC, ...ADMIN, ...LOCAL_OR_ADMIN])
   const signed = ENDPOINTS.filter((e) => !classified.has(e))
-  assert.equal(PUBLIC.size, 4)
+  assert.equal(PUBLIC.size, 5)
   assert.equal(ADMIN.size, 7)
   assert.equal(LOCAL_OR_ADMIN.size, 1)
   assert.equal(signed.length, 37, '其余 37 个应该只依赖签名头')

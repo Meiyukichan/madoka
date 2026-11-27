@@ -194,8 +194,8 @@ $ 最后一行                                           → <!--PART2-->
 | K-101 | ⚠️ | 结构面内联（同 K-013） | 无具名 `PreStepDecision` |
 | K-102 | ✅ | `core.ts:211-219` / `:235-258` | — |
 | K-103 | ✅ | `src/shared/dsh.ts:75-80` 四字段齐全 | — |
-| K-104 | ✅有意差异 | `core.ts:246-251` `source = { kind, plugin, form:'snapshot', sections }` | §5#25：`kind` 不再是 `'plugin'`；`plugin` 字段保留表达"谁注入" |
-| K-105 | ✅ | `core.ts:246-251` `form:'snapshot'` + `sections:[{name,text}]` | — |
+| K-104 | ✅有意差异 | `core.ts` `source = { kind, form, summary|sections }` | §5#25：`kind` 不再是 `'plugin'`；V4 source 不写退役的 `plugin` 字段 |
+| K-105 | ✅ | `form:'snapshot'` + `sections:[{name,text}]`；`form:'notice'` 带 `summary` | — |
 | K-106 | ⚠️ | `mintMessageId` 返回 string | 同 K-015 |
 | K-107 | ❌ | 同 K-017（无品牌转换） | `EphemeralModel.reasoningEffort?: string`（`ephemeral.ts:59`） |
 | K-108 | ⚠️ | 只用 `defaultPreset`（`core.ts:630`）与 `set`（`:651`） | `resolve`/`names`/`current` 未使用 |
@@ -419,7 +419,7 @@ $ 最后一行                                           → <!--PART2-->
 | M-085 | 台账能被读回 | ❌ | — |
 | M-086 | workspace 不传 id → 新建 | ❌ | 只有 ephemeral 同形（`facade.test.ts:39`） |
 | M-087 | 自定义铸造器 / 非法 id 同步抛 | ⚠️ | `core.test.ts:261-264` 覆盖 `resolveResumeTarget` 层；"续跑不再调铸造器"未测 |
-| M-088 | `contextPlugin` 决定 `source.plugin`、`kind`=section | ❌ | — |
+| M-088 | `contextPlugin` 不再写入 source；`kind`=section | ✅（有意差异） | V4 source 不写退役的 `plugin` 字段，生产者身份由 `kind` 表达 |
 | M-089 | 已知 id → resume（不 create、模型回退台账） | ⚠️ | `facade.test.ts:81-105` 是 ephemeral 版；`agentOptions` 深等未断言 |
 | M-090 | 未知 id → 新建并忽略 | ✅ | `facade.test.ts:107-124` + `core.test.ts:246-249` |
 | M-091 | 续跑调用方模型覆盖台账并回写 | ❌ | — |

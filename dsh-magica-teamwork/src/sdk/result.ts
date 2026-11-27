@@ -30,6 +30,8 @@ export type KnownCastboardErrorCode =
   | 'internal_error'
   // ── 会话 ────────────────────────────────────────────────
   | 'login_required'
+  | 'auth_refresh_failed'
+  | 'auth_exchange_missing'
   | 'token_unavailable'
   | 'credential_missing'
   | 'credential_corrupt'

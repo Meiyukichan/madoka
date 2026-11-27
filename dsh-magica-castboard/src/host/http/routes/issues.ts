@@ -283,28 +283,8 @@ export function issuesRoutes(deps: IssueRouteDeps): readonly Route[] {
         if (!isValidIssueId(created.issueId)) {
           throw new HttpFailure('internal', '共享库返回了非法的 issue id', 502)
         }
-        // Cloud is authoritative; materialize the local mirror immediately so the
-        // router can claim it without waiting for the next sync interval.
-        try {
-          await deps.issues.mergeRemote([{
-            id: created.issueId,
-            title,
-            detail,
-            workspaceId: '',
-            status: 'pending',
-            assignee: created.assignee,
-            source: 'self',
-            sourceInstance: deps.deviceInstance?.() ?? deps.instance(),
-            ...(projectId === undefined ? {} : { projectId }),
-            urgency: urgency === undefined ? 'normal' : asUrgency(urgency),
-            ...(assigneeInstance === undefined ? {} : { assigneeInstance }),
-            ...(cwd === undefined ? {} : { cwd }),
-            ...(permission === undefined ? {} : { permission }),
-            ...(assignerMeta === undefined ? {} : { assignerMeta }),
-          }], deps.now())
-        } catch (error) {
-          warn('issue-create-mirror-failed', `${created.issueId}: ${errorText(error)}`)
-        }
+        // Cloud is authoritative. Do not materialize or claim it here: the normal
+        // sync poll owns pending -> accepted and the router then converts it.
         return { status: 201, value: { issueId: created.issueId, assignee: created.assignee } }
       },
     },

@@ -31,9 +31,9 @@
  *
  * @module dsh-magica-castboard/host/pipeline/deliver
  */
-import { commentsXml } from '../context/comment-xml.ts'
+import { commentsXml, type CommentAttachmentRef } from '../context/comment-context.ts'
 import { ISSUE_COMMENTS_SECTION } from '../context/sections.ts'
-import { ASSIGNER_WAKE_INSTRUCTION, WAKE_INSTRUCTION } from '../context/texts.ts'
+import { ASSIGNER_WAKE_INSTRUCTION, WAKE_INSTRUCTION } from '../context/comment-instruction.ts'
 import type { CommentOrigin, ThreadComment } from '../ledger/comment-store.ts'
 import { isIssueAnchor, type LinkStore } from '../ledger/link-store.ts'
 import {
@@ -57,6 +57,8 @@ export const RETRY_COOLDOWN_MS = 30_000
 export interface CommentContextEntry {
   readonly name: string
   readonly text: string
+  readonly form?: 'snapshot' | 'instructions' | 'notice'
+  readonly summary?: string
 }
 
 /**
@@ -84,6 +86,15 @@ export interface CommentDelivererDeps {
   readonly links: LinkStore
   /** Read the full comment stream of one issue (used to rebuild the owed batch on redelivery). Omitted = no redelivery. */
   readonly commentsOf?: (anchorId: string) => Promise<readonly ThreadComment[]>
+  /**
+   * Download one comment's attachments before its context is injected.
+   *
+   * Only comments that are actually about to be delivered are synced; local comments
+   * already synced at write time, and pending rows are filtered by the task context.
+   */
+  readonly syncCommentAttachments?: (issueId: string, commentId: string) => Promise<unknown>
+  /** Read already-synced comment attachments for the XML body; only `ready` rows should be returned. */
+  readonly commentAttachments?: (issueId: string, commentId: string) => readonly CommentAttachmentRef[]
   /** Live sessions in this process; `undefined` means the session was unloaded from memory. */
   readonly liveSession?: (sessionId: string) => LiveCommentSession | undefined
   /**
@@ -316,6 +327,26 @@ export class CommentDeliverer {
   }
 
   /**
+   * Download attachments for the comments that are about to be injected.
+   *
+   * Local comments were synced when written; comment attachments are stored under
+   * `<issue>/comments/<commentId>/`, so the issue anchor is all the path resolution needs.
+   */
+  private async ensureCommentAttachments(anchorId: string, comments: readonly ThreadComment[]): Promise<void> {
+    const sync = this.deps.syncCommentAttachments
+    if (sync === undefined || !isIssueAnchor(anchorId)) return
+    for (const comment of comments) {
+      if (comment.origin === 'local') continue
+      try {
+        await sync(anchorId, comment.id)
+      } catch (error) {
+        // The comment itself is already persisted; do not lose it because one file failed.
+        this.log('warn', 'deliver.comment-attachments-failed', { anchorId, commentId: comment.id, error: errorText(error) })
+      }
+    }
+  }
+
+  /**
    * Real delivery: pick a tier based on session state, each guaranteeing "the comment is read + the session keeps running".
    *
    * @returns Whether this batch was actually sent.
@@ -340,9 +371,23 @@ export class CommentDeliverer {
       return false
     }
 
+    // Bounded to the comments that are actually about to be injected. The cursor has
+    // already advanced (or the debt is being retried), so a failed download must not
+    // block the comment body; pending attachment rows stay out of the task context.
+    await this.ensureCommentAttachments(anchorId, batch)
+
     const entry: CommentContextEntry = {
       name: ISSUE_COMMENTS_SECTION,
-      text: commentsXml(anchorId, batch),
+      text: commentsXml(
+        anchorId,
+        batch,
+        side,
+        this.deps.commentAttachments === undefined
+          ? undefined
+          : commentId => this.deps.commentAttachments!(anchorId, commentId),
+      ),
+      form: 'notice',
+      summary: 'New comments on the issue',
     }
     const since = earliest(batch)
     const live = this.liveOf(sessionId)

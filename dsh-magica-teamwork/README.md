@@ -3,19 +3,20 @@
 DSH 的本地协作服务 + 客户端 SDK：**issue 派发与追踪**、项目与成员、设备与工作区肖像、文件附件。
 
 - **服务端**：Node 24 + Fastify + `node:sqlite`，零第三方存储依赖，**首次启动自动建库建表**
-- **SDK**：`TeamworkClient`，负责登录、凭据加密存储、每个请求现签 JWT、幂等重试
-- **可替换**：`host` 默认 `http://127.0.0.1:3939`；改成自己的域名后，服务端可由任何人按契约实现
+- **SDK**：`createCastboardClient`（`CastboardClient`）通过 `/auth/token` 换请求 headers
+- **可替换**：`host` 默认 `http://127.0.0.1:3939`；服务端可由任何人按契约实现，认证交换见 [`docs/design/auth-exchange.zh.md`](docs/design/auth-exchange.zh.md)
 
 设计文档（唯一权威）：
 
 | 文档 | 内容 |
 |---|---|
+| [`docs/design/auth-exchange.zh.md`](docs/design/auth-exchange.zh.md) | **认证交换协议**：`/auth/token`、`/auth/logout`、SDK 刷新、凭据 v2 |
 | [`docs/design/db-design.zh.md`](docs/design/db-design.zh.md) | 9 张表 / 30 索引 / 19 CHECK / 1 外键 + 完整可执行 DDL |
-| [`docs/design/api-design.zh.md`](docs/design/api-design.zh.md) | 47 个端点的入参 / 出参 / 错误码 |
+| [`docs/design/api-design.zh.md`](docs/design/api-design.zh.md) | 50 个端点的入参 / 出参 / 错误码（认证部分看 auth-exchange） |
 | [`docs/design/server-design.zh.md`](docs/design/server-design.zh.md) | 服务端实现形态、鉴权、停机、信任模型 |
-| [`docs/design/sdk-design.zh.md`](docs/design/sdk-design.zh.md) | **SDK 规格（协同底座）**：`dsh-teamwork/1` 协议 47 端点 + 兼容面 32 端点名 + 24 个组合方法 |
-| [`docs/design/open-items.zh.md`](docs/design/open-items.zh.md) | **待办与未决项**：协议未定的缺口（当前 2 条：待决交互通道、服务端路由选型） |
-| [`docs/design/sdk-design.v1.zh.md`](docs/design/sdk-design.v1.zh.md) | v1 客户端（`TeamworkClient`）的凭据与协议边界（历史文档，不再演进） |
+| [`docs/design/sdk-design.zh.md`](docs/design/sdk-design.zh.md) | **SDK 规格（协同底座）**：`dsh-teamwork/1` 协议 + 兼容面 + 24 个组合方法 |
+| [`docs/design/open-items.zh.md`](docs/design/open-items.zh.md) | **待办与未决项**：协议未定的缺口 |
+| [`docs/design/sdk-design.v1.zh.md`](docs/design/sdk-design.v1.zh.md) | 历史 v1 客户端（`TeamworkClient`）文档，仅存档，不再随包提供 |
 
 ## 快速开始
 
@@ -32,18 +33,23 @@ pnpm start -- --help            # 全部参数
 第一个注册的账号自动成为 `administrator`。
 
 ```ts
-import { TeamworkClient } from 'dsh-magica-teamwork'
+import { createCastboardClient } from 'dsh-magica-teamwork'
 
-const tw = new TeamworkClient()                       // 默认连 127.0.0.1:3939
-await tw.register({ accountId: 'alice', password: 'correct horse battery' })
-// 或 tw.login({ accountId, password })
+const client = createCastboardClient()                  // 默认连 127.0.0.1:3939
+const registered = await client.auth.register({ accountId: 'alice', password: 'correct horse battery' })
+if (!registered.ok) throw new Error(registered.reason)
+// 或 client.auth.login({ accountId, password })
 
-const project = await tw.projects.create({ name: '试点', visibility: 'private' })
-await tw.projects.addMember(project.id, { accountId: 'bob', role: 'manager' })
-
-const [issueId] = await tw.issues.create([{ title: '修复登录超时', assignee: 'bob', projectId: project.id }])
-await tw.comments.add(issueId, { content: '开始处理' })
-await tw.issues.updateStatus([{ issueId, status: 'accepted', expectedStatus: 'pending' }])
+const project = await client.teamwork.project.create({ name: '试点', visibility: 'private' })
+if (!project.ok) throw new Error(project.reason)
+const created = await client.issueCreate({
+  title: '修复登录超时',
+  assignee: 'bob',
+  projectId: project.data.id,
+})
+if (!created.ok) throw new Error(created.reason)
+await client.issue.comment.add(created.data.issue.issueId, { content: '开始处理' })
+await client.issueUpdateStatus({ issueId: created.data.issue.issueId, status: 'accepted', expectedStatus: 'pending' })
 ```
 
 ## 数据与配置
@@ -55,7 +61,7 @@ $DSH_TEAMWORK_HOME（默认 ~/.dsh/storages/teamwork）
 │   ├── config.json          可选配置文件（自动拉起时唯一设置点）
 │   ├── files/<fileId>       附件本体
 │   └── run/server.json      单实例锁
-├── .credentials.json        SDK 凭据（AES-256-GCM 信封）
+├── .credentials.json        SDK 凭据（AES-256-GCM；含 accountToken + auth headers）
 └── .credentials.key         SDK 密钥（0600）
 ```
 
@@ -66,7 +72,7 @@ $DSH_TEAMWORK_HOME（默认 ~/.dsh/storages/teamwork）
 | `--host` | `127.0.0.1` | **只接受回环**（127.0.0.1 / ::1 / localhost）；给 0.0.0.0 或局域网地址会直接拒绝启动 |
 | `--port` | `3939` | `0` = 随机 |
 | `--data-dir` | `~/.dsh/storages/teamwork/server` | 自动创建 |
-| `--token-ttl-days` | `3` | 客户端签 JWT 的有效期上限 |
+| `--token-ttl-days` | `3` | 本地 JWT auth headers 的有效期上限，也是 `/auth/token` 的 `expiresAt` 依据 |
 | `--registration` | `open` | `open` / `code` / `closed` |
 | `--private-member-limit` | `5` | private 项目成员上限 |
 | `--auth-cache-ttl` | `60000` | 鉴权结果缓存（`0` = 关闭） |
@@ -81,7 +87,7 @@ curl -s localhost:3939/dsh-teamwork/v1/version  # 协议 + 已实现端点清单
 停机只有一条正常通道（跨平台可靠）：
 
 ```bash
-# 回环 + 锁文件里的 token，或 administrator 签名头
+# 回环 + 锁文件里的 token，或 administrator 的 auth headers
 curl -X POST localhost:3939/dsh-teamwork/v1/admin/shutdown
 ```
 
@@ -158,7 +164,7 @@ node scripts/saturate.mjs http://127.0.0.1:4000
 
 - 默认只绑回环，SDK 不配 `host` 就只连本机 → 实际是单用户本地服务
 - **issue 的读写不做资源级鉴权**；`GET /files/{fileId}` 只要登录就能下载
-- 用户密码 → `accountToken = SHA256(账号:密码)`；它是 JWT 的签名密钥，按密码级机密对待
+- 用户密码 → `accountToken = SHA256(账号:密码)`；本地 JWT 的签名密钥，按密码级机密对待；新 SDK 不再在客户端签 JWT
 - `--host` **只接受回环**：`0.0.0.0` / 局域网 IP / 域名会直接拒绝启动。要跨机，请用 SSH 隧道或反向代理
 
 详见 [`docs/design/server-design.zh.md`](docs/design/server-design.zh.md) §9.0。

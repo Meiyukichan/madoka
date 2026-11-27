@@ -122,7 +122,7 @@ async function boot(targetUrl: string | undefined, verbose: boolean): Promise<Ha
 function client(baseUrl: string, extra: CastboardClientOptions = {}): CastboardClient {
   return createCastboardClient({
     baseUrl,
-    persist: false,
+    home: mkdtempSync(join(tmpdir(), 'dsh-teamwork-saturate-client-')),
     onRequest: (info) => observe(info.method, info.path),
     ...extra,
   })

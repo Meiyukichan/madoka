@@ -13,6 +13,7 @@ import { IssueStore } from '../src/host/ledger/issue-store.ts'
 import { LinkStore } from '../src/host/ledger/link-store.ts'
 import { CommentStore } from '../src/host/ledger/comment-store.ts'
 import { ThreadService } from '../src/host/pipeline/thread.ts'
+import { acceptanceIdFor } from '../src/host/exec/acceptance.ts'
 import type { TaskRecord } from '../src/host/model.ts'
 import { taskRecord, tempRoot } from './helpers.ts'
 
@@ -197,7 +198,7 @@ test('castboard_move：自动验收会话可收卡，其他会话仍被拒', asy
     workspaceId: 'ws-1',
     status: 'in_review',
     acceptanceInjectedAt: 1_000,
-    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出 MIKU' }],
+    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出结果' }],
     executions: [{ id: 'e-1', trigger: 'acceptance', outcome: 'running', sessionId: 'session-1' }],
   }))
   await seedTask(kit.tasks, taskRecord({
@@ -205,7 +206,7 @@ test('castboard_move：自动验收会话可收卡，其他会话仍被拒', asy
     workspaceId: 'ws-1',
     status: 'in_review',
     acceptanceInjectedAt: 1_000,
-    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出 MIKU' }],
+    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出结果' }],
     executions: [{ id: 'e-1', trigger: 'acceptance', outcome: 'running', sessionId: 'session-1' }],
   }))
   const move = byName(castboardTools(taskDeps({ fixture: kit })), 'castboard_move')
@@ -238,7 +239,7 @@ test('castboard_move：自动验收会话可收卡，其他会话仍被拒', asy
     id: 't-4',
     workspaceId: 'ws-1',
     status: 'in_review',
-    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出 MIKU' }],
+    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出结果' }],
     executions: [{ id: 'e-1', trigger: 'manual', outcome: 'succeeded', sessionId: 'session-1' }],
   }))
   await forbidden('t-4', 'session-1')
@@ -248,7 +249,7 @@ test('castboard_move：自动验收会话可收卡，其他会话仍被拒', asy
     workspaceId: 'ws-1',
     status: 'in_progress',
     acceptanceInjectedAt: 1_000,
-    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出 MIKU' }],
+    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出结果' }],
     executions: [{ id: 'e-1', trigger: 'manual', outcome: 'running', sessionId: 'session-1' }],
   }))
   await forbidden('t-5', 'session-1')
@@ -258,7 +259,7 @@ test('castboard_move：自动验收会话可收卡，其他会话仍被拒', asy
     workspaceId: 'ws-1',
     status: 'in_review',
     acceptanceInjectedAt: 1_000,
-    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出 MIKU' }],
+    acceptanceStrategies: [{ id: 'a-1', title: '验收', type: 'close', description: '输出结果' }],
     executions: [
       { id: 'e-1', trigger: 'manual', outcome: 'succeeded', sessionId: 'session-1' },
       { id: 'e-2', trigger: 'acceptance', outcome: 'succeeded', sessionId: 'session-2' },
@@ -504,7 +505,7 @@ test('castboard_issue_task：继承 issue 的 cron/checklist/验收策略', asyn
     ['无报错', false],
   ])
   assert.deepEqual(receipt.task.acceptanceStrategies?.map(item => [item.id, item.title]), [
-    ['a-check', '自动验收'],
+    [acceptanceIdFor('自动验收', 'issue'), '自动验收'],
   ])
   const issue = await kit.issues.get(created.id)
   assert.deepEqual(issue?.assignerMeta?.cron, '0 9 * * 1-5')
@@ -653,7 +654,7 @@ test('castboard_issues_help：能注入时把指导送进会话，不能时随�
     comments: kit.comments,
     thread: kit.thread,
     now: () => 1,
-    instance: () => '10.0.0.1:3080',
+    instance: () => '127.0.0.1:3080',
     inject: (sessionId, entries) => {
       injected.push({ sessionId: sessionId ?? '', entries })
       return true
@@ -662,8 +663,8 @@ test('castboard_issues_help：能注入时把指导送进会话，不能时随�
 
   const result = await help.execute({}, execContext()) as { injected: boolean; local: { instance: string } }
   assert.equal(result.injected, true)
-  assert.equal(result.local.instance, '10.0.0.1:3080')
-  assert.deepEqual(injected[0]?.entries.map(entry => entry.name), ['castboard-issue-creation-guidance'])
+  assert.equal(result.local.instance, '127.0.0.1:3080')
+  assert.deepEqual(injected[0]?.entries.map(entry => entry.name), ['castboard-issue-delegation'])
 
   const withoutInjection = byName(buildIssueDispatchTools({
     tasks: kit.tasks,
@@ -671,12 +672,12 @@ test('castboard_issues_help：能注入时把指导送进会话，不能时随�
     comments: kit.comments,
     thread: kit.thread,
     now: () => 1,
-    instance: () => '10.0.0.1:3080',
+    instance: () => '127.0.0.1:3080',
   }), 'castboard_issues_help')
   const fallback = await withoutInjection.execute({}, execContext()) as {
     injected: boolean
     guidance?: string
   }
   assert.equal(fallback.injected, false)
-  assert.ok((fallback.guidance ?? '').includes('castboard_issues_create'))
+  assert.ok((fallback.guidance ?? '').includes('castboard_issue (capability="create")'))
 })

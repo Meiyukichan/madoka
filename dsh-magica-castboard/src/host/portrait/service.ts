@@ -11,7 +11,7 @@
  *
  * @module dsh-magica-castboard/host/portrait/service
  */
-import type { PortraitTarget } from './prompt.ts'
+import type { PortraitTarget } from '../context/portrait-context.ts'
 import {
   PORTRAIT_MAX_ATTEMPTS,
   consolePortraitLog,

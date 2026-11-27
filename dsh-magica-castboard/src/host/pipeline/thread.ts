@@ -125,7 +125,7 @@ export class ThreadService {
   private readonly deps: ThreadServiceDeps
   /**
    * References coverage watermark: anchor -> the largest `createdAt` actually handed out by this turn's
-   * `<castboard_task_references>` (0 = none handed out).
+   * `<castboard_task_context>` (0 = none handed out).
    *
    * Records facts only and lives in memory only: it describes what this turn's session has seen, which has no meaning across restarts.
    */
@@ -138,7 +138,7 @@ export class ThreadService {
   /**
    * Which comment references have reached (`createdAt`; 0 = none handed out).
    *
-   * The deliverer uses this to avoid double injection with `<castboard_task_references>`: only comments strictly after the watermark are sent.
+   * The deliverer uses this to avoid double injection with `<castboard_task_context>`: only comments strictly after the watermark are sent.
    *
    * @param anchorId - Anchor.
    */

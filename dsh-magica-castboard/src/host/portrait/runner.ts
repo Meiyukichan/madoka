@@ -11,11 +11,11 @@
 import { stat } from 'node:fs/promises'
 
 import {
-  PORTRAIT_TARGET_SECTION,
-  portraitInstruction,
   portraitTargetXml,
   type PortraitTarget,
-} from './prompt.ts'
+} from '../context/portrait-context.ts'
+import { PORTRAIT_REMINDER_SECTION } from '../context/sections.ts'
+import { portraitInstruction } from '../context/portrait-instruction.ts'
 import type { PortraitEntry, PortraitLog } from './store.ts'
 
 // `error` is human-readable and lands in the log and the ledger's `error` field.
@@ -25,7 +25,15 @@ export interface PortraitSessionFace {
   readonly id: string
   readonly resumed: boolean
   /** `contexts` are appended to this step's message, after the instruction. */
-  run(instruction: string, contexts?: readonly { name: string; text: string }[]): Promise<PortraitTurnOutcome>
+  run(
+    instruction: string,
+    contexts?: readonly {
+      name: string
+      text: string
+      form?: 'snapshot' | 'instructions' | 'notice'
+      summary?: string
+    }[],
+  ): Promise<PortraitTurnOutcome>
   dispose(): Promise<void>
 }
 
@@ -67,8 +75,8 @@ export async function runPortraitTurn(
 ): Promise<PortraitTurnResult> {
   let outcome: PortraitTurnOutcome
   try {
-    outcome = await session.run(portraitInstruction(target), [
-      { name: PORTRAIT_TARGET_SECTION, text: portraitTargetXml(target) },
+    outcome = await session.run(portraitInstruction(), [
+      { name: PORTRAIT_REMINDER_SECTION, text: portraitTargetXml(target), form: 'snapshot' },
     ])
   } catch (error) {
     // Fold into ok:false so the caller still settles.

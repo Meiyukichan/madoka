@@ -41,7 +41,7 @@ function installSettingsSelfCheck(ctx: DshContext): void {
           describe(): Array<{ ns: string }>
           configure(presentation: { auto?: boolean }, owner: unknown): () => void
         }>('settings')
-        if (settings === undefined) return
+        if (settings === undefined) return () => {}
         const found = settings.describe().some(descriptor => descriptor.ns === ABILITY_NS)
         if (!found) {
           ctx.logger.warn(
@@ -52,6 +52,7 @@ function installSettingsSelfCheck(ctx: DshContext): void {
         return settings.configure({ auto: false }, ctx.fiber)
       } catch (error) {
         ctx.logger.warn(`[rune] settings self-check failed: ${String(error)}`)
+        return () => {}
       }
     }, 'dsh-magica-rune: settings self-check')
   })

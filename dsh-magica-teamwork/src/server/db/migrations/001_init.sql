@@ -115,7 +115,7 @@ CREATE TABLE dsh_teamwork_issue (
   assignee_instance TEXT,
   assignee_meta     TEXT,
   status            TEXT NOT NULL DEFAULT 'pending',
-  source            TEXT NOT NULL DEFAULT 'self',
+  source            TEXT NOT NULL DEFAULT 'dsh',
   source_instance   TEXT,
   depends_on        TEXT,
   created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),

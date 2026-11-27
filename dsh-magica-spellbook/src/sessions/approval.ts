@@ -10,7 +10,11 @@
 
 import { randomUUID } from 'node:crypto'
 import { manageWaterfallListener } from './core.ts'
-import { WATERFALL_TAKEOVER } from '../shared/interaction.ts'
+import {
+  WATERFALL_TAKEOVER,
+  emitInteractionChanged,
+  type PendingInteractionRecord,
+} from '../shared/interaction.ts'
 import type { ApprovalOutcome as DshApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
 import type { DshContextLike } from '../shared/dsh.ts'
 
@@ -130,6 +134,18 @@ export function installApprovalAnswerer(
     // 已经 abort 的 AbortSignal 不会再触发 abort 事件，必须先查
     if (signal?.aborted === true) return Promise.resolve<ApprovalOutcome>('cancelled')
 
+    const record: PendingInteractionRecord = {
+      kind: 'approval',
+      id,
+      sessionId: key,
+      since,
+      toolName: entry.toolName,
+      ...(entry.callId === undefined ? {} : { callId: entry.callId }),
+      ...(entry.reason === undefined ? {} : { reason: entry.reason }),
+      ...(entry.displayReason === undefined ? {} : { displayReason: entry.displayReason }),
+      ...(entry.args === undefined ? {} : { args: entry.args }),
+    }
+
     return new Promise<ApprovalOutcome>((resolve) => {
       let done = false
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -144,6 +160,7 @@ export function installApprovalAnswerer(
           // 已移除
         }
         bridge.pending.delete(id)
+        emitInteractionChanged(ctx, { action: 'removed', item: record, outcome })
         resolve(outcome)
       }
 
@@ -163,6 +180,7 @@ export function installApprovalAnswerer(
         // 无法监听：只能靠超时/注销
       }
       bridge.pending.set(id, { ...entry, settle })
+      emitInteractionChanged(ctx, { action: 'added', item: record })
     })
   }
 

@@ -227,7 +227,6 @@ const en: Record<MessageKey, string> = {
   'issue.onlineAttachRemove': 'Remove',
   'issue.source': 'Source',
   'issue.assigner': 'Creator',
-  'issue.sourceLocal': 'Local',
   'issue.discuss': 'Discussion',
   'issue.discussEmpty': 'No comments yet. A note here is delivered to the executor (kept in the thread before conversion).',
   'issue.discussPlaceholder': 'Add a requirement / answer the executor…',

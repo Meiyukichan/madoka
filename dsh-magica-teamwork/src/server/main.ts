@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { openDatabase, type DatabaseHandle } from './db/database.js'
 import { resolveConfig, HELP } from './config.js'
 import { createContext, PROTOCOL, SERVICE_VERSION, type AppContext } from './context.js'
+import type { AuthProvider } from './auth/provider.js'
 import { buildApp } from './app.js'
 import { pathToFileURL } from 'node:url'
 import { isLoopback } from './http/auth-hook.js'
@@ -32,6 +33,8 @@ export interface StartServerOptions {
   log?: (msg: string) => void
   /** 测试用：关闭限流（生产不要传 false） */
   rateLimit?: boolean
+  /** 覆盖样例鉴权；企业也可部署自己的完整服务。 */
+  auth?: AuthProvider
 }
 
 export interface RunningServer {
@@ -102,6 +105,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<{
     config: finalConfig,
     db: db.db,
     rateLimit: options.rateLimit,
+    ...(options.auth === undefined ? {} : { auth: options.auth }),
     shutdown: () => {
       void close()
     },

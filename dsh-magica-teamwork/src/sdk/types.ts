@@ -203,10 +203,10 @@ export function isCastboardIssueId(value: unknown): value is string {
   return typeof value === 'string' && value.trim() === value && CASTBOARD_ISSUE_ID_PATTERN.test(value)
 }
 
-/** 预置来源通道（`source` 是开放取值，这三个是内置） */
-export const CASTBOARD_PRESET_SOURCES: readonly string[] = ['self', 'dsh', 'welink']
+/** 预置来源通道（`source` 是开放取值；`self` 仅为旧数据兼容） */
+export const CASTBOARD_PRESET_SOURCES: readonly string[] = ['dsh', 'im']
 
-export const CASTBOARD_DEFAULT_SOURCE = 'self'
+export const CASTBOARD_DEFAULT_SOURCE = 'dsh'
 
 /** 分页默认值（`api-design` §0.5） */
 export const CASTBOARD_TEAMWORK_DEFAULT_PAGE_NUM = 1

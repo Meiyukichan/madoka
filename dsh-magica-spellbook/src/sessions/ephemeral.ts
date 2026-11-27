@@ -45,7 +45,7 @@ import {
   type SessionRecordStore,
 } from './store.ts'
 import { installFailFastAnswerer, snapshotPendingApprovals } from './approval.ts'
-import { effectOf, asReasoningEffortId } from '../shared/dsh.ts'
+import { effectOf, asReasoningEffortId, serviceOf } from '../shared/dsh.ts'
 import { installFailFastQuestionAnswerer, snapshotPendingQuestions } from './questions.ts'
 import { noteMagicaSession } from '../interactions/ownership.ts'
 import type {
@@ -53,6 +53,7 @@ import type {
   DshAgentSetup,
   DshCancelCause,
   DshSandboxMode,
+  DshSessionTitleLike,
   DshTurnEndReason,
   DshUserMessageLike,
 } from '../shared/dsh.ts'
@@ -74,19 +75,22 @@ export const DEFAULT_SANDBOX: SessionPermission = 'workspace-write'
 export const DEFAULT_TTL_MS = 30 * 60_000
 
 /** `noInteraction` 默认注入的插件规则。 */
-export const NO_INTERACTION_PREFIX = '禁止向用户提问，直接完成/回答。'
+export const NO_INTERACTION_PREFIX = 'Do not ask the user questions; complete or answer directly.'
 
-/** 默认上下文署名。 */
+/** 默认生产者名：只用于诊断/报错，V4 source 不再写 `plugin` 字段。 */
 const DEFAULT_CONTEXT_PLUGIN = 'dsh-magica-spellbook'
 
 /** 构造选项。 */
 export interface RunEphemeralSessionOptions {
   sessionId?: string
   newSessionId?: () => string
+  /** 生产者名：只用于诊断/报错，不写入消息 source。 */
   contextPlugin?: string
   cwd: string
   /** 首轮 user 文本；省略时用 `context` 的第一条具名上下文直接唤醒（不产生 user bubble）。 */
   prompt?: string | string[]
+  /** 会话标题；在会话创建后、首轮开始前钉住。 */
+  title?: string
   context?: PluginContextEntry | readonly PluginContextEntry[]
   agentPresetId?: string | false
   setup?: DshAgentSetup
@@ -413,6 +417,16 @@ function steerImpl(message: string | string[]): boolean {
     uninstall.push(installFailFastQuestionAnswerer(ctx, sessionId))
   }
 
+  function pinTitle(): void {
+    if (options.title === undefined || handle === null) return
+    const titles = serviceOf<DshSessionTitleLike>(ctx, 'sessionTitle')
+    try {
+      titles?.rename?.(handle.agent.session, options.title)
+    } catch {
+      // cosmetic：标题钉不住不影响任务
+    }
+  }
+
   async function startFirstTurn(): Promise<TurnSettlement> {
     const agents = resolveAgents(ctx)
     handle = resumed ? await resumeAgent(agents) : await createAgent(agents)
@@ -431,6 +445,7 @@ function steerImpl(message: string | string[]): boolean {
         warnLedgerWriteFailure(ctx, `permission "${sandbox}" was not applied to ${sessionId}`)
       }
     }
+    pinTitle()
     writeRecord(mountedPresetId)
     let settlement: TurnSettlement
     if (options.prompt === undefined) {

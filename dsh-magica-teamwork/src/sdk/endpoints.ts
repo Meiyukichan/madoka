@@ -1,7 +1,7 @@
 /**
  * 端点表：**唯一真源**。方法体里不许出现手写路径字面量（INV-3）。
  *
- * 50 条表项 / 49 个协议端点（`projectList` 与 `teamworkProjectMine` 同路径 `/projects/mine`）。
+ * 51 条表项 / 50 个协议端点（`projectList` 与 `teamworkProjectMine` 同路径 `/projects/mine`）。
  * 逐条语义、入参、出参与错误码见 `docs/design/api-design.zh.md`；
  * 表项与分组方法的映射见设计文档 §7.2 / §9.1。
  */
@@ -27,7 +27,8 @@ export interface CastboardEndpoint {
 }
 
 export const CASTBOARD_ENDPOINTS = {
-  // ── 账号（6）─────────────────────────────────────────────────────────
+  // ── 账号（7）─────────────────────────────────────────────────────────
+  authToken: { method: 'POST', path: '/auth/token', auth: 'public', retry: false },
   authRegister: { method: 'POST', path: '/auth/register', auth: 'public', retry: false },
   authLogin: { method: 'POST', path: '/auth/login', auth: 'public', retry: false },
   authMe: { method: 'GET', path: '/auth/me', auth: 'signed', retry: true },
@@ -103,7 +104,7 @@ export const CASTBOARD_DEFAULT_PREFIX = '/dsh-teamwork/v1'
 
 /** 端点 → 分组（表与实现漂移的护栏，测试断言两边键集完全相等） */
 export const CASTBOARD_ENDPOINT_OWNER = {
-  auth: ['authRegister', 'authLogin', 'authMe', 'authLogout', 'authPassword', 'authAccountLookup'],
+  auth: ['authToken', 'authRegister', 'authLogin', 'authMe', 'authLogout', 'authPassword', 'authAccountLookup'],
   project: ['projectList', 'projectMembers'],
   teamworkProject: [
     'teamworkProjectList',

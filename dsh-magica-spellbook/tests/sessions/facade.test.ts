@@ -36,6 +36,29 @@ function makeCtx(dir: string, agents: unknown) {
 }
 
 describe('runEphemeralSession', () => {
+  it('给 title 时会 pinTitle（sessionTitle.rename）', async () => {
+    const dir = tempDir()
+    const bundle = fakeAgents({ text: '答案' })
+    const titled: string[] = []
+    const ctx = fakeCtx({
+      agents: bundle.registry,
+      agentDefaultModel: { currentSelection: () => ({ provider: 'mock', model: 'mock-model' }) },
+      dshHomePath: (...segments: string[]) => join(dir, ...segments),
+      sessionTitle: {
+        rename: (_session: unknown, title: string) => { titled.push(title) },
+      },
+    })
+    const handle = runEphemeralSession(ctx, {
+      cwd: 'D:/tmp/project',
+      prompt: '你好',
+      title: 'DSH任务面板项目肖像',
+      storeDir: dir,
+    })
+    await handle.firstTurn
+    assert.deepEqual(titled, ['DSH任务面板项目肖像'])
+    await handle.dispose()
+  })
+
   it('首轮跑通：completed、状态收敛、台账落盘', async () => {
     const dir = tempDir()
     const bundle = fakeAgents({ text: '答案' })

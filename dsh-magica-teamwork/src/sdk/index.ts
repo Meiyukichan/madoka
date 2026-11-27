@@ -3,9 +3,9 @@
  *
  * 分层：
  *  - `result` / `types` / `wire`：信封、线格式类型、翻译与校验（纯函数）
- *  - `endpoints`：49 条协议端点表（唯一真源）
+ *  - `endpoints`：50 条协议端点表（唯一真源）
  *  - `net` / `log`：出站句柄与日志接缝（**都用发布包 `@meiyukichan/dsh-magica-spellbook`**）
- *  - `auth` / `auth-api`：会话（现签 JWT）与账号端点
+ *  - `auth` / `auth-api`：长期凭据 + `/auth/token` 交换 headers + 账号端点
  *  - `transport`：一条请求管线
  *  - 原子分组：`project` / `device` / `file` / `issue/*` / `teamwork/*` / `ops` / `admin`
  *  - 组合层：`sdk.ts`（24 个语义方法 + E1）

@@ -92,7 +92,7 @@ export function assertIssueIdShape(issueId: string): void {
   if (/^t-/i.test(issueId)) {
     throw new HttpFailure(
       'invalid_input',
-      `"${issueId}" 是任务 id，不能作为 issue 锚点；给卡片写评论请用 castboard_comment_add（参数 taskId）。`,
+      `"${issueId}" 是任务 id，不能作为 issue 锚点；先用 castboard_task（capability="get"）拿到 issueId，再用 castboard_comment。`,
       400,
     )
   }

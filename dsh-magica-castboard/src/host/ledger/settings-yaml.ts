@@ -33,7 +33,7 @@ const FIELD_ORDER = [
 const HEADER = [
   '# castboard 看板设置。面板「保存设置」会整份覆盖这个文件；也可以手改，下一次轮询生效。',
   '# 只支持扁平的 key: value（不支持缩进 / 嵌套 / 列表）；删除某个键 = 回退出厂默认值。',
-  '#   maxConcurrent      并发执行上限，整数 1..20（出厂 3）',
+  '#   maxConcurrent      并发执行上限，整数 1..20（出厂 4）',
   '#   autoRoute          自动路由待规划 issue，true / false',
   '#   portraitRunOnStart 启动时立即补跑一次项目肖像，true / false（出厂 false）',
   '#   commentsEnabled    评论拉取，true / false',

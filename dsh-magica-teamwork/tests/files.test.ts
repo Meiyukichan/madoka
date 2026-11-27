@@ -116,7 +116,7 @@ test('上传大小上限：超过 --max-upload-mb 被拒', async (t) => {
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
   const { startServer } = await import('../src/server/index.js')
-  const { TeamworkClient } = await import('../src/index.js')
+  const { TeamworkClient } = await import('./support/legacy-client.js')
 
   const dir = mkdtempSync(join(tmpdir(), 'tw-size-'))
   const server = await startServer({ dataDir: dir, port: 0, log: () => {}, rateLimit: false, argv: ['--max-upload-mb', '1'] })

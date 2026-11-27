@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startServer } from '../src/server/main.js'
-import { TeamworkClient, TeamworkError } from '../src/index.js'
+import { TeamworkClient, TeamworkError } from './support/legacy-client.js'
 
 const PASSWORD = 'correct horse battery'
 const b64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64')

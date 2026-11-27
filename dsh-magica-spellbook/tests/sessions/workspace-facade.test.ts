@@ -137,6 +137,21 @@ describe('runWorkspaceSession（G-1：正式门面必须有测试）', () => {
     await handle.dispose()
   })
 
+  it('prompt 省略：用具名上下文直接唤醒首轮，不生成 user 消息', async () => {
+    const h = harness()
+    const handle = runWorkspaceSession(h.ctx, {
+      workspaceId: 'w-1',
+      workspacePath: 'D:/proj',
+      context: [{ name: 'castboard-issue-comments', text: '<issue_comments/>' }],
+      storeDir: h.dir,
+    })
+    const settlement = await handle.firstTurn
+    assert.equal(settlement.completed, true)
+    assert.equal(h.bundle.calls.length, 1)
+    assert.equal(h.bundle.calls[0]?.kind, 'followup')
+    await handle.dispose()
+  })
+
   it('humanInteraction 打开时安装 approval + question 接管（都是 prepend+global）', async () => {
     const h = harness()
     const handle = runWorkspaceSession(h.ctx, {

@@ -1,5 +1,7 @@
-﻿# dsh-teamwork · 服务端设计
+# dsh-teamwork · 服务端设计
 
+> **认证部分已被 [`auth-exchange.zh.md`](./auth-exchange.zh.md) 取代。** 本文旧段落里的「客户端现签 JWT、固定双头」只描述本地 `LocalJwtAuthProvider`；路由统一走 `AuthProvider.authenticate(headers)`。
+>
 > **本文是 `dsh-teamwork` 服务端的唯一设计基线。**
 >
 > 技术栈：**Node 24 + `node:sqlite` + 零第三方运行时依赖 + 自签 token + 本地磁盘附件**。

@@ -247,6 +247,17 @@ export function buildUserMessage(text: string | string[]): DshUserMessageLike {
 /** 无名插件上下文的缺省 source kind（0.2 的 v4 会话格式拒绝 `kind: 'plugin'`）。 */
 export const DEFAULT_CONTEXT_KIND = 'spellbook-context'
 
+/** 上下文消息的内容形态（dsh `ContextForm` 中本 SDK 实际使用的三种）。 */
+export type PluginContextForm = 'snapshot' | 'instructions' | 'notice'
+
+/** 单条上下文消息的形态选项。 */
+export interface PluginContextOptions {
+  /** 缺省 `snapshot`（具名 section 放在 `sections` 里）。 */
+  readonly form?: PluginContextForm
+  /** `notice` 必填：折叠行的一行说明。 */
+  readonly summary?: string
+}
+
 /**
  * 插件上下文消息。
  *
@@ -256,19 +267,44 @@ export const DEFAULT_CONTEXT_KIND = 'spellbook-context'
  * - 传了 `section` → 用 section 名当 kind（GUI 的上下文行显示它，例：`lattice-rules`）；
  * - 没传 → 用 {@link DEFAULT_CONTEXT_KIND}。
  *
- * 这个生产者形状由 `shared/dsh.ts` 里的 `MessageSourceMap` 声明合并登记（dsh 的官方扩展点），
- * 所以返回的是真正的 `UserMessage`，不再是"长得像"的对象。
+ * `form` 决定消费者如何展示内容：`snapshot` 带 `sections`，`instructions` 是纯指令，
+ * `notice` 必须带一行 `summary`。V4 source 不再写退役的 `plugin` 字段；生产者身份由
+ * `kind` 表达。
+ *
+ * @param plugin - 生产者名，仅用于报错/诊断；不会进入消息 source。
  */
 export function buildPluginMessage(
   plugin: string,
   text: string,
   section?: string,
+  options: PluginContextOptions = {},
 ): DshUserMessageLike {
   const kind = section === undefined || section === '' ? DEFAULT_CONTEXT_KIND : section
   if (kind === 'plugin') {
     throw new Error(
-      "context section must not be 'plugin': dsh session format v4 rejects the retired plugin source kind",
+      `context section must not be 'plugin' (producer ${plugin}): dsh session format v4 rejects the retired plugin source kind`,
     )
+  }
+  const form = options.form ?? 'snapshot'
+  if (form === 'notice') {
+    const summary = options.summary?.trim()
+    if (summary === undefined || summary === '') {
+      throw new Error(`context '${kind}' uses form 'notice' but has no summary`)
+    }
+    return {
+      id: asMessageId(mintMessageId()),
+      role: 'user',
+      content: [{ type: 'text', text }],
+      source: { kind, form, summary },
+    }
+  }
+  if (form === 'instructions') {
+    return {
+      id: asMessageId(mintMessageId()),
+      role: 'user',
+      content: [{ type: 'text', text }],
+      source: { kind, form },
+    }
   }
   return {
     id: asMessageId(mintMessageId()),
@@ -276,7 +312,6 @@ export function buildPluginMessage(
     content: [{ type: 'text', text }],
     source: {
       kind,
-      plugin,
       form: 'snapshot',
       sections: [{ name: kind, text }],
     },
@@ -284,15 +319,22 @@ export function buildPluginMessage(
 }
 
 /** 插件上下文条目。 */
-export type PluginContextEntry = string | { readonly name: string; readonly text: string }
+export interface PluginContextEntryObject {
+  readonly name: string
+  readonly text: string
+  readonly form?: PluginContextForm
+  readonly summary?: string
+}
+
+export type PluginContextEntry = string | PluginContextEntryObject
 
 /** 归一插件上下文条目（空串 / 非对象 / 无 text 一律静默丢弃）。 */
 export function toContextEntries(
   value: PluginContextEntry | readonly PluginContextEntry[] | undefined,
-): Array<{ name?: string; text: string }> {
+): Array<{ name?: string; text: string; form?: PluginContextForm; summary?: string }> {
   if (value === undefined) return []
   const list = Array.isArray(value) ? value : [value as PluginContextEntry]
-  const out: Array<{ name?: string; text: string }> = []
+  const out: Array<{ name?: string; text: string; form?: PluginContextForm; summary?: string }> = []
   for (const item of list) {
     if (typeof item === 'string') {
       if (item !== '') out.push({ text: item })
@@ -302,7 +344,16 @@ export function toContextEntries(
     const text = item.text
     if (typeof text !== 'string' || text === '') continue
     const name = item.name
-    out.push(typeof name === 'string' && name !== '' ? { name, text } : { text })
+    const form = item.form === 'snapshot' || item.form === 'instructions' || item.form === 'notice'
+      ? item.form
+      : undefined
+    const summary = typeof item.summary === 'string' && item.summary !== '' ? item.summary : undefined
+    out.push({
+      ...(typeof name === 'string' && name !== '' ? { name } : {}),
+      text,
+      ...(form === undefined ? {} : { form }),
+      ...(summary === undefined ? {} : { summary }),
+    })
   }
   return out
 }
@@ -312,11 +363,15 @@ export function toMessages(
   plugin: string,
   value: PluginContextEntry | readonly PluginContextEntry[] | undefined,
 ): DshUserMessageLike[] {
-  return toContextEntries(value).map((entry) =>
-    entry.name === undefined
-      ? buildPluginMessage(plugin, entry.text)
-      : buildPluginMessage(plugin, entry.text, entry.name),
-  )
+  return toContextEntries(value).map((entry) => {
+    const options: PluginContextOptions = {
+      ...(entry.form === undefined ? {} : { form: entry.form }),
+      ...(entry.summary === undefined ? {} : { summary: entry.summary }),
+    }
+    return entry.name === undefined
+      ? buildPluginMessage(plugin, entry.text, undefined, options)
+      : buildPluginMessage(plugin, entry.text, entry.name, options)
+  })
 }
 
 /**

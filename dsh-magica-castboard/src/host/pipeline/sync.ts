@@ -21,6 +21,7 @@
  *
  * @module dsh-magica-castboard/host/pipeline/sync
  */
+import { normalizeIssueSource } from '../../shared/wire.ts'
 import { mapLimit } from '../shared/async.ts'
 import { eventLog } from '../shared/event-log.ts'
 import { MAX_TITLE } from '../rules.ts'
@@ -502,7 +503,7 @@ export class IssueSyncService {
       const assignee = text(view.assignee)
       const assigneeTask = text(view.assigneeTask)
       const assigneeInstance = text(view.assigneeInstance)
-      const source = text(view.source)
+      const source = normalizeIssueSource(text(view.source))
       const sourceInstance = text(view.sourceInstance)
       const projectId = typeof view.projectId === 'number' && Number.isInteger(view.projectId)
         ? view.projectId

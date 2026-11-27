@@ -16,13 +16,13 @@ test('M1 健康：公开；含 db 与缓存统计；user_version=1', async (t) =
   assert.equal(body.authCache.ttlMs, 60_000)
 })
 
-test('M2 版本：protocol = dsh-teamwork/1；endpoints 恰好 49 个', async (t) => {
+test('M2 版本：protocol = dsh-teamwork/1；endpoints 恰好 50 个', async (t) => {
   const h = await bootHarness()
   t.after(() => h.close())
   const res = await h.raw('GET', '/version')
   const body = res.body as { protocol: string; endpoints: string[]; node: string }
   assert.equal(body.protocol, 'dsh-teamwork/1')
-  assert.equal(body.endpoints.length, 49)
+  assert.equal(body.endpoints.length, 50)
   assert.ok(body.endpoints.includes('POST /issues/batch'))
   assert.ok(body.endpoints.includes('GET /health'))
   assert.match(body.node, /^v\d+/)

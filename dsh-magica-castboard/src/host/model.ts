@@ -50,16 +50,7 @@ export type CommentRecord = {
   systemParams?: Record<string, string>
 }
 
-/**
- * The `welink` source. It has three product rules keyed off this constant — hidden from
- * the board, exempt from the concurrency cap, and executes as soon as it is transferred
- * out — so do not spell the string out elsewhere.
- */
-export const WELINK_SOURCE = 'welink'
-
-export function isWelinkSource(source: string | undefined): boolean {
-  return typeof source === 'string' && source.trim().toLowerCase() === WELINK_SOURCE
-}
+export { IM_SOURCE, isImSource } from '../shared/wire.ts'
 
 // Path-safety boundary, not just a format rule: ids are concatenated into `<id>.json`.
 const ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/
@@ -102,7 +93,7 @@ export const MIN_MAX_CONCURRENT = 1
 
 export const MAX_MAX_CONCURRENT = 20
 
-export const DEFAULT_MAX_CONCURRENT = 3
+export const DEFAULT_MAX_CONCURRENT = 4
 
 export const MAX_CHECKLIST_ITEMS = 30
 
@@ -252,7 +243,7 @@ export type TaskRecord = {
   source?: string
   derivedIssues?: string[]
   execution: ExecutionConfig
-  reference?: { dag?: string; router?: string }
+  reference?: { dag?: string; proposal?: string }
   /** Shown to the executor only; never consulted by transitions. */
   tags?: string[]
   model?: TaskModel
@@ -875,7 +866,6 @@ export type CreateIssueBody = {
   projectId?: number
   title: string
   detail?: string
-  /** `self` means this host. */
   assignee: string
   assigneeInstance?: string
   cwd?: string

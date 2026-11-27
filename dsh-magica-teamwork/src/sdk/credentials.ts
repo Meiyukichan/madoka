@@ -1,8 +1,8 @@
 /**
  * 本地凭据存储：AES-256-GCM 信封 + 独立密钥文件。
  *
- * 明文里只存 `accountToken`（= SHA256(账号:密码)，JWT 签名密钥）+ 账号信息 + `ttlSeconds`；
- * **不存 `authToken`**（每个请求现签）。
+ * 明文里存长期凭据 `accountToken`、账号信息，以及最近一次 `/auth/token` 换来的
+ * `auth.headers` / `expiresAt`；headers 名字完全由服务端决定。
  *
  * 目录：`$DSH_TEAMWORK_HOME`（默认 `~/.dsh/storages/teamwork`）
  *   .credentials.key   32 字节原始密钥的 base64url（0600）
@@ -13,13 +13,20 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+export interface StoredAuth {
+  headers: Record<string, string>
+  expiresAt: number | null
+  obtainedAt: string
+}
+
 export interface StoredCredential {
-  v: 1
+  v: 2
   server: string
   accountId: string
   displayName: string | null
   accountToken: string
   ttlSeconds: number
+  auth: StoredAuth | null
   savedAt: string
 }
 
@@ -78,7 +85,7 @@ export class CredentialStore {
       decipher.setAAD(Buffer.from(`dsh-teamwork/credential/v1|${envelope.kid}`, 'utf8'))
       decipher.setAuthTag(tag)
       const plain = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8')
-      return JSON.parse(plain) as StoredCredential
+      return normalizeStored(JSON.parse(plain) as unknown)
     } catch {
       throw new CredentialError('credential_corrupt', '凭据解密失败（密钥变了或文件被篡改）')
     }
@@ -170,4 +177,50 @@ export class CredentialStore {
 
 function fingerprint(key: Buffer): string {
   return key.subarray(0, 4).toString('hex')
+}
+
+/** v1 自动升级：保留账号/长期凭据，清空缓存的 auth headers，首次请求再换。 */
+function normalizeStored(value: unknown): StoredCredential {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CredentialError('credential_corrupt', '凭据明文不是对象')
+  }
+  const raw = value as Record<string, unknown>
+  const accountId = typeof raw.accountId === 'string' ? raw.accountId : ''
+  const accountToken = typeof raw.accountToken === 'string' ? raw.accountToken : ''
+  const server = typeof raw.server === 'string' ? raw.server : ''
+  if (accountId === '' || accountToken === '' || server === '') {
+    throw new CredentialError('credential_corrupt', '凭据缺少 accountId / accountToken / server')
+  }
+  const auth = normalizeAuth(raw.auth)
+  return {
+    v: 2,
+    server,
+    accountId,
+    displayName: typeof raw.displayName === 'string' ? raw.displayName : null,
+    accountToken,
+    ttlSeconds: typeof raw.ttlSeconds === 'number' && raw.ttlSeconds > 0 ? raw.ttlSeconds : 259_200,
+    auth,
+    savedAt: typeof raw.savedAt === 'string' ? raw.savedAt : new Date(0).toISOString(),
+  }
+}
+
+function normalizeAuth(value: unknown): StoredAuth | null {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new CredentialError('credential_corrupt', 'auth 字段不是对象')
+  }
+  const raw = value as Record<string, unknown>
+  if (raw.headers === null || typeof raw.headers !== 'object' || Array.isArray(raw.headers)) {
+    throw new CredentialError('credential_corrupt', 'auth.headers 不是对象')
+  }
+  const headers: Record<string, string> = {}
+  for (const [key, item] of Object.entries(raw.headers as Record<string, unknown>)) {
+    if (typeof item !== 'string') throw new CredentialError('credential_corrupt', `auth.headers.${key} 不是字符串`)
+    headers[key] = item
+  }
+  return {
+    headers,
+    expiresAt: typeof raw.expiresAt === 'number' && Number.isFinite(raw.expiresAt) ? raw.expiresAt : null,
+    obtainedAt: typeof raw.obtainedAt === 'string' ? raw.obtainedAt : new Date(0).toISOString(),
+  }
 }

@@ -8,7 +8,7 @@
  *
  * @module dsh-magica-castboard/host/http/routes/tasks
  */
-import { taskDispatchInstruction } from '../../context/renders.ts'
+import { taskDispatchInstruction } from '../../context/task-instruction.ts'
 import { nextCronRunAtOrUndefined, withNextRunAt } from '../../dispatch/cron.ts'
 import { normalizeInlineAcceptanceStrategies, planAcceptance, type AcceptanceStrategy } from '../../exec/acceptance.ts'
 import type { ExecutionService } from '../../exec/engine.ts'

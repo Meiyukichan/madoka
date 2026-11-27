@@ -12,7 +12,7 @@
  */
 
 import { CastboardAdminApi } from './admin.js'
-import { CastboardAuth } from './auth.js'
+import { CastboardAuth, type CastboardAuthDevice, type CastboardAuthGrant } from './auth.js'
 import { CastboardAuthApi } from './auth-api.js'
 import { CastboardDeviceApi } from './device.js'
 import { mineInstance, teamworkBaseUrl, type BaseUrlOptions } from './env.js'
@@ -74,14 +74,14 @@ import type {
 
 export interface CastboardClientOptions extends BaseUrlOptions {
   // ── 会话 ──────────────────────────────────────────────────────────────
-  /** 凭据目录；缺省 `~/.dsh/storages/teamwork` */
+  /** 凭据目录；缺省 `~/.dsh/storages/teamwork`（始终持久化） */
   home?: string
-  /** `false` = 纯内存（不写任何凭据文件） */
-  persist?: boolean
   /** 直接注入会话（CI / 测试）；优先于 `tokenProvider` */
   credentials?: { accountId: string; accountToken: string; ttlSeconds?: number; displayName?: string | null; globalRole?: CastboardGlobalRole }
   /** 异步解析会话（自定义凭据源） */
   tokenProvider?: () => Promise<{ accountId: string; accountToken: string; ttlSeconds?: number } | null>
+  /** `/auth/token` 的可选设备信息；函数形式每次刷新时取最新值。 */
+  authDevice?: CastboardAuthDevice | (() => CastboardAuthDevice | undefined)
   /** 401 时通知调用方清自己的缓存 */
   onTokenInvalid?: () => void
   // ── 身份兜底（组合层用）───────────────────────────────────────────────
@@ -146,9 +146,9 @@ export class CastboardClient {
       ? null
       : castboardFail({ status: 0, code: 'invalid_host', reason: resolved.reason, value: resolved.value })
 
+    let transportRef: CastboardTransport | undefined
     this.authSession = new CastboardAuth({
       ...(options.home === undefined ? {} : { home: options.home }),
-      ...(options.persist === undefined ? {} : { persist: options.persist }),
       ...(options.credentials === undefined
         ? {}
         : {
@@ -170,6 +170,19 @@ export class CastboardClient {
                 : { accountId: found.accountId, accountToken: found.accountToken, ttlSeconds: found.ttlSeconds ?? 259_200 }
             },
           }),
+      authExchange: async (input) => {
+        const transport = transportRef
+        if (transport === undefined) throw new Error('auth transport is not ready')
+        const result = await transport.call<CastboardAuthGrant>('authToken', {}, { body: input })
+        if (!result.ok) {
+          throw Object.assign(new Error(result.reason), { status: result.status, code: result.code })
+        }
+        if (result.data === null || typeof result.data !== 'object') {
+          throw new Error('/auth/token 响应不是对象')
+        }
+        return result.data
+      },
+      ...(options.authDevice === undefined ? {} : { device: options.authDevice }),
       ...(options.onTokenInvalid === undefined ? {} : { onTokenInvalid: options.onTokenInvalid }),
       serverKey: this.baseUrl,
     })
@@ -184,6 +197,7 @@ export class CastboardClient {
       ...(options.onRequest === undefined ? {} : { onRequest: options.onRequest }),
       auth: this.authSession,
     })
+    transportRef = this.transport
 
     this.auth = new CastboardAuthApi(this.transport, this.authSession)
     this.project = new CastboardProjectApi(this.transport)

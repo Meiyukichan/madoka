@@ -1,13 +1,12 @@
 /**
- * Where the tool set gets assembled: four groups of definitions end up in one registry.
- *
- * Only combination and narrowing live here. Each group receives a minimal dependency face, so no
- * group can reach storage or network capabilities it has no business touching.
+ * Where the model-facing tool set gets assembled: the domain handlers are built
+ * with narrowed dependency faces, then exposed through four capability gateways.
  *
  * @module dsh-magica-castboard/host/tools
  */
 import type { ToolDefinition as HostToolDefinition } from '@deepseek-ai/dsh-tools'
 
+import { buildGatewayTools } from './gateway.ts'
 import type { CommentStore } from '../ledger/comment-store.ts'
 import type { IssueStore } from '../ledger/issue-store.ts'
 import type { LinkStore } from '../ledger/link-store.ts'
@@ -17,7 +16,7 @@ import type { IssueQueryFace } from '../pipeline/sdk-query.ts'
 import { issueCommentTools, type CommentDeliveryFace, type IssueCommentToolDeps } from './issue-comment.ts'
 import { issueTaskTools, type IssueTaskToolDeps, type UpstreamIssueComment } from './issue-task.ts'
 import { buildIssueDispatchTools } from './issue-tools.ts'
-import type { ToolDeps as DispatchToolDeps, ToolDefinition as DispatchToolDefinition } from './shared.ts'
+import type { ToolDeps as DispatchToolDeps } from './shared.ts'
 import {
   castboardTools,
   type ExecutionFace,
@@ -63,7 +62,7 @@ export interface CastboardToolDeps {
   query?: IssueQueryFace
   remoteIssue?: DispatchToolDeps['remoteIssue']
   remoteComments?: DispatchToolDeps['remoteComments']
-  /** Shared-library issue source dictionary (self-heal self/dsh + validate explicit codes). */
+  /** Shared-library issue source dictionary; this plugin only ensures `dsh`. */
   sources?: NonNullable<DispatchToolDeps['sources']>
   /** Issue-target attachment sync for `castboard_issue_state`. */
   syncIssueAttachments?: DispatchToolDeps['syncIssueAttachments']
@@ -157,5 +156,6 @@ export function buildTools(deps: CastboardToolDeps): readonly HostToolDefinition
   const conversionTools = issueTaskTools(issueTaskToolDeps(deps)) as unknown as HostToolDefinition[]
   const dispatchTools = buildIssueDispatchTools(dispatchToolDeps(deps))
   const commentTools = issueCommentTools(issueCommentToolDeps(deps)) as unknown as HostToolDefinition[]
-  return [...taskTools, ...conversionTools, ...dispatchTools, ...commentTools]
+  const legacy = [...taskTools, ...conversionTools, ...dispatchTools, ...commentTools]
+  return buildGatewayTools(legacy as never)
 }

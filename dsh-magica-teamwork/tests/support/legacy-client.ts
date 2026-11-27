@@ -6,12 +6,12 @@
  * - 401 自动处理：`token_expired` 重签重试一次；`unauthorized` → 需要重新登录
  */
 import { createHmac } from 'node:crypto'
-import { CredentialStore, CredentialError, defaultHome, type StoredCredential } from '../credentials.js'
+import { CredentialStore, CredentialError, defaultHome, type StoredCredential } from '../../src/sdk/credentials.js'
 import type {
   Account, Attachment, AttachmentRole, AttachmentTargetType, AuthSession, Comment, CommentDelta, Device, FileInfo, Issue,
   IssueCreateInput, Project, ProjectDetail, ProjectMember, ProjectRole, Source, StatusUpdateItem,
   StatusUpdateResult, VersionInfo, Workspace,
-} from './types.js'
+} from './legacy-types.js'
 
 /** fetch 的请求体：不引 lib.dom，统一走宽松类型 */
 type RequestPayload = unknown
@@ -292,12 +292,13 @@ export class TeamworkClient {
   private persist(): void {
     if (!this.store || !this.session) return
     const credential: StoredCredential = {
-      v: 1,
+      v: 2,
       server: this.host,
       accountId: this.session.account.accountId,
       displayName: this.session.account.displayName,
       accountToken: this.session.accountToken,
       ttlSeconds: this.session.ttlSeconds,
+      auth: null,
       savedAt: new Date().toISOString(),
     }
     try {

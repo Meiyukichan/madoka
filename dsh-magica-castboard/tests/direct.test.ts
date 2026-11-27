@@ -8,11 +8,12 @@ import { tempRoot } from './helpers.ts'
 test('direct 校验失败：assignee 评论 + assigneeMeta 回写', async t => {
   const issues = new IssueStore({ dir: tempRoot(t), now: () => 1_000 })
   const issue = await issues.create({
-    title: '输出 miku',
-    detail: '直接输出 miku',
+    title: '输出结果',
+    detail: '直接输出结果',
     workspaceId: '',
     urgency: 'direct',
   })
+  await issues.update(issue.id, draft => { draft.status = 'accepted' })
 
   const comments: Array<{ body: string; role?: string | null }> = []
   let abandonedMeta: Record<string, unknown> | undefined

@@ -8,12 +8,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  CastboardAuthError,
   CastboardTransport,
-  signToken,
   type CastboardAuthLike,
   type CastboardFetch,
   type CastboardGlobalRole,
-  type CastboardSession,
 } from '../src/sdk/index.js'
 
 const BASE = 'http://127.0.0.1:3939/dsh-teamwork/v1'
@@ -46,27 +45,24 @@ function json(body: unknown, status = 200): Response {
 class FakeAuth implements CastboardAuthLike {
   signed = true
   role: CastboardGlobalRole | undefined = 'administrator'
-  expired = 0
-  skew: number | null = null
+  refreshed = 0
+  refreshError: Error | null = null
   cleared = 0
   private counter = 0
 
-  headers(): { token: string; accountId: string } | null {
+  async headers(): Promise<Record<string, string> | null> {
     if (!this.signed) return null
     this.counter += 1
-    return { token: `token-${this.counter}`, accountId: 'alice' }
+    return { 'x-auth-token': `token-${this.counter}`, cookie: 'sid=abc' }
+  }
+
+  async refresh(): Promise<void> {
+    this.refreshed += 1
+    if (this.refreshError !== null) throw this.refreshError
   }
 
   globalRole(): CastboardGlobalRole | undefined {
     return this.role
-  }
-
-  onExpired(): void {
-    this.expired += 1
-  }
-
-  onExpTooLong(skewMs: number): void {
-    this.skew = skewMs
   }
 
   onUnauthorized(): void {
@@ -90,9 +86,9 @@ test('public 端点不带鉴权头；signed 端点带双头', async () => {
   await transport.call('projectList')
 
   assert.equal(calls.length, 2)
-  assert.equal(calls[0]!.init.headers?.['dsh-teamwork-token'], undefined)
-  assert.equal(calls[1]!.init.headers?.['dsh-teamwork-token'], 'token-1')
-  assert.equal(calls[1]!.init.headers?.['dsh-teamwork-account'], 'alice')
+  assert.equal(calls[0]!.init.headers?.['x-auth-token'], undefined)
+  assert.equal(calls[1]!.init.headers?.['x-auth-token'], 'token-1')
+  assert.equal(calls[1]!.init.headers?.['cookie'], 'sid=abc')
 })
 
 test('signed 端点无会话 → 401 login_required，且零请求', async () => {
@@ -121,34 +117,7 @@ test('admin 端点：已知角色不是 administrator → 403 forbidden，零请
   assert.equal(calls.length, 0)
 })
 
-test('现签 JWT：payload 只有 {a,iat,exp}，两次请求的 exp 不同', async () => {
-  const session: CastboardSession = { accountId: 'alice', accountToken: 'a'.repeat(64), ttlSeconds: 3600 }
-  const { calls, fetchImpl } = recorder(() => json({ ok: true }))
-  const auth: CastboardAuthLike = {
-    headers: () => ({ token: signToken(session), accountId: session.accountId }),
-    globalRole: () => 'administrator',
-    onExpired: () => {},
-    onExpTooLong: () => {},
-    onUnauthorized: () => {},
-  }
-  const transport = makeTransport(fetchImpl, { auth })
-  await transport.call('projectList')
-  await transport.call('projectList')
-
-  const decode = (token: string): Record<string, unknown> => {
-    const parts = token.split('.')
-    assert.equal(parts.length, 3)
-    return JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')) as Record<string, unknown>
-  }
-  const first = decode(calls[0]!.init.headers!['dsh-teamwork-token']!)
-  const second = decode(calls[1]!.init.headers!['dsh-teamwork-token']!)
-  assert.equal(first['a'], 'alice')
-  assert.deepEqual(Object.keys(first).sort(), ['a', 'exp', 'iat'])
-  assert.equal(first['a'], second['a'])
-  assert.ok(Number(second['iat']) >= Number(first['iat']))
-})
-
-test('token_expired → 重签一次并成功（第二次带的 token 已经不同）', async () => {
+test('401 → 刷新 headers 一次并重试；headers 名字由 auth 决定', async () => {
   let attempt = 0
   const { calls, fetchImpl } = recorder(() => {
     attempt += 1
@@ -160,35 +129,29 @@ test('token_expired → 重签一次并成功（第二次带的 token 已经不�
   const result = await transport.call('projectList')
   assert.equal(result.ok, true)
   assert.equal(calls.length, 2)
-  assert.equal(auth.expired, 1)
+  assert.equal(auth.refreshed, 1)
   assert.notEqual(
-    calls[0]!.init.headers!['dsh-teamwork-token'],
-    calls[1]!.init.headers!['dsh-teamwork-token'],
+    calls[0]!.init.headers!['x-auth-token'],
+    calls[1]!.init.headers!['x-auth-token'],
   )
 })
 
-test('token_exp_too_long → 用 /health.serverTime 学 skew 后重试成功', async () => {
-  let attempt = 0
-  const serverTime = new Date(Date.now() - 5_000).toISOString()
-  const { calls, fetchImpl } = recorder((call) => {
-    if (call.url.endsWith('/health')) return json({ serverTime })
-    attempt += 1
-    return attempt === 1 ? json({ code: 'token_exp_too_long', message: 'too long' }, 401) : json([])
-  })
+test('刷新认证失败 → auth_refresh_failed，不无限重试', async () => {
+  const { calls, fetchImpl } = recorder(() => json({ code: 'token_expired' }, 401))
   const auth = new FakeAuth()
+  auth.refreshError = new CastboardAuthError('auth_refresh_failed', 'auth endpoint down', 503)
   const transport = makeTransport(fetchImpl, { auth })
 
   const result = await transport.call('projectList')
-  assert.equal(result.ok, true)
-  assert.ok(calls.some((c) => c.url.endsWith('/health')), '应当去读 /health 学时钟差')
-  assert.equal(typeof auth.skew, 'number')
-  // 服务端时间比本地慢 5s → skew 为正（本地"快了"），传输层把它交给 auth 去收敛
-  assert.ok((auth.skew ?? 0) > 0)
-  assert.equal(calls.filter((c) => !c.url.endsWith('/health')).length, 2)
+  assert.equal(result.ok, false)
+  if (result.ok) return
+  assert.equal(result.code, 'auth_refresh_failed')
+  assert.equal(auth.refreshed, 1)
+  assert.equal(calls.length, 1)
 })
 
-test('unauthorized → login_required 且清会话', async () => {
-  const { fetchImpl } = recorder(() => json({ code: 'unauthorized', message: '签名错误' }, 401))
+test('重新认证后仍 401 → login_required 且清 headers', async () => {
+  const { calls, fetchImpl } = recorder(() => json({ code: 'unauthorized', message: '仍被拒绝' }, 401))
   const auth = new FakeAuth()
   const transport = makeTransport(fetchImpl, { auth })
 
@@ -197,6 +160,8 @@ test('unauthorized → login_required 且清会话', async () => {
   if (result.ok) return
   assert.equal(result.code, 'login_required')
   assert.equal(auth.cleared, 1)
+  assert.equal(auth.refreshed, 1)
+  assert.equal(calls.length, 2)
 })
 
 test('网络错误只对幂等请求重试；非幂等 POST 只打一次', async () => {

@@ -35,7 +35,7 @@ test('原子层：账号 / 项目 / issue / 评论 / 来源 / 附件 / 工作区
   // ── ops：协议 + 能力探测 ──────────────────────────────────────────────
   const version = await alice.ops.version()
   assert.equal(version.ok, true)
-  if (version.ok) assert.equal(version.data.endpoints.length, 49)
+  if (version.ok) assert.equal(version.data.endpoints.length, 50)
 
   const probed = await alice.ops.probe()
   assert.equal(probed.ok, true)

@@ -1,7 +1,7 @@
 # 重点事项
 
 - **用中文回答**
-- **新代码一律面向 `0.2.0 ~ 0.2.1` 的 DSH**（本机运行/源码当前是 `0.2.1-rc.5`，已实测适配）；本地源码：`D:\project-code\test\deepseek-harness`（下文路径都相对它）。
+- **新代码一律面向 `0.2.0 ~ 0.2.2` （主版本：0.2.1）的 DSH**（本机运行/源码当前是 `0.2.1-rc.5`，已实测适配）；本地源码：`D:\project-code\test\deepseek-harness`（下文路径都相对它）。
 - 本仓另有 0.1.2 线（`@meiyukichan/dsh-index`）：**只维护，不复用其代码、类型和 API 记忆** 。
 - 写插件前先查源码中同类官方实现，对齐 API、命名与返回结构；**不要照抄 0.1.2 时代的代码**（本文件末尾列了常见漂移）。
 - 项目下所有子包采用pnpm构建 (pnpm-workspace.yaml)，版本统一从0.2.0-alpha.1开始，最后lib/只有两个文件：index.js/client.js【压缩源码】。*.js.map 禁止进入 lib/
@@ -61,7 +61,11 @@
    - 保留 sourcemap（Host 从 `/plugins/<包名>/client.js.map` 提供），构建时替换 `process.env.NODE_ENV` / `import.meta.env.MODE`，产物默认 production。
    - Host 服务的是**构建产物** `lib/client.js`：改完源码必须重新构建对应包再验证，源码不会被直接执行。
 
-5. **依赖与版本兼容**：需要与宿主共享实例的 dsh 包（cordis、dsh-llm、dsh-settings、dsh-tools 等）**同时**写 `peerDependencies` 与 `devDependencies`；范围必须覆盖当前运行时（如 `>=0.2.0-rc.2` / `^0.2.0-rc.2`）。0.2 在 profile 组合期会对 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-*` 的 peer 做 semver 校验（含 prerelease）：不满足的插件行会被**直接禁用**，安装也会被拒绝，只能用 `dsh plugin allow-version` 做逐版本显式豁免（`packages/boot/app-boot/src/plugin-compatibility.ts`）。`engines.dsh` 只是声明性字段，没有读取方，写它不产生任何保护。react、ui-primitives、ui-slots、client-store 等基线模块由 shell 模块表注入，只放 `devDependencies` 供类型检查。
+5. **依赖与版本兼容**：本仓所有 0.2 插件的**编译/测试基线统一为 DSH `0.2.1-rc.5`**，同时保留 `0.2.0 ~ 0.2.2` 的安装范围；升级主版本时先改 devDependencies，peer 范围继续保留三条线。
+   - 需要与宿主共享实例的 dsh 包（cordis、dsh-llm、dsh-settings、dsh-tools 等）**同时**写 `peerDependencies` 与 `devDependencies`；dev 侧钉精确 `0.2.1-rc.5`（cordis `4.0.5`、schemastery `3.18.5`），供 `tsc` 解析真实类型。
+   - peer 统一写三段式：`>=0.2.0-rc.2 <0.3.0-0 || >=0.2.1-rc.5 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0`。DSH 自己的兼容闸用 `semver.satisfies(..., { includePrerelease: true })`，单段就能覆盖；但 npm/pnpm 解析 peer 时按标准 semver，预发布元组规则会挡掉 `0.2.1-rc.x` / `0.2.2-rc.x`，所以必须按线分段。
+   - **不要写 `engines.dsh`**：`packages/boot/app-boot/src/plugin-compatibility.ts` 会优先读它，一旦存在就只校验这一条、跳过所有逐包 peer；删掉它，校验才会落到每个 `@deepseek-ai/dsh*` peer。0.2 在 profile 组合期对不满足的插件行会**直接禁用**，安装也会被拒绝，只能用 `dsh plugin allow-version` 做逐版本显式豁免。
+   - `@deepseek-ai/dsh` 本体只在本包确实 import 它时才声明；react、ui-primitives、ui-slots、client-store 等基线模块由 shell 模块表注入，只放 `devDependencies` 供类型检查。
 
 ## 二、运行时安全（host 侧）
 
@@ -89,6 +93,7 @@
 
 - **插件形态**：导出 `name` / `inject` / `apply(ctx, config)` / `Config`。依赖未就绪时 fiber 停在 PENDING；`apply` 抛错进 FAILED；通过 `ctx` 做的注册随 fiber 卸载自动回收。
 - **工具**：默认用 `defineTool`（`@deepseek-ai/dsh-tools`）声明 name/description/parameters/output/execute，再 `ctx.tools.register(...)`；参数校验、超时、并行与展示模式由工具表统一处理。只有对接外部 JSON Schema 时才直接注册裸 schema，并自行负责输入校验。自定义卡片在 client 侧注册 `tool.call.toolview`（按 tool 名 keyed）。
+- **上下文消息**：`user/message.source` 用 `kind`（生产者/section）+ `form`：`snapshot` 必须带 `sections`，`notice` 必须带一行 `summary`，`instructions` 不带 sections；**不要写退役的 `plugin` 字段**，V4 持久化编码会拒绝 `kind:'plugin'`。
 - **配置**：需要设置页即时编辑的字段声明为 `Volatile<T>` + `.volatile()`，操作开始时读 `.get()`，并监听 `loader/volatile-update`；敏感值用 `role('secret')` 或凭据引用。schema 表达不了的跨字段约束在 `apply` 或写入路径自行校验并抛错（本版本 schemastery 3.18.4 **没有** `.check()`，cookbook 里的写法在源码中不存在）。
 - **服务**：需要对外提供能力时 `ctx.provide(name, impl)`（或用 `Service` 基类）；消费方按第 2 节第 4 条取用。跨插件通信只走 Cordis service / event，不走模块级全局或直接 import 对方实现。
 - **Remote / RPC**：Host 方法经 Typert 生成 `/remote` 产物，client 通过 `ctx.remote.<namespace>` 调用、`ctx.remote.$on` 订阅。生成物之外的跨包值导入同样被 purity gate 拒绝。
@@ -162,7 +167,7 @@
 
 ## 六、0.1.2 → 0.2 常见漂移（照抄旧代码必踩）
 
-| 0.1.2 写法 / 旧文档说法 | 0.2.0-rc.2 正确做法 |
+| 0.1.2 写法 / 旧文档说法 | 0.2.1-rc.5 正确做法 |
 |---|---|
 | `dsh.client.inject: ["locale"]` 当服务注入 | 服务依赖写 Cordis `export const inject = ['locale', ...]`；`dsh.client.inject` 只写包名 |
 | 组件里 `useSyncExternalStore(locale.subscribe, locale.getSnapshot)` | slot 注册声明 `locale: ns` 拿 `t`，或在 `apply` 里 `ctx.locale.bind(ns)` 后作 prop 传入 |
@@ -171,7 +176,7 @@
 | Host Config schema `.i18n({ zh, en })` | 全仓无此调用约定；配置说明用 `description()`，展示名走 `locale/*.json`，界面文案走 locale 服务 |
 | 跨插件 `import` 组件 / 服务类 | 只允许 `import type`（声明合并）；运行时走 Cordis service 或 slot |
 | `dsh.client.external` 当依赖声明用 | 仅基础设施模块请求可用；功能插件用 service / slot 协作 |
-| 认为 `engines.dsh` 会拦住不兼容版本 | 只是声明性字段，无读取方强制 |
+| 认为 `engines.dsh` 会拦住不兼容版本 | `engines.dsh` 有读取方，且**优先于 peer**：写了它只会校验这一条并跳过逐包 peer；插件不要写，让校验落到每个 `@deepseek-ai/dsh*` peer |
 
 ## 七、禁止事项
 

@@ -16,25 +16,28 @@ import { basename, join, resolve } from 'node:path'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ToolDefinition as HostToolDefinition } from '@deepseek-ai/dsh-tools'
+import type { InteractionChangedEvent } from '@meiyukichan/dsh-magica-spellbook'
 
 import {
   BOARD_PROMPT_ORDER_OFFSET,
   BOARD_PROMPT_SECTION,
-  BOARD_PROMPT_TEXT,
+  CASTBOARD_SYSTEM_PROMPT,
   PLUGIN_NAME,
   PORTRAIT_IDLE_PROMPT,
   PORTRAIT_MAX_LINES,
   PORTRAIT_ORDER,
   PORTRAIT_SECTION,
-  castboardIssueReferences,
-  castboardIssueRoutingXml,
+  PORTRAIT_REMINDER_SECTION,
+  castboardIssueContext,
+  castboardIssueRouterXml,
   castboardPortraitXml,
 } from './host/context/index.ts'
 import { DispatcherService } from './host/dispatch/dispatcher.ts'
 import { SchedulerService } from './host/dispatch/scheduler.ts'
 import { AcceptanceRunner } from './host/exec/acceptance-runner.ts'
 import { ExecutionService, type SessionsFace } from './host/exec/engine.ts'
-import { InteractionService, type InteractionFace, type PendingInteraction } from './host/exec/interactions.ts'
+import { InteractionCoordinator } from './host/exec/interaction-coordinator.ts'
+import { InteractionService, type InteractionFace, type InteractionOutcome, type PendingInteraction } from './host/exec/interactions.ts'
 import { createSpellbookSessions } from './host/exec/spellbook-sessions.ts'
 import { backfillTaskSources } from './host/exec/source-backfill.ts'
 import { createRouter, type Route } from './host/http/router.ts'
@@ -64,7 +67,7 @@ import { IssueFinalizer } from './host/pipeline/finalize.ts'
 import { IssueCommentInbox } from './host/pipeline/inbox.ts'
 import { CommentPublisher } from './host/pipeline/publish.ts'
 import { IssueRouterService } from './host/pipeline/router.ts'
-import { createRouterSessionOpener, routerRoutingSection } from './host/pipeline/router-runner.ts'
+import { createRouterSessionOpener, routerGuideSection } from './host/pipeline/router-runner.ts'
 import { createSdkFaces, type CastboardClientLike, type SdkFaces, type SdkIssueComment } from './host/pipeline/sdk-face.ts'
 import { IssueSyncService } from './host/pipeline/sync.ts'
 import { ThreadService } from './host/pipeline/thread.ts'
@@ -82,9 +85,9 @@ import { batchDateOf, PortraitStore } from './host/portrait/store.ts'
 import { portraitFileWritten } from './host/portrait/runner.ts'
 import { resolveDefaultModel, type ResolvedModel } from './host/shared/default-model.ts'
 import { eventLog } from './host/shared/event-log.ts'
-import { ROUTE_PREFIX } from './shared/wire.ts'
+import { ROUTE_PREFIX, ISSUE_SOURCE_DSH } from './shared/wire.ts'
 import { maxConcurrentOf } from './host/rules.ts'
-import type { PendingInteractionRecord } from './host/model.ts'
+import type { CreateIssueBody, PendingInteractionRecord } from './host/model.ts'
 import { buildTools, type CastboardToolDeps, type IssueStateAttachment, type UpstreamIssueComment } from './host/tools/index.ts'
 import { tracePayload, workspaceFace, type ExecutionFace, type WorkspaceFace } from './host/tools/task-tools.ts'
 
@@ -605,9 +608,16 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
   }
 
   // The execution service is built after the deliverer, so live sessions are resolved through a reference at call time.
+  // Comments use the same reference: both task context and redelivery must read through
+  // ThreadService.list(), which owns echo deduplication.
+  const threadRef: { current?: ThreadService } = {}
   const deliverer = new CommentDeliverer({
     links,
-    commentsOf: anchorId => comments.list(anchorId),
+    commentsOf: anchorId => threadRef.current?.list(anchorId) ?? Promise.resolve([]),
+    syncCommentAttachments: (issueId, commentId) => attachmentSync.syncComment(issueId, commentId),
+    commentAttachments: (issueId, commentId) => attachments.list(issueId)
+      .filter(row => row.targetType === 'comment' && row.targetId === commentId && row.state !== 'pending')
+      .map(row => ({ name: row.name, path: row.path })),
     coveredUntil: anchorId => executionRef.current?.commentsSeededUntil(anchorId) ?? 0,
     liveSession: sessionId => {
       const live = executionRef.current?.liveAgentOf(sessionId)
@@ -616,12 +626,12 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
         running: live.running,
         push: entries => {
           for (const entry of entries) {
-            const result = live.push({ name: entry.name, text: entry.text })
+            const result = live.push(entry)
             if (!result.ok) return false
           }
           return 'pushed'
         },
-        inject: entries => live.inject(entries.map(entry => ({ name: entry.name, text: entry.text }))),
+        inject: entries => live.inject(entries),
         followUp: text => live.followUp(text),
       }
     },
@@ -631,7 +641,7 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
       if (taskId === undefined) return false
       const text = input.context.map(entry => entry.text).join('\n\n')
       return executionRef.current
-        ?.wakeForComment(taskId, input.instruction, text)
+        ?.wakeForComment(taskId, text)
         .then(result => result.ok)
         .catch(() => false) ?? false
     },
@@ -646,6 +656,7 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     publish: anchorId => { publisherRef.current?.schedule(anchorId) },
     deliver: (source, anchorId, list) => deliverer.deliver(source, anchorId, list),
   })
+  threadRef.current = thread
 
   const execution = new ExecutionService({
     ctx: options.ctx,
@@ -655,7 +666,18 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     ...(options.sessions === undefined ? {} : { sessions: options.sessions }),
     workspaces: { get: id => workspaces.get(id) },
     ...(options.archiveSession === undefined ? {} : { archiveSession: options.archiveSession }),
-    attachmentsFor: async issueId => attachments.listForTask({ id: '', issueId }),
+    attachmentsFor: async issueId => attachments.list(issueId)
+      .filter(row => row.state !== 'pending')
+      .map(row => ({
+        name: row.name,
+        path: row.path,
+        type: attachmentKind(row),
+        targetType: row.targetType,
+        targetId: row.targetId,
+        ...(row.description === undefined ? {} : { description: row.description }),
+      })),
+    syncCommentAttachments: (issueId, commentId) => attachmentSync.syncComment(issueId, commentId),
+    cacheDir: join(paths.root, '.cache'),
     acceptanceStrategies: () => acceptanceStrategies.list(),
     ...(model === undefined ? {} : { resolveDefaultModel: () => model }),
     onIssueRunning: issueId => {
@@ -695,6 +717,33 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     taskIdOfSession: sessionId => tasks.taskIdOfSession(sessionId),
     face: createInteractionFace(options.ctx),
   })
+
+  // Skeleton scheduler: the real refresh -> reconcile -> report pass lands with the
+  // interaction protocol. For now it proves the event-driven wake + safety fallback.
+  const coordinator = new InteractionCoordinator({
+    run: async () => {
+      const refresh = await interactions.refreshResult()
+      if (!refresh.ok) return
+      if (refresh.items.length > 0) {
+        note('info', 'interaction-coordinator-pending', String(refresh.items.length))
+      }
+    },
+    log: (event, error) => note('warn', event, errorText(error)),
+  })
+
+  const hostEvents = options.ctx as {
+    on?: (name: string, listener: (change: InteractionChangedEvent) => void) => (() => void) | void
+    effect?: (callback: () => unknown, label?: string) => unknown
+  } | undefined
+  const offInteraction = hostEvents?.on?.('magica/interaction-changed', change => {
+    if (change.action === 'removed') {
+      interactions.noteOutcome(change.item.id, outcomeOfInteractionChange(change))
+    }
+    coordinator.wake(change.action)
+  })
+  if (offInteraction !== undefined && hostEvents?.effect !== undefined) {
+    hostEvents.effect(() => offInteraction, 'castboard:interaction-changed')
+  }
 
   const uplink = new ArtifactUplink({
     cursors: publishCursor,
@@ -816,20 +865,19 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
       : { abandonRemote: (issueIds: readonly string[]) => options.faces!.abandon!(issueIds) }),
     ...(options.faces?.issues === undefined
       ? {}
-      : {        createRemote: async (draft: {
-          title: string
-          detail?: string
-          assignee: string
-          assigneeInstance?: string
-          cwd?: string
-          urgency?: string
-          permission?: string
-          attachments?: readonly string[]
-        }) => {
+      : {
+        createRemote: async (draft: CreateIssueBody) => {
           const result = await options.faces!.issues!.createMany([{
-            assignerMeta: { title: draft.title, detail: draft.detail ?? '' },
+            assignerMeta: {
+              ...(draft.assignerMeta ?? {}),
+              title: draft.title,
+              detail: draft.detail ?? '',
+            },
             assignee: draft.assignee,
             assigneeInstance: draft.assigneeInstance ?? '',
+            source: ISSUE_SOURCE_DSH,
+            sourceInstance: deviceInstance,
+            ...(draft.projectId === undefined ? {} : { projectId: draft.projectId }),
             ...(draft.cwd === undefined ? {} : { cwd: draft.cwd }),
             ...(draft.urgency === undefined ? {} : { urgency: draft.urgency }),
             ...(draft.permission === undefined ? {} : { permission: draft.permission }),
@@ -872,6 +920,7 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
 
   const stopOwnerServices = (): void => {
     ownerStarted = false
+    coordinator.stop()
     for (const item of ownerDisposers.splice(0).reverse()) settle(item)
     owner.publisher = undefined
     owner.inbox = undefined
@@ -971,6 +1020,7 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
     owner.inbox = inbox
     ownerDisposers.push({ dispose: () => inbox.stop() })
     inbox.start()
+    coordinator.start()
 
     const dispatcher = new DispatcherService({
       store: {
@@ -1079,11 +1129,12 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
       openSession: createRouterSessionOpener({
         ctx: options.ctx,
         cwd: worklabRoot,
-        sections: [routerRoutingSection(castboardIssueRoutingXml({
+        sections: [routerGuideSection(castboardIssueRouterXml({
           workspacesCustom: workspacesCustomFile,
           strategyCustom: strategyCustomFile,
-          scratchDir: scratchRoot,
           tasksDir: paths.taskDir,
+          workspaceIndex: portraitIndexFile,
+          portraitDir,
         }))],
         ...(routerModel === undefined ? {} : { model: routerModel }),
         log: note,
@@ -1149,11 +1200,11 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
             },
             log: note,
           }, issue.id)
-          return castboardIssueReferences(issue, { ...extras, fallbackCwd })
+          return castboardIssueContext(issue, { ...extras, fallbackCwd })
         } catch (error) {
           // References are optional model material; a failure to prepare them must not block dispatch.
           note('warn', 'router-references-failed', `${issue.id}: ${errorText(error)}`)
-          return castboardIssueReferences(issue)
+          return castboardIssueContext(issue)
         }
       },
       dependsOnStatuses: async issueIds => {
@@ -1213,10 +1264,12 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Castb
         sandbox: 'workspace-write',
         ...(sessionId === undefined ? {} : { sessionId }),
         idlePrompt: PORTRAIT_IDLE_PROMPT,
+        turnSection: PORTRAIT_REMINDER_SECTION,
         sections: [{
           name: PORTRAIT_SECTION,
           order: PORTRAIT_ORDER,
           text: castboardPortraitXml(PORTRAIT_MAX_LINES),
+          form: 'instructions',
         }],
         ...(portraitModel === undefined ? {} : { model: portraitModel }),
         ttlMs: workSessionTtlMs('DSH_CASTBOARD_PORTRAIT_TTL_MS'),
@@ -1512,7 +1565,7 @@ export function installPromptSection(ctx: ClientLike): void {
       systemPrompt.section({
         name: BOARD_PROMPT_SECTION,
         order: (systemPrompt.getSectionOrder?.('TOOLS_SDK') ?? 0) + BOARD_PROMPT_ORDER_OFFSET,
-        text: BOARD_PROMPT_TEXT,
+        text: CASTBOARD_SYSTEM_PROMPT,
       })
     } catch (error) {
       note('warn', 'prompt-section-failed', errorText(error))
@@ -1608,6 +1661,25 @@ async function loadSpellbookBridge(): Promise<SpellbookInteractionBridge | null>
     spellbookBridge = null
   }
   return spellbookBridge
+}
+
+/**
+ * Map spellbook's raw removal reason to the protocol outcome.
+ *
+ * Approval values are `ApprovalOutcome`; question values are the event suffix
+ * (`answered` / `cancelled` / `aborted`).
+ */
+function outcomeOfInteractionChange(change: InteractionChangedEvent): InteractionOutcome {
+  if (change.action !== 'removed') return 'unknown'
+  const raw = change.outcome
+  if (change.item.kind === 'approval') {
+    if (raw === 'allowed-once' || raw === 'rejected') return 'answered'
+    if (raw === 'cancelled' || raw === 'unavailable') return 'cancelled'
+    return 'unknown'
+  }
+  if (raw === 'answered') return 'answered'
+  if (raw === 'cancelled' || raw === 'aborted') return 'cancelled'
+  return 'unknown'
 }
 
 /**

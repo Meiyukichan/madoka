@@ -262,9 +262,9 @@ test('派发器：按并发上限开跑，满员后跳过', async () => {
   service.dispose()
 })
 
-test('派发器：welink 卡不占名额，满员也照跑', async () => {
+test('派发器：im 卡不占名额，满员也照跑', async () => {
   const fixture = dispatcherFixture([
-    summaryOf({ id: 't-1', source: 'welink' }),
+    summaryOf({ id: 't-1', source: 'im' }),
     summaryOf({ id: 't-2' }),
   ], 1)
   const calls: string[] = []

@@ -12,8 +12,8 @@
  * Cycles, dangling refs and more than {@link MAX_DEPENDS_ON} entries are rejected at creation —
  * such data never heals itself, it only parks the issues in the planning column.
  *
- * The shared library goes first: when reachable, dispatched issues live there and in the link
- * table only. The local ledger is the fallback that keeps offline use working.
+ * The shared library is the only place an issue is created; a failed create is an error,
+ * never a local fallback record.
  *
  * @module dsh-magica-castboard/host/tools/issue-tools
  */
@@ -21,8 +21,8 @@ import { eventLog } from '../shared/event-log.ts'
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
-import { castboardIssueCreationGuidance } from '../context/dispatch-guidance.ts'
-import { DISPATCH_GUIDANCE_SECTION } from '../context/sections.ts'
+import { castboardIssueDelegation } from '../context/delegation-context.ts'
+import { ISSUE_DELEGATION_SECTION } from '../context/sections.ts'
 import type { ThreadComment } from '../ledger/comment-store.ts'
 import type { IssueDraft, IssueRecord } from '../ledger/issue-store.ts'
 import { patchLinkQuiet, type LinkStore } from '../ledger/link-store.ts'
@@ -35,6 +35,7 @@ import {
   type Urgency,
 } from '../model.ts'
 import { queryOrDegrade } from '../pipeline/sdk-query.ts'
+import { ISSUE_SOURCE_DSH, normalizeIssueSource } from '../../shared/wire.ts'
 import {
   asPermission,
   asUrgency,
@@ -52,7 +53,6 @@ import { ERR, JSON_OUT, ToolError, json, type ToolRunContext } from './task-tool
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** `source` default for issues created by this tool. */
-const SOURCE_DSH = 'dsh'
 
 /** How many issues one call may create (a bigger batch is a bulk import, not "splitting work"). */
 const MAX_ISSUES_PER_CALL = 20
@@ -92,9 +92,9 @@ interface Candidate {
   readonly attachments?: readonly string[]
   /** A ref of this batch or an external UUID — not resolved yet. */
   readonly dependsOnRefs: readonly string[]
-  /** Explicit `source` from the caller; only used when it is already registered in the dictionary. */
+  /** Explicit source from the caller; must already exist in the source dictionary. */
   readonly requestedSource?: string
-  /** Scheduling source actually written to the shared library. */
+  /** Source actually written to the shared library; `self` folds to `dsh`. */
   source: string
   dependsOn?: string[]
 }
@@ -141,7 +141,7 @@ function degraded(error: string): { ok: false; degraded: true; error: string } {
  */
 function localInstance(deps: ToolDeps): string {
   const instance = (deps.instance?.() ?? '').trim()
-  if (instance === '') throw new Error('本机实例（ip:port）解析不出来，无法判断 self / dsh')
+  if (instance === '') throw new Error('本机实例（ip:port）解析不出来，无法填写 sourceInstance')
   return instance
 }
 
@@ -286,11 +286,6 @@ function projectKeyOf(primary: unknown, alias: unknown): number | string {
   const text = typeof raw === 'string' ? raw.trim() : ''
   if (text === '') throw new Error('projectId 必填 —— 传 castboard_issue_groups 返回的数字 id')
   return /^\d+$/.test(text) ? Number(text) : text
-}
-
-/** Target instance equals this machine → `self`; otherwise a cross-instance dispatch → `dsh`. */
-function sourceOf(): string {
-  return SOURCE_DSH
 }
 
 /**
@@ -499,7 +494,7 @@ function candidateOf(raw: unknown, index: number, instance: string): Candidate {
     ...(attachments !== undefined ? { attachments } : {}),
     dependsOnRefs,
     ...(explicitSource === undefined ? {} : { requestedSource: explicitSource }),
-    source: sourceOf(),
+    source: ISSUE_SOURCE_DSH,
   }
 }
 
@@ -677,7 +672,7 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
       description:
         'Read the guidance for dispatching issues to other people / other dsh instances. '
         + '**Call this FIRST, before castboard_issues_create** — it injects the '
-        + `"${DISPATCH_GUIDANCE_SECTION}" named context (field schema, tool order, the 5 steps, hard rules) `
+        + `"${ISSUE_DELEGATION_SECTION}" named context (field schema, tool order, the 5 steps, hard rules) `
         + 'into this session so you can read it on your next step. The return value only repeats the compact '
         + 'field list; the full steps arrive through the injected context. If nothing can be injected the '
         + 'whole guidance text is returned under `guidance` instead.',
@@ -686,12 +681,17 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
       async execute(_args, exec) {
         try {
           const instance = localInstance(deps)
-          const guidance = castboardIssueCreationGuidance({ instance })
+          const guidance = castboardIssueDelegation({ instance })
           const sessionId = callerSession(exec as ToolRunContext)
           let injected = false
           if (deps.inject !== undefined && sessionId !== '') {
             try {
-              injected = deps.inject(sessionId, [{ name: DISPATCH_GUIDANCE_SECTION, text: guidance }]) === true
+              injected = deps.inject(sessionId, [{
+                name: ISSUE_DELEGATION_SECTION,
+                text: guidance,
+                form: 'notice',
+                summary: 'Issue delegation guidance',
+              }]) === true
             } catch (error) {
               warn('issue-dispatch-help-inject-failed', messageOf(error))
             }
@@ -706,7 +706,7 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
             requiredFields: [...REQUIRED_FIELDS],
             optionalFields: [...OPTIONAL_FIELDS],
             note: injected
-              ? `指导已注入上下文 "${DISPATCH_GUIDANCE_SECTION}"（下一步生效）。按它的 5 步走`
+              ? `指导已注入上下文 "${ISSUE_DELEGATION_SECTION}"（下一步生效）。按它的 5 步走`
                 + '（项目组 → 项目成员 → 成员实例 → 该实例 Index → cwd）；**必填 5 个**'
                 + '（requiredFields：projectId / title / detail / assignee / assigneeInstance），其余可选 ——'
                 + ' cwd 不传就是「让对方自己判断在哪个目录做」，不要为了凑字段编一个目录。'
@@ -1076,14 +1076,14 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
       name: 'castboard_issues_create',
       description:
         'Create issues in the shared library (issueCreateMany) so other people / other dsh instances pick '
-        + `them up. **Call castboard_issues_help FIRST** — it injects the "${DISPATCH_GUIDANCE_SECTION}" `
+        + `them up. **Call castboard_issues_help FIRST** — it injects the "${ISSUE_DELEGATION_SECTION}" `
         + 'guidance (field schema + the steps). '
         + 'Each item needs 5 required fields: projectId (from castboard_issue_groups), title, detail, '
         + 'assignee and assigneeInstance. Optional: assignerMeta (acceptance / reference), cwd '
         + '(omit = let the assignee pick the directory), urgency '
-        + '(default normal), permission (default workspace-write), attachments (input files the user picked), '
-        + 'source (default `dsh`; any explicit value must exist in dsh_teamwork_issue_source), '
-        + 'ref and dependsOn. '
+        + '(default normal), permission (default workspace-write), source (default `dsh`; external channels '
+        + 'such as `im` must already exist in the source dictionary; `self` is normalized to `dsh`), '
+        + 'attachments (input files the user picked), ref and dependsOn. '
         + 'The tool fills the rest itself: issueId (fresh UUID), sourceInstance (current device instance) '
         + 'and assignerTask (the board task you are executing, resolved from your session). '
         + '**When creating several issues at once, decide whether they depend on each other**: if B may only '
@@ -1118,9 +1118,24 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
               assignerMeta: {
                 type: 'object',
                 additionalProperties: true,
+                properties: {
+                  acceptanceStrategies: {
+                    type: 'array',
+                    description: 'Full inline acceptance strategies; the host mints each id from type + title.',
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        title: { type: 'string', description: 'Strategy title.' },
+                        type: { type: 'string', description: 'issue | close.' },
+                        description: { type: 'string', description: 'Decision criteria.' },
+                      },
+                    },
+                  },
+                },
                 description: 'Optional requester metadata. '
                   + 'Planning keys cron / checklist / acceptanceStrategies are documented in '
-                  + 'castboard_issue_creation_guidance — call castboard_issues_help first. '
+                  + 'castboard_issue_delegation — call castboard_issues_help first. '
                   + 'Legacy assignerMeta.title/detail is still accepted when top-level title/detail are absent.',
               },
               assignee: { type: 'string', required: true, description: 'Responsible account — exactly one person per issue.' },
@@ -1139,8 +1154,8 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
               permission: { type: 'string', description: 'read-only | workspace-write (default) | danger-full-access.' },
               source: {
                 type: 'string',
-                description: '**Optional.** Defaults to `dsh`. If supplied, it must already exist in '
-                  + '`dsh_teamwork_issue_source`; an unknown code is rejected.',
+                description: '**Optional.** Defaults to `dsh`. External channels (for example `im`) must '
+                  + 'already exist in `dsh_teamwork_issue_source`; `self` is normalized to `dsh`.',
               },
               attachments: {
                 type: 'array',
@@ -1246,7 +1261,7 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
 
           const ordered = [...byId.values()].sort((left, right) => left.index - right.index)
 
-          // Explicit sources are validated, never registered. An unknown code is an error.
+          // Explicit sources are validated against the dictionary; `self` folds to `dsh`.
           const requested = new Set(ordered.flatMap(candidate =>
             candidate.requestedSource === undefined ? [] : [candidate.requestedSource]))
           if (requested.size > 0) {
@@ -1259,11 +1274,13 @@ export function buildIssueDispatchTools(deps: ToolDeps): Array<ReturnType<typeof
               }
             }
             for (const candidate of ordered) {
-              if (candidate.requestedSource !== undefined) candidate.source = candidate.requestedSource
+              if (candidate.requestedSource !== undefined) {
+                candidate.source = normalizeIssueSource(candidate.requestedSource)
+              }
             }
           }
 
-          // The two scheduling codes this plugin owns must exist before issueCreateMany validates them.
+          // The one source code this plugin writes must exist before issueCreateMany validates it.
           if (deps.sources !== undefined) {
             try {
               await deps.sources.ensure()

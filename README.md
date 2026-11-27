@@ -1,11 +1,17 @@
 # madoka
 
-本仓库只收录一个插件：[`dsh-magica-rune`](dsh-magica-rune/) —— DSH 的能力管理插件，
-用来按**全局 / 工作区**启用与禁用任意工具和技能。
+DSH 0.2 插件集合。所有 0.2 包统一以 **DSH `0.2.1-rc.5`** 为编译/测试基线，peer 范围覆盖 **0.2.0 ~ 0.2.2**（保证安装；0.2.0 / 0.2.2 尚未做全量 API 回归）。
+
+| 包 | 作用 |
+|---|---|
+| [`dsh-magica-rune`](dsh-magica-rune/) | 能力管理插件：按全局 / 工作区启用或禁用工具与技能 |
+| [`dsh-magica-castboard`](dsh-magica-castboard/) | 任务台账 + 看板 + 派活中枢 |
+| [`dsh-magica-teamwork`](dsh-magica-teamwork/) | 本地协作服务（issue / 项目 / 设备 / 文件）+ 客户端 SDK |
+| [`dsh-magica-spellbook`](dsh-magica-spellbook/) | 0.2 插件 SDK（纯库，不是插件） |
 
 ![能力管理](dsh-magica-rune/assets/screenshot-1.png)
 
-## 安装
+## 安装 rune
 
 ```bash
 dsh plugin --profile web add @meiyukichan/dsh-magica-rune

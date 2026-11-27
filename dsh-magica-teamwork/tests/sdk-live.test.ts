@@ -22,6 +22,7 @@ import {
   CastboardTransport,
   type CastboardAccount,
   type CastboardAttachment,
+  type CastboardAuthGrant,
   type CastboardAuthSession,
   type CastboardComment,
   type CastboardDevice,
@@ -43,7 +44,17 @@ const ACCOUNT = 'alice-live'
 let server: Awaited<ReturnType<typeof startServer>>
 let dataDir = ''
 let transport: CastboardTransport
-const auth = new CastboardAuth({ persist: false })
+const authHome = mkdtempSync(join(tmpdir(), 'dsh-teamwork-live-auth-'))
+const badAuthHome = mkdtempSync(join(tmpdir(), 'dsh-teamwork-live-bad-auth-'))
+const auth = new CastboardAuth({
+  home: authHome,
+  authExchange: async (input) => {
+    const result = await transport.call<CastboardAuthGrant>('authToken', {}, { body: input })
+    if (!result.ok) throw Object.assign(new Error(result.reason), { status: result.status, code: result.code })
+    if (result.data === null || typeof result.data !== 'object') throw new Error('/auth/token 响应不是对象')
+    return result.data
+  },
+})
 
 function b64(plain: string): string {
   return Buffer.from(plain, 'utf8').toString('base64')
@@ -62,6 +73,8 @@ after(async () => {
   await transport.dispose()
   await server.close()
   rmSync(dataDir, { recursive: true, force: true })
+  rmSync(authHome, { recursive: true, force: true })
+  rmSync(badAuthHome, { recursive: true, force: true })
 })
 
 test('真机联调：一条完整链路（注册→项目→issue→认领→评论→附件→工作区→设备）', async () => {
@@ -70,7 +83,7 @@ test('真机联调：一条完整链路（注册→项目→issue→认领→评
   assert.equal(version.ok, true)
   if (!version.ok) return
   assert.equal(version.data.protocol, 'dsh-teamwork/1')
-  assert.equal(version.data.endpoints.length, 49)
+  assert.equal(version.data.endpoints.length, 50)
   transport.setCapabilities(version.data.endpoints)
   for (const name of Object.keys(CASTBOARD_ENDPOINTS) as (keyof typeof CASTBOARD_ENDPOINTS)[]) {
     assert.equal(transport.supports(name), true, `${name} 未出现在 /version.endpoints[]`)
@@ -93,8 +106,9 @@ test('真机联调：一条完整链路（注册→项目→issue→认领→评
     displayName: registered.data.account.displayName,
     globalRole: registered.data.account.globalRole,
   })
+  await auth.refresh()
 
-  // ③ 现签 JWT 被真实 guard 验过
+  // ③ /auth/token 换来的 headers 被真实 guard 验过
   const me = await transport.call<{ account: CastboardAccount }>('authMe')
   assert.equal(me.ok, true, me.ok ? '' : `${me.code}: ${me.reason}`)
   if (me.ok) assert.equal(me.data.account.accountId, ACCOUNT)
@@ -354,10 +368,19 @@ test('真机联调：错误归一（404 / unknown_field / 401 → login_required
     assert.equal(unknownField.code, 'unknown_field')
   }
 
-  // 错的 accountToken → guard 验签失败 → 401 unauthorized → 传输层折成 login_required 并清会话
-  const badAuth = new CastboardAuth({ persist: false })
+  // 错的 accountToken → /auth/token 401 invalid_credentials → 传输层折成 login_required 并清 headers
+  let badTransport!: CastboardTransport
+  const badAuth = new CastboardAuth({
+    home: badAuthHome,
+    authExchange: async (input) => {
+      const result = await badTransport.call<CastboardAuthGrant>('authToken', {}, { body: input })
+      if (!result.ok) throw Object.assign(new Error(result.reason), { status: result.status, code: result.code })
+      if (result.data === null || typeof result.data !== 'object') throw new Error('/auth/token 响应不是对象')
+      return result.data
+    },
+  })
   badAuth.acceptSession({ accountId: ACCOUNT, accountToken: 'f'.repeat(64), ttlSeconds: 3600 })
-  const badTransport = new CastboardTransport({
+  badTransport = new CastboardTransport({
     baseUrl: `http://127.0.0.1:${server.port}/dsh-teamwork/v1`,
     auth: badAuth,
   })
@@ -368,7 +391,7 @@ test('真机联调：错误归一（404 / unknown_field / 401 → login_required
       assert.equal(denied.status, 401)
       assert.equal(denied.code, 'login_required')
     }
-    assert.equal(badAuth.headers(), null, '签名对不上要清内存会话')
+    assert.equal(await badAuth.headers(), null, '认证失败后 headers 必须清空')
   } finally {
     await badTransport.dispose()
   }

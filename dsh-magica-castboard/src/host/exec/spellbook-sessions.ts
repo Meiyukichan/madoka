@@ -294,7 +294,7 @@ export async function createSpellbookSessions(options: SpellbookSessionsOptions)
       }
       const base: Record<string, unknown> = {
         sessionId: input.sessionId,
-        prompt: input.prompt,
+        ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
         contextPlugin: PLUGIN_NAME,
         workspaceId,
         workspacePath,

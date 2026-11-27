@@ -474,11 +474,6 @@ function uniqueChecklistIds(items: ChecklistItem[], reserved: ReadonlySet<string
   return items
 }
 
-/** Derive a stable id from title + type, so a resubmitted inline strategy keeps its identity. */
-function inlineStrategies(raw: unknown): AcceptanceStrategy[] | undefined {
-  return normalizeAcceptanceStrategies(raw)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Releasing sessions after a delete
 // ─────────────────────────────────────────────────────────────────────────────
@@ -548,27 +543,24 @@ export function castboardTools(deps: ToolDeps): Array<ReturnType<typeof defineTo
   tools.push(defineTool({
     name: 'castboard_get',
     description:
-      'Read one card in full: fields, acceptance checklist, the latest 20 comments, and the '
-      + 'execution history. Read this before claiming or continuing work so the decision is '
-      + 'based on the current card rather than an earlier summary.',
+      'Read one card in full: fields, acceptance checklist, and execution history. Read this before '
+      + 'claiming or continuing work so the decision is based on the current card rather than an earlier summary.',
     parameters: {
       id: { type: 'string', required: true, description: 'Task id from the board.' },
     },
     output: {
       schema: JSON_OUT,
       render: (_args, value) => {
-        const result = value as unknown as { task?: TaskRecord; comments?: Parameters<typeof taskDetail>[2] }
+        const result = value as unknown as { task?: TaskRecord }
         if (result.task === undefined) return [{ type: 'text', text: '任务不存在。' }]
-        return [{ type: 'text', text: taskDetail(result.task, Date.now(), result.comments ?? []) }]
+        return [{ type: 'text', text: taskDetail(result.task, Date.now(), []) }]
       },
     },
     async execute(args) {
       try {
         const task = store.get(args.id)
         if (task === undefined || task.trashedAt !== undefined) throw new ToolError(ERR.notFound, `no task ${args.id}`)
-        // Comments are read on demand; only the latest 20 are fetched, and the full timeline is left to castboard_comments.
-        const comments = await deps.thread.recent(anchorOf(task), 20)
-        return json({ task, comments })
+        return json({ task })
       } catch (error) { fail(error) }
     },
   }))
@@ -783,7 +775,6 @@ export function castboardTools(deps: ToolDeps): Array<ReturnType<typeof defineTo
               type: 'object',
               additionalProperties: false,
               properties: {
-                id: { type: 'string', description: 'Stable strategy id; omitted means derive one from title + type.' },
                 title: { type: 'string', description: 'Strategy title (≤80 chars).' },
                 type: { type: 'string', description: 'issue | close.' },
                 description: { type: 'string', description: 'Decision criteria (≤4000 chars).' },
@@ -863,7 +854,7 @@ export function castboardTools(deps: ToolDeps): Array<ReturnType<typeof defineTo
             else next.acceptanceStrategyIds = ids
           }
           if (args.acceptanceStrategies !== undefined) {
-            const strategies = inlineStrategies(args.acceptanceStrategies)
+            const strategies = normalizeAcceptanceStrategies(args.acceptanceStrategies)
             if (strategies === undefined) delete next.acceptanceStrategies
             else next.acceptanceStrategies = strategies
           }
@@ -1306,7 +1297,7 @@ export function castboardTools(deps: ToolDeps): Array<ReturnType<typeof defineTo
           type: 'text',
           text: `执行报告已写入任务 ${result.taskId}（执行 ${String(result.executionId)}）：`
             + `${result.report.summary?.slice(0, 120) ?? ''}\n`
-            + '接下来：用 castboard_comment_add 留交接评论，再用 castboard_move 移到 in_review。',
+            + '接下来：用 castboard_comment（capability="add"）留交接评论，再用 castboard_task（capability="move"）移到 in_review。',
         }]
       },
     },

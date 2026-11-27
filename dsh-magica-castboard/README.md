@@ -3,7 +3,7 @@
 DSH 0.2 的**协同插件**：任务台账 + 看板 + 派活中枢。
 
 - **host 半侧**：任务/issue 台账（租约单写者）、执行编排（会话走 [`dsh-magica-spellbook`](../dsh-magica-spellbook)）、
-  cron 调度与派发、20 个 Agent 工具、`/api/castboard` HTTP 面。
+  cron 调度与派发、4 个能力网关工具、`/api/castboard` HTTP 面。
 - **client 半侧**：把「协作」面板注册进 dsh web（`sidebar.panellist` 入口 + `main` 整页）；
   会话能力不自己实现，共享库数据走 [`dsh-magica-teamwork`](../dsh-magica-teamwork) 的 SDK。
 
@@ -39,7 +39,7 @@ dsh plugin --profile <name> add link:<path-to-this-package>
 ```
 
 `cordis.patch.yml` 里是**裸包名那一行**（只有这一行会挂载 `./client`）。
-peer 版本必须落在 `>=0.2.0-rc.2 <0.3.0-0`，否则 profile 组合期该行会被直接禁用。
+peer 版本必须落在 `>=0.2.0-rc.2 <0.3.0-0 || >=0.2.1-rc.5 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0`，否则 profile 组合期该行会被直接禁用。本包的 `devDependencies` 钉在 `0.2.1-rc.5`（cordis `4.0.5`、schemastery `3.18.5`）作为编译与测试基线；不写 `engines.dsh`，让校验真正落到每个逐包 peer 上。
 
 ## 当前进度
 

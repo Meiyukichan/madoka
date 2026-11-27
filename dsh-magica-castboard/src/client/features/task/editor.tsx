@@ -474,6 +474,7 @@ export function Composer({ store, t, lang, task, prefill }: {
         return
       }
       const cwd = state.workspaces.find(workspace => workspace.id === workspaceId)?.path
+      const meta = issueMeta()
       const created = await store.createIssue({
         ...(projectId === '' ? {} : { projectId: Number(projectId) }),
         title: title.trim(),
@@ -484,7 +485,7 @@ export function Composer({ store, t, lang, task, prefill }: {
         ...(cwd === undefined || cwd === '' ? {} : { cwd }),
         permission,
         ...(attachments.length === 0 ? {} : { attachments: [...attachments] }),
-        ...(issueMeta() === undefined ? {} : { assignerMeta: issueMeta() }),
+        ...(meta === undefined ? {} : { assignerMeta: meta }),
       })
       if (created !== undefined) {
         store.closeComposer()

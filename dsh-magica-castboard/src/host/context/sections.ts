@@ -22,24 +22,24 @@ export const BOARD_PROMPT_SECTION = 'plugin:dsh-magica-castboard'
 export const BOARD_PROMPT_ORDER_OFFSET = 100
 
 /** Tool guidance conventionally occupies 100–199; 150 keeps the router clear of the execution-session sections. */
-export const ISSUE_ROUTING_ORDER = 150
+export const ISSUE_ROUTER_ORDER = 150
 
-// Single definition in `portrait/prompt.ts`.
-export {
-  PORTRAIT_MAX_LINES,
-  PORTRAIT_ORDER,
-  PORTRAIT_SECTION,
-  PORTRAIT_TARGET_SECTION,
-} from '../portrait/prompt.ts'
+// Portrait static rules and their per-turn contexts.
+export const PORTRAIT_SECTION = 'castboard-project-portrait'
+export const PORTRAIT_ORDER = 160
+export const PORTRAIT_IDLE_SECTION = 'castboard-project-portrait-idle'
+export const PORTRAIT_REMINDER_SECTION = 'castboard-project-portrait-reminder'
 
 // Rules stay static; references carry the card and are re-rendered for every new session.
-export const RULES_SECTION = 'castboard-task-rules'
-export const REFERENCES_SECTION = 'castboard-task-references'
+export const TASK_PROTOCOL_SECTION = 'castboard-task-protocol'
+export const TASK_CONTEXT_SECTION = 'castboard-task-context'
 export const TASK_ACCEPTANCE_SECTION = 'castboard-task-acceptance'
+export const TASK_DISPATCH_SECTION = 'castboard-task-dispatch'
 
 // Router guidance, per-issue router data, on-demand dispatch guidance, and comments
 // delivered to a peer session.
-export const ISSUE_ROUTING_SECTION = 'castboard-issue-routing'
-export const ISSUE_REFERENCES_SECTION = 'castboard-issue-references'
-export const DISPATCH_GUIDANCE_SECTION = 'castboard-issue-creation-guidance'
+export const ISSUE_ROUTER_SECTION = 'castboard-issue-router'
+export const ISSUE_ROUTER_REMINDER_SECTION = 'castboard-issue-router-reminder'
+export const ISSUE_ROUTER_IDLE_SECTION = 'castboard-issue-router-idle'
+export const ISSUE_DELEGATION_SECTION = 'castboard-issue-delegation'
 export const ISSUE_COMMENTS_SECTION = 'castboard-issue-comments'

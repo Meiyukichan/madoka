@@ -2,6 +2,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { Config } from './config.js'
 import { AuthCache } from './auth/cache.js'
+import { LocalJwtAuthProvider } from './auth/local-jwt.js'
+import type { AuthProvider } from './auth/provider.js'
 import { RateLimiter } from './security/rate-limit.js'
 import { AccountService } from './modules/account/service.js'
 import { ProjectService } from './modules/project/service.js'
@@ -12,9 +14,9 @@ import { FileService } from './modules/file/service.js'
 export const PROTOCOL = 'dsh-teamwork/1' as const
 export const SERVICE_VERSION = '0.2.0-alpha.1' as const
 
-/** 已实现的端点清单（`/version` 的能力探测，也是「49 个是否齐了」的自检） */
+/** 已实现的端点清单（`/version` 的能力探测，也是「50 个是否齐了」的自检） */
 export const ENDPOINTS: readonly string[] = [
-  'POST /auth/register', 'POST /auth/login', 'GET /auth/me', 'POST /auth/logout',
+  'POST /auth/token', 'POST /auth/register', 'POST /auth/login', 'GET /auth/me', 'POST /auth/logout',
   'PUT /auth/password', 'GET /auth/accounts',
   'GET /projects', 'GET /projects/mine', 'GET /projects/:id', 'GET /projects/:id/accounts', 'POST /projects',
   'PUT /projects/:id', 'DELETE /projects/:id', 'GET /projects/:id/members',
@@ -37,6 +39,8 @@ export interface AppContext {
   config: Config
   db: DatabaseSync
   authCache: AuthCache
+  /** 样例鉴权扩展点；企业服务只需要实现同一套 HTTP 协议。 */
+  auth: AuthProvider
   rateLimiter: RateLimiter
   accounts: AccountService
   projects: ProjectService
@@ -60,6 +64,8 @@ export interface CreateContextArgs {
   failureDelayMs?: number
   /** false = 关闭限流（仅测试） */
   rateLimit?: boolean
+  /** 覆盖样例鉴权；企业可注入自己的 provider，或直接实现 HTTP 协议。 */
+  auth?: AuthProvider
 }
 
 export function createContext(args: CreateContextArgs): AppContext {
@@ -82,6 +88,11 @@ export function createContext(args: CreateContextArgs): AppContext {
     authCache,
     failureDelayMs: args.failureDelayMs ?? 300,
   })
+  const auth = args.auth ?? new LocalJwtAuthProvider({
+    db,
+    ttlSeconds: config.tokenTtlSeconds,
+    authCache,
+  })
   const projects = new ProjectService({ db, privateMemberLimit: config.privateMemberLimit, accounts })
   const devices = new DeviceService({ db })
   const issues = new IssueService({ db, privateMemberLimit: config.privateMemberLimit })
@@ -91,6 +102,7 @@ export function createContext(args: CreateContextArgs): AppContext {
     config,
     db,
     authCache,
+    auth,
     rateLimiter,
     accounts,
     projects,

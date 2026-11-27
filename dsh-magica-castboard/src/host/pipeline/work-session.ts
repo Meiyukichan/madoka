@@ -5,14 +5,15 @@
  *
  * | Use | cwd | Sandbox | Static guidance |
  * |---|---|---|---|
- * | Pending issue to card | `worklabs` | `read-only` | `castboard-issue-routing` |
+ * | Pending issue to card | `worklabs` | `read-only` | `castboard-issue-router` |
  * | Project portrait | `worklabs/workspaces` | `workspace-write` | `castboard-project-portrait` |
  *
  * ## Why static guidance travels on two legs
  *
  * 1. Injected when the session is created as named plugin context -- its name is visible in the GUI's "context injection" row;
  * 2. Registered in `setup` as an agent-scoped system prompt section -- it follows the system prompt and returns
- *    automatically when the prompt is rebuilt after compaction, which plugin context cannot do.
+ *    automatically when the prompt is rebuilt after compaction; each resident turn also re-checks that the
+ *    section survived a system-prompt reinjection.
  *
  * The only cost is one extra copy on the first turn, in exchange for "visible + durable".
  *
@@ -39,11 +40,14 @@ import type {
 } from '@meiyukichan/dsh-magica-spellbook'
 
 import type { ResolvedModel } from '../shared/default-model.ts'
-import { ISSUE_ROUTING_SECTION } from '../context/sections.ts'
 
 export interface WorkContext {
   readonly name: string
   readonly text: string
+  /** 内容形态；缺省 snapshot。 */
+  readonly form?: 'snapshot' | 'instructions' | 'notice'
+  /** `notice` 必填：折叠行的一行说明。 */
+  readonly summary?: string
 }
 
 export type WorkTurnResult = { ok: true } | { ok: false; error: string }
@@ -95,7 +99,10 @@ export interface WorkSessionOptions {
   readonly sessionId?: string
   /** Display title pinned on create and every resume; omitted = leave the DSH title untouched. */
   readonly title?: string
+  /** First-turn user prompt: wakes the session and lets context delivery append the static sections. */
   readonly idlePrompt: string
+  /** Name of the per-turn followup context (must differ from any static section name). */
+  readonly turnSection: string
   readonly sections?: readonly WorkSection[]
   /** Model route; `undefined` = omit it (the driver fails on persona interpolation, so always resolve it). */
   readonly model?: ResolvedModel
@@ -120,22 +127,6 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Best-effort session title pin; title is cosmetic and must never fail session startup. */
-function pinSessionTitle(ctx: unknown, sessionId: string, title: string | undefined): void {
-  if (title === undefined || title === '') return
-  try {
-    const scope = ctx as { get?: (name: string) => unknown }
-    const sessions = scope.get?.('sessions') as { get?: (id: string) => unknown } | undefined
-    const session = sessions?.get?.(sessionId)
-    const titles = scope.get?.('sessionTitle') as
-      | { rename?: (session: unknown, title: string) => void }
-      | undefined
-    if (session !== undefined && titles?.rename !== undefined) titles.rename(session, title)
-  } catch {
-    // Session title is presentation-only; ignore capability or version mismatches.
-  }
-}
-
 /** Narrow face of an agent scope: just enough to mount system prompt sections and session events. */
 interface AgentScopeLike {
   get?: (name: string) => unknown
@@ -146,11 +137,48 @@ interface SystemPromptLike {
   section?: (section: { name: string; order: number; text: string }) => unknown
 }
 
+const SECTION_ALREADY_REGISTERED = 'already registered'
+
+function isSectionAlreadyRegistered(error: unknown): boolean {
+  return errorText(error).includes(SECTION_ALREADY_REGISTERED)
+}
+
+/**
+ * Mount every static section that is not already present.
+ *
+ * `systemPrompt.section()` throws on a duplicate, which is the only supported way to
+ * probe whether a section survived a system-prompt re-injection. Keeping this check at
+ * the start of every resident turn means a router/portrait session that is re-injected
+ * without being compacted or recreated gets its `castboard-*` section back.
+ *
+ * @returns Number of sections actually mounted on this call.
+ */
+function ensureWorkSections(
+  prompt: SystemPromptLike | undefined,
+  sections: readonly WorkSection[],
+  label: string,
+): number {
+  if (prompt?.section === undefined) return 0
+  let mounted = 0
+  for (const section of sections) {
+    try {
+      prompt.section({ name: section.name, order: section.order, text: section.text })
+      mounted += 1
+    } catch (error) {
+      if (!isSectionAlreadyRegistered(error)) {
+        logWork('warn', `${label}-section-failed`, `注册静态指导失败（会话照常跑）：${errorText(error)}`)
+      }
+    }
+  }
+  return mounted
+}
+
 interface SpawnOptions {
   sessionId?: string
   cwd: string
-  prompt?: string
   sandbox: SessionPermission
+  title?: string
+  prompt?: string
   contextPlugin: string
   ttlMs: number
   model?: ResolvedModel
@@ -177,6 +205,10 @@ export async function openWorkSession(ctx: unknown, options: WorkSessionOptions)
   const { label } = options
   await mkdir(options.cwd, { recursive: true }).catch(() => { /* If creation fails, the session facade reports it */ })
   const sections = options.sections ?? []
+  const staticContexts: WorkContext[] = sections.map(section => ({
+    name: section.name,
+    text: section.text,
+  }))
   const model = options.model
   logWork('info', `${label}-session-opening`,
     `${options.sessionId === undefined ? '新建' : `续跑 ${options.sessionId}`}`
@@ -190,19 +222,23 @@ export async function openWorkSession(ctx: unknown, options: WorkSessionOptions)
    * resuming, so the existing one is removed before installing a new one. `dispose()` removes it again regardless.
    */
   let offCompaction: () => void = () => { /* not installed yet */ }
+  /** Kept so each turn can re-check that the static section survived a prompt reinjection. */
+  let promptService: SystemPromptLike | undefined
 
   const handle: EphemeralSessionHandle = await spawnSession(ctx, {
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     cwd: options.cwd,
-    prompt: options.idlePrompt,
     sandbox: options.sandbox,
+    ...(options.title !== undefined ? { title: options.title } : {}),
     contextPlugin: options.contextPlugin,
     ttlMs: options.ttlMs ?? DEFAULT_WORK_TTL_MS,
     // The model is mandatory: the session facade does not fill in a default, and without it the system prompt's
     // model interpolation throws and the agent cannot be created at all.
     ...(model !== undefined ? { model } : {}),
-    // First leg of static guidance: named plugin context (visible in the GUI).
-    ...(sections.length > 0 ? { context: sections.map(section => ({ name: section.name, text: section.text })) } : {}),
+    // The idle prompt starts the first turn; the static sections travel as named context and
+    // installContextDelivery appends them to that same pre-step (no per-context followup loop).
+    prompt: options.idlePrompt,
+    ...(staticContexts.length > 0 ? { context: staticContexts } : {}),
     // Second leg of static guidance: agent-scoped system prompt section (survives a post-compaction rebuild).
     setup: async (agentCtx): Promise<undefined> => {
       const scope = agentCtx as unknown as AgentScopeLike
@@ -211,11 +247,12 @@ export async function openWorkSession(ctx: unknown, options: WorkSessionOptions)
         if (prompt?.section === undefined) {
           logWork('warn', `${label}-section-unavailable`, 'agent scope 里取不到 systemPrompt.section，静态指导未注入')
         } else {
-          for (const section of sections) {
-            prompt.section({ name: section.name, order: section.order, text: section.text })
+          promptService = prompt
+          const mounted = ensureWorkSections(prompt, sections, label)
+          if (mounted > 0) {
+            logWork('info', `${label}-section-mounted`,
+              sections.map(section => `${section.name} @order ${String(section.order)}`).join('、'))
           }
-          logWork('info', `${label}-section-mounted`,
-            sections.map(section => `${section.name} @order ${String(section.order)}`).join('、'))
         }
       } catch (error) {
         // A failed registration must not block the session: it can run without guidance instead of dispatching nothing.
@@ -268,24 +305,28 @@ export async function openWorkSession(ctx: unknown, options: WorkSessionOptions)
       throw error
     }
   }
-  pinSessionTitle(ctx, handle.id, options.title)
   logWork('info', `${label}-session-ready`, `${handle.id}（${handle.resumed ? '续跑' : '新建'}）`)
 
   return {
     id: handle.id,
     resumed: handle.resumed,
     async run(instruction, contexts) {
+      const remounted = ensureWorkSections(promptService, sections, label)
+      if (remounted > 0) {
+        logWork('info', `${label}-section-remounted`,
+          `静态指导缺失，已重新挂载 ${sections.map(section => section.name).join('、')}`)
+      }
       // Combine the router instruction and its references into one named-context wake,
       // the same shape as a task acceptance round: one "收到执行请求" event, no separate
       // user bubble plus injected context.
       const entries = [
-        { name: ISSUE_ROUTING_SECTION, text: instruction },
+        { name: options.turnSection, text: instruction },
         ...(contexts ?? []).map(entry => ({ name: entry.name, text: entry.text })),
       ]
       // One named-context message, not one per section: the GUI shows a single
       // "收到执行请求" event and the model still receives instruction + references.
       const combined = {
-        name: ISSUE_ROUTING_SECTION,
+        name: options.turnSection,
         text: entries.map(entry => entry.text).join('\n\n'),
       }
       const settlement = await handle.followupNamedContext([combined])

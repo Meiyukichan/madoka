@@ -1,5 +1,7 @@
 # dsh-teamwork · SDK 设计（`dsh-teamwork/1` 协议面 + 兼容面）
 
+> **认证部分已被 [`auth-exchange.zh.md`](./auth-exchange.zh.md) 取代。** 本文旧段落里的「客户端现签 JWT、固定双头」只适用于已移除的 `sdk/legacy` 客户端；新 `CastboardClient` 通过 `/auth/token` 换取任意 headers。端点总数以 `/version` 的 50 个为准。
+>
 > **本文定义 `src/sdk/**` 的全部内容。** 它是 `src/server`（参考实现）对外契约的客户端侧：
 > 一层**协议面**（47 个端点 1:1），一层**组合面**（24 个协同语义方法 + 1 个扩展），
 > 两者都返回结果信封、永不抛异常。
@@ -31,7 +33,7 @@
 | **§10** | **组合层 24 个方法（+E1）**：调用方地图（§10.0）、时序图、逐个规格 | **最重要，插件作者必读** |
 | §11–§13 | 请求管线、环境与实例、运行期文案（逐字） | 实现者 |
 | §14 | 兼容面差异 + **插件接入必查清单** | 插件作者 |
-| §15–§17 | 包内既有 `TeamworkClient` 的处置、测试契约（含端到端剧本）、落地顺序 | 实现者、排期 |
+| §15–§17 | 包内既有 `CastboardClient` 的处置、测试契约（含端到端剧本）、落地顺序 | 实现者、排期 |
 | §18 | 非目标与已知限制 | 所有人 |
 
 ---
@@ -177,7 +179,7 @@ DB 引擎与表名、进程模型、端口、是否 `bin` 启动、限流参数�
 
 **落地位置**：新 SDK 直接在 `src/sdk/**` 根下（没有 `castboard/` 之类的中间目录）。
 
-- `src/sdk/legacy/`：包内既有 `TeamworkClient` 的 `client.ts` / `types.ts`（按 §15 先并存、后适配、再删除）；
+- `src/sdk/legacy/`：包内既有 `CastboardClient` 的 `client.ts` / `types.ts`（按 §15 先并存、后适配、再删除）；
 - `src/sdk/credentials.ts`：AES-256-GCM 凭据存储，**两层共用**，不搬不改。
 
 ```
@@ -376,8 +378,10 @@ export interface CastboardOptions {
   credentials?: { accountId: string; accountToken: string; ttlSeconds?: number }
   tokenProvider?: () => Promise<{ accountId: string; accountToken: string; ttlSeconds?: number } | null>
   onTokenInvalid?: () => void
-  home?: string                   // 默认 $DSH_TEAMWORK_HOME ?? ~/.dsh/storages/teamwork
-  persist?: boolean               // 默认 true；false = 纯内存
+  /** 凭据目录；始终持久化（新 SDK 不提供纯内存模式） */
+  home?: string
+  /** `/auth/token` 可选设备信息 */
+  authDevice?: CastboardAuthDevice | (() => CastboardAuthDevice | undefined)
   // ── 身份兜底（组合层用，§12）──────────────────────────────────
   userId?: string
   instance?: string
@@ -403,14 +407,14 @@ export interface CastboardOptions {
 | `fetchImpl` | `fetchImpl` | 同义；SDK 仍会套并发闸与 `AbortSignal.timeout`（兼容面已踩过的坑） |
 | `tokenProvider` | `tokenProvider` | **形状变了**：兼容面返回 `x-auth-token`，本协议返回 `{accountId, accountToken}`（现签 JWT 的密钥）。能力不减：测试 / CI / 自定义凭据源都走它 |
 | `invalidateToken` | `onTokenInvalid` | 同义：401 时通知调用方清自己的缓存 |
-| —— | `credentials` | 新增：直接注入一份会话（等价 `persist:false` + 已登录），CI 用 |
-| —— | `home` / `persist` | 新增：凭据文件位置与内存模式（既有 `TeamworkClient` 已有，迁过来） |
+| —— | `credentials` | 新增：直接注入一份会话（已登录），CI 用；凭据仍会落盘 |
+| —— | `home` / `persist` | 新增：凭据文件位置与内存模式（既有 `CastboardClient` 已有，迁过来） |
 | —— | `instance` / `os` | 新增：组合层的实例/平台兜底（不传则走 §12） |
 | —— | `onRequest` | 新增：单请求可观测（排障用，不做日志框架） |
 | —— | `probe` / `strictProtocol` | 新增：能力探测开关（§8.9） |
 
 **注入优先级（逐项独立）**：`显式选项 > 环境变量 > config.json > 默认值`。
-`credentials` 与 `tokenProvider` 同时给时 `credentials` 优先；`persist:false` 时**不碰**任何凭据文件（测试/CI 的硬要求）。
+`credentials` 与 `tokenProvider` 同时给时 `credentials` 优先；凭据**始终**写入 `home`（新 SDK 没有纯内存模式，测试也必须给临时 `home`）。
 
 ---
 
@@ -1812,13 +1816,13 @@ teamworkInstanceName()  ==  `${device.host}:${device.port}`  ==  issue.assigneeI
 
 ---
 
-## 15. 既有 `TeamworkClient` 的处置
+## 15. 既有 `CastboardClient` 的处置
 
 ### 15.1 现状
 
-`src/sdk/legacy/client.ts`（`TeamworkClient`）已经覆盖了 47 个端点里的一大部分，但：
+`src/sdk/legacy/client.ts`（`CastboardClient`）已经覆盖了 47 个端点里的一大部分，但：
 
-| 差异 | 既有 `TeamworkClient` | 新 SDK |
+| 差异 | 既有 `CastboardClient` | 新 SDK |
 |---|---|---|
 | 返回值 | **抛 `TeamworkError`** | **返回信封**（永不抛） |
 | 分组 | `tw.issues.*` / `tw.projects.*` 对象字面量 | 类 + 端点表 |
@@ -1950,7 +1954,7 @@ node scripts/sdk-saturate.mjs --url http://10.1.2.3:3939/dsh-teamwork/v1
 | 步 | 角色 | 动作 | 断言 |
 |---|---|---|---|
 | 1 | alice | `auth.register` → `auth.login` | `accountToken` 落盘；`account.globalRole === 'administrator'`（首个账号） |
-| 2 | bob | 另开一个 `CastboardClient`（`persist:false`）注册 | 两个 client 会话互不干扰 |
+| 2 | bob | 另开一个 `CastboardClient`（独立临时 `home`）注册 | 两个 client 会话互不干扰 |
 | 3 | alice | `teamwork.project.create({name,visibility:'private'})` → `memberAdd(bob,'manager')` | 项目可见性 / 成员角色正确 |
 | 4 | alice | `castboardAddIssueSource({code:'demo-source', pluginName:'demo'})` | 字典里有这条 |
 | 5 | alice | `issueCreate({title, assignee:'bob', assigneeInstance: bobInstance, assignerMeta:{title,detail}, dependsOn: [depId], attachments:[file] })` | `attachments.length===1`；`dependsOn` 是 `string[]` |
@@ -2045,7 +2049,7 @@ node scripts/sdk-saturate.mjs --url <baseUrl>   # 打已部署服务（见 §16.
 | **M0 底座** | ✅ 完成 | `result` / `types` / `endpoints` / `wire` / `env` / `auth` / `net` / `log` / `transport` | `sdk-endpoints` / `sdk-transport` / `sdk-env` / `sdk-net` 全绿；`sdk-live` 真机通 |
 | **M1 原子分组** | ✅ 完成 | `auth-api` / `project` / `device` / `file` / `issue/*`(5) / `teamwork/*`(3) / `ops` / `admin` | `sdk-atomic` 真机通（含两处映射） |
 | **M2 组合层** | ✅ 完成 | `sdk.ts`（24 + E1）/ `client.ts`（8 分组 + 25 方法 + `request`/`dispose`） | `sdk-composite` 真机通（认领仲裁 / 回填不清空 / 收尾顺序 / 评论幂等 / E1） |
-| M3 收口 | ⏳ 待做 | 既有 `TeamworkClient` 薄适配、`tests/**` 全切新 SDK、README 用法段 | 见 §15.2 |
+| M3 收口 | ⏳ 待做 | 既有 `CastboardClient` 薄适配、`tests/**` 全切新 SDK、README 用法段 | 见 §15.2 |
 | M4 插件接入 | ⏳ 待做 | `dsh-magica-castboard` 按 §14.5 十二条清单接入 | 真机双机剧本（§16.7） |
 | **饱和验收** | ✅ 完成 | `tests/sdk-saturate.ts` + `scripts/sdk-saturate.mjs` | **183/183 断言、48/48 端点**（§16.9） |
 

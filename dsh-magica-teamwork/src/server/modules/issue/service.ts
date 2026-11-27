@@ -181,7 +181,7 @@ export class IssueService {
           optionalString(body.cwd, 'cwd', 500), urgency, permission,
           assignee, optionalString(body.assigneeTask, 'assigneeTask'), optionalString(body.assigneeInstance, 'assigneeInstance'),
           optionalString(body.assigneeMeta, 'assigneeMeta'), status,
-          body.source === undefined || body.source === null ? 'self' : requireString(body.source, 'source', 1, 64),
+          body.source === undefined || body.source === null ? 'dsh' : requireString(body.source, 'source', 1, 64),
           optionalString(body.sourceInstance, 'sourceInstance'), optionalString(body.dependsOn, 'dependsOn'),
           at, optionalString(body.assignedAt, 'assignedAt'), at,
         )
@@ -203,7 +203,7 @@ export class IssueService {
         optionalString(body.cwd, 'cwd', 500), urgency, permission, assignee,
         optionalString(body.assigneeTask, 'assigneeTask'), optionalString(body.assigneeInstance, 'assigneeInstance'),
         optionalString(body.assigneeMeta, 'assigneeMeta'), status,
-        body.source === undefined || body.source === null ? 'self' : requireString(body.source, 'source', 1, 64),
+        body.source === undefined || body.source === null ? 'dsh' : requireString(body.source, 'source', 1, 64),
         optionalString(body.sourceInstance, 'sourceInstance'), optionalString(body.dependsOn, 'dependsOn'),
         optionalString(body.assignedAt, 'assignedAt'), at, issueId,
       )

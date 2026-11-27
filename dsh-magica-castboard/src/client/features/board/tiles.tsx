@@ -16,7 +16,7 @@ import {
 import { useState } from 'react'
 
 import type { IssueSummary } from '../../../shared/wire.ts'
-import { canTransition } from '../../../shared/wire.ts'
+import { canTransition, normalizeIssueSource } from '../../../shared/wire.ts'
 import type { TaskSummaryView } from '../../data/index.ts'
 import type { BoardStore } from '../../data/state/index.ts'
 import type { Translate } from '../../labels/index.ts'
@@ -264,7 +264,7 @@ export function IssueTile({ issue, store, t }: { issue: IssueSummary; store: Boa
       <div className="lt-tile-meta">
         <span className="lt-tag" data-urgency={issue.urgency}>{t(URGENCY_LABEL[issue.urgency])}</span>
         <Tip label={t('issue.source')}>
-          <span className="lt-tag" data-tone="source">{issue.source === 'self' || issue.source === '' ? t('issue.sourceLocal') : issue.source}</span>
+          <span className="lt-tag" data-tone="source">{normalizeIssueSource(issue.source)}</span>
         </Tip>
         {issue.assignee !== undefined && issue.assignee !== '' && (
           <Tip label={t('issue.assigner')}>

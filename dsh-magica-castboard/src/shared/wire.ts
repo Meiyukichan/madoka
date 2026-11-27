@@ -11,6 +11,22 @@ export const CASTBOARD_SCHEMA_VERSION = 1
 /** 所有 host 路由共用的前缀；client 与 host 必须取同一个值。 */
 export const ROUTE_PREFIX = '/api/castboard'
 
+/** 本插件创建 issue 的唯一来源标记。 */
+export const ISSUE_SOURCE_DSH = 'dsh'
+
+/** IM 来源：卡片不占执行并发名额，也不进入任务面板的常规列表。 */
+export const IM_SOURCE = 'im'
+
+export function isImSource(source: string | undefined): boolean {
+  return typeof source === 'string' && source.trim().toLowerCase() === IM_SOURCE
+}
+
+/** `self` 是旧版遗留值；读取时统一折叠成 `dsh`。 */
+export function normalizeIssueSource(source: string | undefined): string {
+  const value = (source ?? '').trim()
+  return value === '' || value === 'self' ? ISSUE_SOURCE_DSH : value
+}
+
 /** 结果信封：成功。 */
 export interface Ok<T> {
   ok: true
@@ -107,7 +123,7 @@ export interface TaskSummary {
   execution?: { mode: 'queue' | 'scheduled'; cron?: string }
   lastExecutionOutcome?: ExecutionOutcome
   dispatchedIssueCount?: number
-  /** 来源通道（'self' = 本机；weLink 等外部来源预留）。 */
+  /** 来源通道（本插件统一写 `dsh`；`self` 仅为旧数据兼容）。 */
   source?: string
   /** 创建/更新者（审计；D-19）。 */
   createdBy?: TaskActor
@@ -199,7 +215,7 @@ export interface BoardSettings {
 /** 设置默认值（空设置对象 = 出厂默认）。 */
 export const DEFAULT_SETTINGS: BoardSettings = {
   defaultPermission: 'workspace-write',
-  maxConcurrent: 3,
+  maxConcurrent: 4,
   autoRoute: true,
   portraitRunOnStart: false,
   commentsEnabled: true,

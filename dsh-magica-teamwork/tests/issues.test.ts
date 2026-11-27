@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { bootHarness, isCode, PASSWORD, signToken } from './helpers.js'
-import type { TeamworkClient } from '../src/index.js'
+import type { TeamworkClient } from './support/legacy-client.js'
 
 test('提交：assigner 强制 = token 账号；返回顺序与入参一致', async (t) => {
   const h = await bootHarness()

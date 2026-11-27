@@ -93,9 +93,9 @@
 | I-062 | ✅ 一致 | `core.ts:187-192`；test: 'mintMessageId 连续 200 次不重复' | `magica-msg-<ts36>-<seq36>-<6 位随机>` |
 | I-063 | ✅ 一致 | `core.ts:186`、`core.ts:206-208`（`asSessionId` 单点 no-op） | 不 import dsh 品牌函数 |
 | I-064 | ✅ 一致 | `core.ts:211-219`；test: 'buildUserMessage：source 只有 user，字符串数组 → 多 block' | `source.kind='user'`，多 block，独占 turn |
-| I-065 | ✅ 有意差异 | `core.ts:235-258`（kind=section 或 `spellbook-context`，保留 `plugin`/`form`/`sections`）；test: 'buildPluginMessage 具名：section 名当 kind，且带 form + sections' | 白名单 §3.8 #3 + §5 #25：v4 拒绝 `kind:'plugin'`，必须发生产者自有的具名 kind |
-| I-066 | ✅ 有意差异 | `core.ts:222,240-245`（无名分支改用 `DEFAULT_CONTEXT_KIND='spellbook-context'`）；test: 'buildPluginMessage 无名：用默认 kind（v4 拒绝 plugin 这个 kind）' | 同上（§5 #25）；`section==='plugin'` 直接抛错（`core.ts:241-245`），比 0.1.6 多一道闸门 |
-| I-067 | ✅ 一致 | `core.ts:230-231`（注释明确 GUI 上下文行显示 section 名）、`core.ts:246-251` | `plugin` 字段两条分支都保留 |
+| I-065 | ✅ 有意差异 | `core.ts`（kind=section 或 `spellbook-context`，`form` 为 snapshot/instructions/notice，不再写 `plugin`）；test: 'buildPluginMessage 具名：section 名当 kind，且带 form + sections' | 白名单 §3.8 #3 + §5 #25：v4 拒绝 `kind:'plugin'`，必须发生产者自有的具名 kind |
+| I-066 | ✅ 有意差异 | `core.ts`（无名分支改用 `DEFAULT_CONTEXT_KIND='spellbook-context'`）；test: 'buildPluginMessage 无名：用默认 kind（v4 拒绝 plugin 这个 kind）' | 同上（§5 #25）；`section==='plugin'` 直接抛错，比 0.1.6 多一道闸门 |
+| I-067 | ✅ 一致 | `core.ts`（注释明确 GUI 上下文行显示 section 名） | V4 source 不再保留 `plugin` 字段 |
 | I-068 | ✅ 一致 | `core.ts:264-282`；test: 'toContextEntries 归一与丢弃' | 空串/非对象/无 text 静默丢弃，空 name 退化为无名 |
 | I-069 | ✅ 一致 | `core.ts:563-566`、`core.ts:604-618` | `push`/`dispose` 形状一致 |
 | I-070 | ✅ 一致 | `core.ts:591-596`；test: 'reject 时不动，上下文继续等下一个 step' | 先 `await next()`，pending 空或 reject 不消费 |

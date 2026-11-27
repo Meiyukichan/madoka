@@ -7,8 +7,7 @@
  *  2. esbuild 打包 `src/index.ts` → `lib/index.js`（ESM、minify、fastify 保持外部依赖）
  *  3. tsc 只出声明到 `.dts/`，再用 dts-bundle-generator 合成单个 `lib/index.d.ts`
  */
-import { build } from 'esbuild'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -38,26 +37,35 @@ ${entries}
   console.log(`  inline ${files.length} migration file(s) → src/server/db/migrations.generated.ts`)
 }
 
-async function bundle() {
-  const result = await build({
-    entryPoints: [join(ROOT, 'src/index.ts')],
-    outfile: join(ROOT, 'lib/index.js'),
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    target: 'node22',
-    minify: true,
-    sourcemap: false,
-    legalComments: 'none',
+/** 调 esbuild CLI，不调它的 JS API：JS API 会起 pipe 子进程，在受限沙箱下会 EPERM。 */
+function runEsbuild(label, args) {
+  const result = spawnSync(
+    process.execPath,
+    [join(ROOT, 'node_modules/esbuild/bin/esbuild'), ...args],
+    { cwd: ROOT, stdio: 'inherit' },
+  )
+  if (result.error !== undefined) throw result.error
+  if (result.status !== 0) throw new Error(`${label} 失败（esbuild exit ${String(result.status)}）`)
+}
+
+function bundle() {
+  runEsbuild('host bundle', [
+    'src/index.ts',
+    '--bundle',
+    '--platform=node',
+    '--format=esm',
+    '--target=node22',
+    '--minify',
+    '--legal-comments=none',
+    '--outfile=lib/index.js',
     // 依赖交给 node_modules（单文件只含本包源码）
     // @meiyukichan/dsh-magica-spellbook：出站（TLS/代理/闸）+ 日志 + JSON 路由的发布包，runtime 依赖
-    external: ['fastify', '@sinclair/typebox', '@meiyukichan/dsh-magica-spellbook'],
-    banner: {
-      js: '#!/usr/bin/env node',
-    },
-    logLevel: 'info',
-  })
-  if (result.errors.length) throw new Error('esbuild 打包失败')
+    '--external:fastify',
+    '--external:@sinclair/typebox',
+    '--external:@meiyukichan/dsh-magica-spellbook',
+    '--banner:js=#!/usr/bin/env node',
+    '--log-level=info',
+  ])
 }
 
 /**
@@ -66,23 +74,24 @@ async function bundle() {
  * 为什么必须单独产：`exports["./client"]` 指向它；只发 `src/client` 源码时，
  * 消费方的构建器不一定能编译 node_modules 里的 TSX（本仓就踩过）。
  */
-async function bundleClient() {
-  const result = await build({
-    entryPoints: [join(ROOT, 'src/client/index.ts')],
-    outfile: join(ROOT, 'lib/client.js'),
-    bundle: true,
-    platform: 'browser',
-    format: 'esm',
-    target: 'es2022',
-    minify: true,
-    sourcemap: false,
-    legalComments: 'none',
-    jsx: 'automatic',
+function bundleClient() {
+  runEsbuild('client bundle', [
+    'src/client/index.ts',
+    '--bundle',
+    '--platform=browser',
+    '--format=esm',
+    '--target=es2022',
+    '--minify',
+    '--legal-comments=none',
+    '--jsx=automatic',
+    '--outfile=lib/client.js',
     // react / DSH 基线组件由宿主提供（peerDependencies），不打进产物
-    external: ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/dsh-client-ui-primitives'],
-    logLevel: 'info',
-  })
-  if (result.errors.length) throw new Error('esbuild 打包 client 失败')
+    '--external:react',
+    '--external:react/jsx-runtime',
+    '--external:react-dom',
+    '--external:@deepseek-ai/dsh-client-ui-primitives',
+    '--log-level=info',
+  ])
 }
 
 function clientDeclarations() {
@@ -123,8 +132,8 @@ function declarations() {
 console.log('构建 dsh-magica-teamwork')
 inlineMigrations()
 mkdirSync(join(ROOT, 'lib'), { recursive: true })
-await bundle()
-await bundleClient()
+bundle()
+bundleClient()
 clientDeclarations()
 declarations()
 console.log('产物：lib/index.js + lib/index.d.ts + lib/client.js + lib/client.d.ts')

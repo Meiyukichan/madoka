@@ -13,8 +13,10 @@ import { manageWaterfallListener } from './core.ts'
 import { serviceOf } from '../shared/dsh.ts'
 import {
   WATERFALL_TAKEOVER,
+  emitInteractionChanged,
   type InteractionAnswerItem,
   type InteractionQuestion,
+  type PendingInteractionRecord,
 } from '../shared/interaction.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionRequestEvent } from '@deepseek-ai/dsh-user-questions/types'
 import type { DshContextLike } from '../shared/dsh.ts'
@@ -205,6 +207,14 @@ export function installQuestionAnswerer(
       return Promise.reject(questionError('ask_user_question was aborted before the user answered', 'ASK_ABORTED'))
     }
 
+    const record: PendingInteractionRecord = {
+      kind: 'question',
+      id,
+      sessionId: key,
+      since,
+      questions: questions.map(question => ({ ...question })),
+    }
+
     return new Promise<AskUserQuestionAnswer>((resolve, reject) => {
       let done = false
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -219,6 +229,14 @@ export function installQuestionAnswerer(
           // 已移除
         }
         bridge.pending.delete(id)
+        const outcome = event === 'question.answered'
+          ? 'answered'
+          : event === 'question.cancelled'
+            ? 'cancelled'
+            : event === 'question.aborted'
+              ? 'aborted'
+              : 'unknown'
+        emitInteractionChanged(ctx, { action: 'removed', item: record, outcome })
         logInteraction(event, { sessionId: key, id, waitedMs: Date.now() - since })
         finish()
       }
@@ -255,6 +273,7 @@ export function installQuestionAnswerer(
         },
         settleAbort: onAbort,
       })
+      emitInteractionChanged(ctx, { action: 'added', item: record })
     })
   }
 

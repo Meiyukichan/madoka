@@ -65,8 +65,10 @@ export interface RunWorkspaceSessionOptions {
   workspaceId: string
   /** 必须等于 workspace 的 canonical path（attach 会严格比对会话头 cwd）。 */
   workspacePath: string
-  prompt: string | string[]
+  /** First user turn; omit to wake with the named `context` only (no user bubble). */
+  prompt?: string | string[]
   title?: string
+  /** 生产者名：只用于诊断/报错，不写入消息 source。 */
   contextPlugin?: string
   context?: PluginContextEntry | readonly PluginContextEntry[]
   agentPresetId?: string | false
@@ -253,9 +255,10 @@ function steerImpl(message: string | string[]): boolean {
       })
       unsubscribe = composition.unsubscribe
       if (composition.presetId !== undefined) mountedPresetId = composition.presetId
-      if (!reattached) {
+      if (!reattached && options.prompt !== undefined) {
         // 续跑也要投调用方 context（D14）：旧实现 `workspace.ts:566` 是总投——
         // "续跑传 context" 的语义就是"给唤醒轮一批新上下文"，丢掉等于调用方白传。
+        // prompt 省略时走 agent.followup(pluginMessage)，由下面的首轮分支直接发送。
         delivery = installContextDelivery(agentCtx, contexts)
       }
       return composition.commit
@@ -461,7 +464,20 @@ function steerImpl(message: string | string[]): boolean {
     }
     pinTitle()
     writeRecord()
-    const settlement = await runOneTurn(buildUserMessage(options.prompt), false)
+    let settlement: TurnSettlement
+    if (options.prompt === undefined) {
+      if (contexts.length === 0) {
+        throw new Error('runWorkspaceSession: prompt omitted and no context to wake the first turn')
+      }
+      // Context-only wake: the named context is the turn's initiating message, so
+      // there is no user bubble and no separate context-delivery installation.
+      state.running = true
+      state.done = false
+      for (const message of contexts) handle.agent.followup(message)
+      settlement = await runOneTurn(undefined, true)
+    } else {
+      settlement = await runOneTurn(buildUserMessage(options.prompt), false)
+    }
     if (!disposed) {
       state.running = false
       state.done = true

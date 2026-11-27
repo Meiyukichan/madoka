@@ -119,3 +119,49 @@ export const INTERACTION_TAG = 'dsh-magica-spellbook/interaction'
 
 /** 排他式瀑布监听选项 —— 抢在 `api/remotes` 转发器之前的唯一办法。 */
 export const WATERFALL_TAKEOVER = { prepend: true, global: true } as const
+
+// ── 待决交互变更事件（跨插件观察）────────────────────────────────
+
+/** `magica/interaction-changed` 的事件名；两端共用同一份契约。 */
+export const INTERACTION_CHANGED_EVENT = 'magica/interaction-changed' as const
+
+/**
+ * 待决交互的 added / removed 通知。
+ *
+ * 事件只做**观察**：listener 抛错不能影响审批/提问本身；真正的结算仍走
+ * `answerApproval` / `answerQuestion` / `cancelQuestion`。
+ */
+export interface InteractionChangedEvent {
+  action: 'added' | 'removed'
+  item: PendingInteractionRecord
+  /**
+   * removed 时的原始原因：
+   * - approval：`allowed-once` / `rejected` / `cancelled` / `unavailable`
+   * - question：`answered` / `cancelled` / `aborted`
+   */
+  outcome?: string
+}
+
+/**
+ * 发一条变更事件。ctx 可能是测试 mock / 非 cordis 环境，所以用鸭子类型 + try/catch。
+ * @param ctx - 宿主 context（只需要 `emit`）。
+ * @param change - 变更内容。
+ */
+export function emitInteractionChanged(ctx: unknown, change: InteractionChangedEvent): void {
+  try {
+    const scope = ctx as { emit?: (name: string, payload: InteractionChangedEvent) => void }
+    scope.emit?.(INTERACTION_CHANGED_EVENT, change)
+  } catch {
+    // 观察者失败不能影响审批/提问本身
+  }
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * 待决交互出现/消失的通知。
+     * @param change - added/removed 与待决项快照。
+     */
+    'magica/interaction-changed'(change: InteractionChangedEvent): void
+  }
+}

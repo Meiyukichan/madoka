@@ -72,7 +72,6 @@ describe('消息构造', () => {
     const message = buildPluginMessage('@x/y', '规则')
     assert.deepEqual(message.source, {
       kind: 'spellbook-context',
-      plugin: '@x/y',
       form: 'snapshot',
       sections: [{ name: 'spellbook-context', text: '规则' }],
     })
@@ -87,10 +86,24 @@ describe('消息构造', () => {
     const message = buildPluginMessage('@x/y', '规则', 'lattice-rules')
     assert.deepEqual(message.source, {
       kind: 'lattice-rules',
-      plugin: '@x/y',
       form: 'snapshot',
       sections: [{ name: 'lattice-rules', text: '规则' }],
     })
+  })
+
+  it('buildPluginMessage 支持 instructions 与 notice，notice 必须有 summary', () => {
+    assert.deepEqual(
+      buildPluginMessage('@x/y', '规则', 'lattice-rules', { form: 'instructions' }).source,
+      { kind: 'lattice-rules', form: 'instructions' },
+    )
+    assert.deepEqual(
+      buildPluginMessage('@x/y', '新评论', 'issue-comments', { form: 'notice', summary: '3 条新评论' }).source,
+      { kind: 'issue-comments', form: 'notice', summary: '3 条新评论' },
+    )
+    assert.throws(
+      () => buildPluginMessage('@x/y', '新评论', 'issue-comments', { form: 'notice' }),
+      /has no summary/,
+    )
   })
 
   it('mintMessageId 连续 200 次不重复', () => {
@@ -108,6 +121,10 @@ describe('消息构造', () => {
     assert.deepEqual(toContextEntries([{ name: 'n', text: '' }, { name: 'm', text: 'ok' }]), [
       { name: 'm', text: 'ok' },
     ])
+    assert.deepEqual(
+      toContextEntries({ name: 'comments', text: 'x', form: 'notice', summary: '3 条新评论' }),
+      [{ name: 'comments', text: 'x', form: 'notice', summary: '3 条新评论' }],
+    )
   })
 
   it('extractAssistantText 多 block 用 join("")，过滤 reasoning/tool-call', () => {

@@ -12,6 +12,7 @@
  * @module dsh-magica-castboard/host/tools/issue-task
  */
 import { eventLog } from '../shared/event-log.ts'
+import { normalizeIssueSource } from '../../shared/wire.ts'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 
 import {
@@ -96,7 +97,7 @@ export interface IssueTaskInput {
   readonly permission: PermissionMode
   /** Carried from issue.assignerMeta.model; absent = host default. */
   readonly model?: TaskModel
-  readonly reference?: { dag?: string; router?: string }
+  readonly reference?: { dag?: string; proposal?: string }
   readonly checklist?: readonly ChecklistItem[]
   readonly tags?: readonly string[]
   /** When present and non-empty, the card is scheduled; absent/empty = queue. */
@@ -121,7 +122,7 @@ interface TaskSeed {
   readonly permission: PermissionMode
   readonly model?: TaskModel
   readonly execution?: ExecutionConfig
-  readonly reference?: { dag?: string; router?: string }
+  readonly reference?: { dag?: string; proposal?: string }
   readonly checklist?: readonly ChecklistItem[]
   readonly acceptanceStrategies?: readonly AcceptanceStrategy[]
   readonly tags?: readonly string[]
@@ -158,7 +159,7 @@ function convertible(status: IssueRecord['status']): boolean {
   return status === 'routing'
 }
 
-function noteOf(source: Record<string, unknown>, key: 'dag' | 'router'): string | undefined {
+function noteOf(source: Record<string, unknown>, key: 'dag' | 'proposal'): string | undefined {
   const value = source[key]
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'string') throw new Error(`reference.${key} 必须是字符串`)
@@ -167,21 +168,21 @@ function noteOf(source: Record<string, unknown>, key: 'dag' | 'router'): string 
 }
 
 /**
- * Normalize `reference` to `{ dag?, router? }`; both empty yields `undefined` so no empty object
+ * Normalize `reference` to `{ dag?, proposal? }`; both empty yields `undefined` so no empty object
  * lands on the task record.
  */
-function readReference(raw: unknown): { dag?: string; router?: string } | undefined {
+function readReference(raw: unknown): { dag?: string; proposal?: string } | undefined {
   if (raw === undefined || raw === null) return undefined
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('reference 必须是 { dag?, router? }')
+    throw new Error('reference 必须是 { dag?, proposal? }')
   }
   const source = raw as Record<string, unknown>
   const dag = noteOf(source, 'dag')
-  const router = noteOf(source, 'router')
-  if (dag === undefined && router === undefined) return undefined
-  const reference: { dag?: string; router?: string } = {}
+  const proposal = noteOf(source, 'proposal')
+  if (dag === undefined && proposal === undefined) return undefined
+  const reference: { dag?: string; proposal?: string } = {}
   if (dag !== undefined) reference.dag = dag
-  if (router !== undefined) reference.router = router
+  if (proposal !== undefined) reference.proposal = proposal
   return reference
 }
 
@@ -400,7 +401,7 @@ function convertedMeta(
   base: IssueMeta | undefined,
   title: string,
   detail: string,
-  reference: { dag?: string; router?: string } | undefined,
+  reference: { dag?: string; proposal?: string } | undefined,
   checklistTexts: readonly string[] | undefined,
   cron: string | undefined,
   acceptanceStrategies: readonly AcceptanceStrategy[] | undefined,
@@ -501,7 +502,7 @@ export async function convertIssueToTask(
     checklist,
     acceptanceStrategies,
     tags,
-    source: issue.source,
+    source: normalizeIssueSource(issue.source),
   }, stamp)
 
   const mergedMeta = convertedMeta(
@@ -518,26 +519,9 @@ export async function convertIssueToTask(
   // is written and the caller gets an error to retry.
   await pushOnline(deps, issue, card, cwd, urgency, permission, mergedMeta, stamp)
 
-  await deps.store.mutate('task-created', ledger => {
-    ledger.tasks.push(card)
-    return [card]
-  })
-
-  // Link table: this card has taken the issue on. A failed write only costs a routing cache entry.
-  if (deps.links !== undefined) {
-    await patchLinkQuiet(deps.links, issueId, { assigneeTaskId: card.id }, 'issue-task')
-  }
-
-  // The issue-stage discussion joins the comment stream, anchored on the issueId.
-  if (deps.thread !== undefined && seededComments.length > 0) {
-    try {
-      await deps.thread.ingest(issueId, seededComments)
-    } catch (error) {
-      warn('issue-task-comment-seed-failed', `${issueId}: ${errorText(error)}`)
-    }
-  }
-
-  // Write the issue back: normalized fields, projected meta, and both-way binding.
+  // Bind the local issue before the task enters the store. The store write wakes the
+  // executor synchronously; if this ran after it, onIssueRunning would still see
+  // `accepted` and skip the running transition.
   const attached = await deps.issues.update(issueId, draft => {
     // A concurrent caller may already have advanced it (abandoned, settled) — keep that verdict.
     if (draft.status !== 'pending' && draft.status !== 'accepted' && draft.status !== 'routing') return false
@@ -556,6 +540,25 @@ export async function convertIssueToTask(
   }, 'issue-transferred')
   if (attached === undefined) {
     throw new Error(`issue ${issueId} 的本地镜像更新失败；云端已标记 routing`)
+  }
+
+  await deps.store.mutate('task-created', ledger => {
+    ledger.tasks.push(card)
+    return [card]
+  })
+
+  // Link table: this card has taken the issue on. A failed write only costs a routing cache entry.
+  if (deps.links !== undefined) {
+    await patchLinkQuiet(deps.links, issueId, { assigneeTaskId: card.id }, 'issue-task')
+  }
+
+  // The issue-stage discussion joins the comment stream, anchored on the issueId.
+  if (deps.thread !== undefined && seededComments.length > 0) {
+    try {
+      await deps.thread.ingest(issueId, seededComments)
+    } catch (error) {
+      warn('issue-task-comment-seed-failed', `${issueId}: ${errorText(error)}`)
+    }
   }
 
   return {
@@ -621,10 +624,10 @@ export function issueTaskTools(deps: IssueTaskToolDeps): ToolDefinition[] {
         permission: { type: 'string', description: 'read-only | workspace-write (default) | danger-full-access.' },
         reference: {
           type: 'object',
-          description: 'Notes for the executor: { dag?: string, router?: string } (both optional).',
+          description: 'Notes for the executor: { dag?: string, proposal?: string } (both optional).',
           additionalProperties: false,
           properties: {
-            router: { type: 'string', description: 'Recommended plan, extra context, and caveats.' },
+            proposal: { type: 'string', description: 'Recommended plan, extra context, and caveats.' },
             dag: { type: 'string', description: 'Execution DAG code — omit for simple work.' },
           },
         },
@@ -672,7 +675,6 @@ export function issueTaskTools(deps: IssueTaskToolDeps): ToolDefinition[] {
             additionalProperties: false,
             type: 'object',
             properties: {
-              id: { type: 'string', description: 'Stable strategy id; omitted means derive one.' },
               title: { type: 'string', description: 'Strategy title.' },
               type: { type: 'string', description: 'issue | close.' },
               description: { type: 'string', description: 'Decision criteria.' },

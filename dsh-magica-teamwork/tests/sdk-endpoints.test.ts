@@ -17,12 +17,12 @@ import {
   endpointCapabilityKey,
 } from '../src/sdk/index.js'
 
-test('端点表恰好 50 条表项 / 49 个协议端点（projectList 与 teamworkProjectMine 同路径）', () => {
+test('端点表恰好 51 条表项 / 50 个协议端点（projectList 与 teamworkProjectMine 同路径）', () => {
   const names = Object.keys(CASTBOARD_ENDPOINTS)
-  assert.equal(names.length, 50)
+  assert.equal(names.length, 51)
 
   const unique = new Set(names.map((name) => endpointCapabilityKey(name as keyof typeof CASTBOARD_ENDPOINTS)))
-  assert.equal(unique.size, 49)
+  assert.equal(unique.size, 50)
   assert.equal(endpointCapabilityKey('projectList'), endpointCapabilityKey('teamworkProjectMine'))
   assert.equal(endpointCapabilityKey('projectList'), 'GET /projects/mine')
   assert.equal(endpointCapabilityKey('issueAttachmentListByTarget'), 'GET /attachments')
@@ -60,11 +60,11 @@ test('能力键把 {param} 归一成 :param（服务端 /version 用 Express 风
   assert.equal(endpointCapabilityKey('fileDownload'), 'GET /files/:fileId')
 })
 
-test('鉴权级别分布：4 个公开 / local 只有停机 / 需要 administrator 的有 7 个', () => {
+test('鉴权级别分布：5 个公开 / local 只有停机 / 需要 administrator 的有 7 个', () => {
   const publicNames = Object.entries(CASTBOARD_ENDPOINTS)
     .filter(([, endpoint]) => endpoint.auth === 'public')
     .map(([name]) => name)
-  assert.deepEqual(publicNames.sort(), ['authLogin', 'authRegister', 'health', 'version'])
+  assert.deepEqual(publicNames.sort(), ['authLogin', 'authRegister', 'authToken', 'health', 'version'])
 
   const localNames = Object.entries(CASTBOARD_ENDPOINTS)
     .filter(([, endpoint]) => endpoint.auth === 'local')
@@ -85,7 +85,7 @@ test('组合层清单：24 个 raw 方法 + 1 个扩展，且都挂在 Castboard
   assert.equal(new Set(CASTBOARD_COMPOSITES).size, 24)
   assert.deepEqual([...CASTBOARD_EXTENSION_COMPOSITES], ['castboardIssueStatuses'])
 
-  const client = createCastboardClient({ baseUrl: 'http://127.0.0.1:1/dsh-teamwork/v1', persist: false })
+  const client = createCastboardClient({ baseUrl: 'http://127.0.0.1:1/dsh-teamwork/v1' })
   for (const name of [...CASTBOARD_COMPOSITES, ...CASTBOARD_EXTENSION_COMPOSITES]) {
     assert.equal(typeof (client as unknown as Record<string, unknown>)[name], 'function', `${name} 必须挂在 client 上`)
   }

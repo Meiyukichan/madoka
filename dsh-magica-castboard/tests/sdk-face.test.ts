@@ -28,7 +28,7 @@ test('auth 面：读状态 / 登录后刷新快照 / 登出', async () => {
     auth: {
       state: 'anonymous',
       accountId: 'a-1',
-      accountDisplayName: '小明',
+      accountDisplayName: 'Alice',
       me: async () => ({ ok: true, data: { accountId: 'a-1' } }),
       login: async () => {
         client.auth!.state = 'authenticated'
@@ -41,9 +41,9 @@ test('auth 面：读状态 / 登录后刷新快照 / 登出', async () => {
     },
   }
   const faces = await createSdkFaces({ instance: 'x', load: async () => ({ createCastboardClient: () => client }) })
-  assert.deepEqual(faces.auth?.status(), { state: 'anonymous', accountId: 'a-1', displayName: '小明' })
+  assert.deepEqual(faces.auth?.status(), { state: 'anonymous', accountId: 'a-1', displayName: 'Alice' })
   assert.deepEqual(await faces.auth!.login({ accountId: 'a-1', password: 'x' }), {
-    state: 'authenticated', accountId: 'a-1', displayName: '小明',
+    state: 'authenticated', accountId: 'a-1', displayName: 'Alice',
   })
   assert.equal((await faces.auth!.logout()).state, 'login_required')
 })
@@ -118,21 +118,21 @@ test('device 自动上报：登录成功后 host 内部调用 sync，固定 3080
     teamwork: {
       device: {
         mine: async () => ({ ok: true, data: { items: [
-          { host: '10.0.0.2', port: 3080, os: 'linux' },
-          { host: '192.168.3.7', port: 3080, os: 'win32' },
+          { host: 'localhost', port: 3080, os: 'linux' },
+          { host: '127.0.0.1', port: 3080, os: 'win32' },
         ] } }),
       },
     },
   }
   const faces = await createSdkFaces({
     instance: 'x',
-    load: async () => ({ createCastboardClient: () => client, getLocalIp: () => '192.168.3.7' }),
+    load: async () => ({ createCastboardClient: () => client, getLocalIp: () => '127.0.0.1' }),
   })
   assert.ok(faces.auth?.login)
   await faces.auth.login({ accountId: 'a-1', password: 'x' })
   assert.deepEqual(synced, [
-    { host: '10.0.0.2', port: 3080, os: 'linux' },
-    { host: '192.168.3.7', port: 3080, os: process.platform === 'win32' ? 'windows' : process.platform },
+    { host: 'localhost', port: 3080, os: 'linux' },
+    { host: '127.0.0.1', port: 3080, os: process.platform === 'win32' ? 'windows' : process.platform },
   ])
 })
 
@@ -154,7 +154,7 @@ test('device 自动上报：host 启动时已登录也会上报', async () => {
   }
   await createSdkFaces({
     instance: 'x',
-    load: async () => ({ createCastboardClient: () => client, getLocalIp: () => '192.168.3.7' }),
+    load: async () => ({ createCastboardClient: () => client, getLocalIp: () => '127.0.0.1' }),
   })
   await new Promise(resolve => setTimeout(resolve, 0))
   assert.equal(synced, 1)
@@ -167,16 +167,16 @@ test('query.workspaces：使用顶层 castboardWorkspaceIndexes/Portal，不调�
     castboardWorkspaceIndexes: async () => ({
       ok: true,
       data: [
-        { workspaceId: null, instance: '192.168.3.7:3080', cwd: 'D:/work', detail: '# index' },
-        { workspaceId: null, instance: '10.0.0.2:3080', cwd: 'D:/other', detail: '# other' },
+        { workspaceId: null, instance: '127.0.0.1:3080', cwd: 'D:/work', detail: '# index' },
+        { workspaceId: null, instance: 'localhost:3080', cwd: 'D:/other', detail: '# other' },
       ],
     }),
-    castboardWorkspacePortal: async () => ({ ok: true, data: { workspaceId: 'w1', instance: '192.168.3.7:3080', cwd: 'D:/work', detail: '# portal' } }),
+    castboardWorkspacePortal: async () => ({ ok: true, data: { workspaceId: 'w1', instance: '127.0.0.1:3080', cwd: 'D:/work', detail: '# portal' } }),
   }
   const faces = await createSdkFaces({ instance: 'x', load: async () => ({ createCastboardClient: () => client }) })
-  const index = await faces.query?.workspaces({ type: 'index', userId: 'a-1', instance: '192.168.3.7:3080' })
+  const index = await faces.query?.workspaces({ type: 'index', userId: 'a-1', instance: '127.0.0.1:3080' })
   assert.deepEqual(index?.map(item => item.cwd), ['D:/work'])
-  const portal = await faces.query?.workspaces({ type: 'portal', instance: '192.168.3.7:3080', workspaceId: 'w1' })
+  const portal = await faces.query?.workspaces({ type: 'portal', instance: '127.0.0.1:3080', workspaceId: 'w1' })
   assert.equal(portal?.[0]?.id, 'w1')
   assert.equal(portal?.[0]?.cwd, 'D:/work')
 })
@@ -193,9 +193,9 @@ test('sync.myInstanceIssues：自动带当前 accountId', async () => {
     issueClaim: async () => ({ ok: true, data: { claimed: [], failed: [] } }),
   }
   const faces = await createSdkFaces({ instance: 'x', load: async () => ({ createCastboardClient: () => client }) })
-  await faces.sync?.myInstanceIssues({ status: 'pending', instance: '192.168.3.7:3080', os: 'windows' })
+  await faces.sync?.myInstanceIssues({ status: 'pending', instance: '127.0.0.1:3080', os: 'windows' })
   assert.equal(seen?.['userId'], 'a-1')
-  assert.equal(seen?.['instance'], '192.168.3.7:3080')
+  assert.equal(seen?.['instance'], '127.0.0.1:3080')
 })
 
 test('issueAttachmentList：兼容对象/位置两代入参，映射 targetType/targetId/role', async () => {
@@ -360,7 +360,7 @@ test('comments.listSince：把云端行映射成 RemoteComment（commentAt / 作
                 commentAt: '2026-08-01 09:00:00',
                 commentRole: 'assigner',
                 commentAuthorType: 'system',
-                author: 'alice',
+                author: 'tester',
                 issueId: 'i-1',
               },
               { id: '101', content: '无方向', createdAt: '2026-08-01T09:00:00+08:00', commentRole: null, issueId: 'i-1' },
@@ -379,7 +379,7 @@ test('comments.listSince：把云端行映射成 RemoteComment（commentAt / 作
   assert.equal(first.commentId, '100')
   assert.equal(first.role, 'assigner')
   assert.equal(first.authorType, 'system')
-  assert.equal(first.author, 'alice')
+  assert.equal(first.author, 'tester')
   // `commentAt` wins over `createdAt`, and a zone-less Beijing string must be +08:00.
   assert.equal(first.createdAt, Date.parse('2026-08-01T09:00:00+08:00'))
   // Unknown direction stays null instead of being rewritten to `assigner`.
@@ -388,11 +388,11 @@ test('comments.listSince：把云端行映射成 RemoteComment（commentAt / 作
   assert.equal(page.nextSinceId, '101')
 })
 
-test('sources：ensure 只补缺失的 self/dsh；isRegistered 精确匹配且不注册', async () => {
+test('sources：ensure 只补 dsh；isRegistered 精确匹配且不注册', async () => {
   const added: string[] = []
   let rows = [
     { code: 'self', pluginName: '@meiyukichan/dsh-magica-castboard' },
-    { code: 'welink', pluginName: 'other' },
+    { code: 'im', pluginName: 'other' },
   ] as Array<{ code: string; pluginName?: string | null }>
   const client: CastboardClientLike = {
     auth: { me: async () => ({ ok: true, data: { accountId: 'a-1' } }) },
@@ -409,15 +409,15 @@ test('sources：ensure 只补缺失的 self/dsh；isRegistered 精确匹配且�
   const faces = await createSdkFaces({ instance: 'x', load: async () => ({ createCastboardClient: () => client }) })
   assert.ok(faces.sources !== undefined)
   await faces.sources.ensure()
-  // self already carries our pluginName; only dsh is registered.
+  // `self` is a legacy row, already present; only `dsh` is registered by this plugin.
   assert.deepEqual(added, ['dsh'])
   await faces.sources.ensure()
   assert.deepEqual(added, ['dsh'], 'second ensure is a no-op')
 
-  assert.equal(await faces.sources.isRegistered('welink'), true)
-  // Server-side ILIKE returns `welink` for `wel`; exact comparison must reject it, and lookup never registers.
-  assert.equal(await faces.sources.isRegistered('wel'), false)
-  assert.equal(await faces.sources.isRegistered('welnk'), false)
+  assert.equal(await faces.sources.isRegistered('im'), true)
+  // Server-side ILIKE returns `im` for `i`; exact comparison must reject it, and lookup never registers.
+  assert.equal(await faces.sources.isRegistered('i'), false)
+  assert.equal(await faces.sources.isRegistered('ix'), false)
   assert.deepEqual(added, ['dsh'])
 })
 

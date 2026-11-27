@@ -1,8 +1,8 @@
 /**
  * Backfill of the source channel for cards that have none.
  *
- * `source` (`self` / `dsh` / `welink` …) decides two execution-scheduling rules: cards
- * from `welink` do not consume a concurrency slot, and they run immediately once
+ * `source` (`dsh` / `im` …) decides two execution-scheduling rules: cards
+ * from `im` do not consume a concurrency slot, and they run immediately once
  * forwarded. Both are judged from the summary on hot paths (every dispatcher drain,
  * every execution-gate run), so the source is read only from **task ledger fields** in
  * this process and never goes back to the issue ledger.
@@ -21,6 +21,7 @@
  */
 import type { TaskLedger, TaskRecord, TaskSummary } from '../model.ts'
 import { eventLog } from '../shared/event-log.ts'
+import { normalizeIssueSource } from '../../shared/wire.ts'
 
 /** Ledger face; tests may pass a narrow implementation. */
 export interface TaskSourceBackfillStore {
@@ -68,7 +69,7 @@ export async function backfillTaskSources(deps: TaskSourceBackfillDeps): Promise
         if (task.source !== undefined && task.source !== '') continue
         const source = deps.issueSourceOf(task.issueId)
         if (source === undefined || source === '') continue
-        task.source = source
+        task.source = normalizeIssueSource(source)
         filled += 1
         touched.push(task)
       }

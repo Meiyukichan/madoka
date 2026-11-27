@@ -20,6 +20,7 @@ export type { InteractionHandlerOptions } from './route.ts'
 
 // 我们自己的线上契约（路径 / 信封 / 请求体），不是 dsh 类型镜像。
 export {
+  INTERACTION_CHANGED_EVENT,
   INTERACTION_PATHS,
   INTERACTION_PREFIX,
   INTERACTION_TAG,
@@ -33,6 +34,7 @@ export type {
   InteractionAnswer,
   InteractionAnswerItem,
   InteractionAnswerValue,
+  InteractionChangedEvent,
   InteractionEnvelope,
   InteractionIntent,
   InteractionListValue,

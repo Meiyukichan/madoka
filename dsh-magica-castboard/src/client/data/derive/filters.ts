@@ -3,7 +3,7 @@
  *
  * @module dsh-magica-castboard/client/data/derive/filters
  */
-import { PLANNING_ISSUE_STATUSES, type IssueSummary } from '../../../shared/wire.ts'
+import { isImSource, PLANNING_ISSUE_STATUSES, type IssueSummary } from '../../../shared/wire.ts'
 import type { TaskSummaryView } from '../dto.ts'
 import type { BoardState } from '../state/types.ts'
 import { URGENCY_WEIGHT } from './format.ts'
@@ -12,7 +12,8 @@ import { URGENCY_WEIGHT } from './format.ts'
 export function visibleTasks(state: BoardState, tasks: readonly TaskSummaryView[]): TaskSummaryView[] {
   const query = state.search.trim().toLowerCase()
   const list = tasks.filter(task =>
-    (state.filters.workspaceId === undefined || task.workspaceId === state.filters.workspaceId)
+    !isImSource(task.source)
+    && (state.filters.workspaceId === undefined || task.workspaceId === state.filters.workspaceId)
     && (state.filters.urgencies.length === 0 || state.filters.urgencies.includes(task.urgency))
     && (query === '' || task.title.toLowerCase().includes(query) || task.id.toLowerCase().includes(query)))
   if (state.sortBy === 'default') return list
@@ -36,7 +37,8 @@ export function visibleIssues(state: BoardState, issues: readonly IssueSummary[]
   const converted = new Set(state.tasks.filter(task => task.issueId !== undefined).map(task => task.issueId))
   return issues
     .filter(issue =>
-      PLANNING_ISSUE_STATUSES.includes(issue.status)
+      !isImSource(issue.source)
+      && PLANNING_ISSUE_STATUSES.includes(issue.status)
       && !converted.has(issue.issueId)
       && (state.filters.workspaceId === undefined || issue.workspaceId === state.filters.workspaceId)
       && (state.filters.urgencies.length === 0 || state.filters.urgencies.includes(issue.urgency))

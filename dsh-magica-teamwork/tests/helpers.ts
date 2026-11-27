@@ -1,10 +1,10 @@
-﻿/** 测试公共设施：起服务、造客户端、直连 HTTP（绕过 SDK 验证服务端契约） */
+/** 测试公共设施：起服务、造客户端、直连 HTTP（绕过 SDK 验证服务端契约） */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHmac } from 'node:crypto'
 import { startServer } from '../src/server/main.js'
-import { TeamworkClient } from '../src/index.js'
+import { TeamworkClient } from './support/legacy-client.js'
 
 export const PASSWORD = 'correct horse battery'
 export const PASSWORD2 = 'another good passphrase'

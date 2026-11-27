@@ -12,13 +12,7 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": [],
-    "baseUrl": ".",
-    "paths": {
-      "react": ["../dsh-magica-spellbook/node_modules/@types/react"],
-      "react/jsx-runtime": ["../dsh-magica-spellbook/node_modules/@types/react/jsx-runtime"],
-      "@deepseek-ai/dsh-client-ui-primitives": ["../dsh-magica-castboard/node_modules/@deepseek-ai/dsh-client-ui-primitives"]
-    }
+    "types": []
   },
   "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]
 }
