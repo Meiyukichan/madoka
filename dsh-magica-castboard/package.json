@@ -66,8 +66,8 @@
     "lint:tokens": "node ./scripts/lint-tokens.mjs"
   },
   "dependencies": {
-    "@meiyukichan/dsh-magica-spellbook": "link:../dsh-magica-spellbook",
-    "@meiyukichan/dsh-magica-teamwork": "link:../dsh-magica-teamwork",
+    "@meiyukichan/dsh-magica-spellbook": "0.2.0-alpha.6",
+    "@meiyukichan/dsh-magica-teamwork": "0.2.0-alpha.6",
     "ajv": "^8.20.0",
     "cron-schedule": "^5.0.4"
   },

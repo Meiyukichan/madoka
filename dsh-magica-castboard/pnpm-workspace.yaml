@@ -18,5 +18,5 @@ allowBuilds:
   '@primno/dpapi': false
 
 minimumReleaseAgeExclude:
-  - '@meiyukichan/dsh-magica-spellbook@0.2.0-alpha.1 || 0.2.0-alpha.3'
-  - '@meiyukichan/dsh-magica-teamwork@0.2.0-alpha.1 || 0.2.0-alpha.2'
+  - '@meiyukichan/dsh-magica-spellbook@0.2.0-alpha.1 || 0.2.0-alpha.3 || 0.2.0-alpha.6'
+  - '@meiyukichan/dsh-magica-teamwork@0.2.0-alpha.1 || 0.2.0-alpha.2 || 0.2.0-alpha.6'
