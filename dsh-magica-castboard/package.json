@@ -6,7 +6,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "DSH 协同插件：任务台账 + 看板 + 派活中枢。host 半侧管台账/执行/调度/工具/HTTP，client 半侧把看板与项目管理注册进 dsh web（会话能力来自 dsh-magica-spellbook，共享库数据来自 dsh-magica-teamwork SDK）。",
+  "description": "DSH 的多人、多实例、多系统协同框架：把工作派给正确的机器与 Agent，并将过程、结果与产物回写到共享库。host 半侧负责协作/工作/执行/事件协议，client 半侧提供看板与项目管理入口。",
   "engines": {
     "node": ">=22.5",
     "pnpm": ">=11"
